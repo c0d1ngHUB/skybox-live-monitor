@@ -1,0 +1,13 @@
+{
+  "KPlugin": {
+    "Id": "com.skybox.verticalsysmonitor",
+    "Name": "Skybox Vertical System Dashboard",
+    "Description": "Compact live system dashboard for the vertical Skybox display",
+    "Icon": "utilities-system-monitor",
+    "Version": "1.1.0",
+    "License": "MIT",
+    "Category": "System Information"
+  },
+  "KPackageStructure": "Plasma/Applet",
+  "X-Plasma-API-Minimum-Version": "6.0"
+}
