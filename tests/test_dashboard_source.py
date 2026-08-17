@@ -66,7 +66,7 @@ def test_gpu_card_shows_top_two_processes_but_counts_all_workloads():
     assert 'property var topGpuProcesses: []' in text
     assert 'id: topGpuSource' in text
     assert '--query-compute-apps=process_name,used_memory' in text
-    gpu_source = text[text.index('id: topGpuSource'):text.index('// Auto-detect network interface')]
+    gpu_source = text[text.index('id: topGpuSource'):text.index('id: netDetectSource')]
     assert '| head -2' not in gpu_source
     assert 'validProcessCount++' in text
     assert 'if (processes.length < 2)' in text
@@ -169,14 +169,16 @@ def test_health_state_always_exposes_a_safe_cause_string():
     assert 'root.healthState().cause.length' not in text
 
 
-def test_freshness_tracks_successful_data_updates_not_the_chart_timer():
+def test_freshness_tracks_each_data_domain_not_the_chart_timer():
     text = source()
     timer_block = text[text.index('interval: 1000'):text.index('    // Current top', text.index('interval: 1000'))]
     assert 'root.lastRefresh = root.refreshClock()' not in timer_block
-    assert 'function markDataFresh()' in text
-    assert 'root.markDataFresh()' in text
+    assert 'function markDataFresh(domain)' in text
+    for domain in ('cpu', 'gpu', 'memory', 'network', 'disk', 'system'):
+        assert f'root.markDataFresh("{domain}")' in text
+    assert 'MonitorLogic.staleDomains' in text
     assert 'property string dataStatus: "WAITING FOR DATA"' in text
-    assert 'root.dataStatus' in text
+    assert 'STALE · ' in text
 
 
 def test_ollama_unload_distinguishes_dependencies_connection_and_partial_failure():

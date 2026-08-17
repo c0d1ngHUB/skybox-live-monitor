@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate metadata
+        run: python3 -m json.tool metadata.json >/dev/null
+      - name: Check JavaScript syntax
+        run: node --check contents/code/monitor_logic.js
+      - name: Run source regression checks
+        run: python3 tests/test_dashboard_source.py
+      - name: Run behavioral regression tests
+        run: python3 tests/test_monitor_behavior.py

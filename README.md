@@ -20,8 +20,13 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 ## Install
 
 ```bash
-mkdir -p ~/.local/share/plasma/plasmoids
-cp -a com.skybox.verticalsysmonitor ~/.local/share/plasma/plasmoids/
+kpackagetool6 --type Plasma/Applet --install .
+```
+
+To update an existing installation:
+
+```bash
+kpackagetool6 --type Plasma/Applet --upgrade .
 ```
 
 Then add **Skybox Vertical System Dashboard** from Plasma's *Add Widgets* dialog.
@@ -40,10 +45,12 @@ The control requires two clicks within five seconds. It queries the local Ollama
 
 ```bash
 python3 tests/test_dashboard_source.py
+python3 tests/test_monitor_behavior.py
+node --check contents/code/monitor_logic.js
 qmllint contents/ui/main.qml
 ```
 
-`qmllint` may report unresolved Plasma types when run outside Plasma's import environment; run the widget inside Plasma as the final integration check.
+The Python behavior suite executes the actual network-detection and Ollama commands in isolated temporary environments. `qmllint` may report unresolved Plasma types when run outside Plasma's import environment; run the widget inside Plasma as the final integration check.
 
 ## License
 
