@@ -4,7 +4,7 @@
     "Name": "Skybox Vertical System Dashboard",
     "Description": "Compact live system dashboard for the vertical Skybox display",
     "Icon": "utilities-system-monitor",
-    "Version": "1.1.0",
+    "Version": "1.2.0",
     "License": "MIT",
     "Category": "System Information"
   },

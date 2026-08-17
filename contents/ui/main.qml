@@ -5,6 +5,7 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid 2.0
 import org.kde.plasma.plasma5support 2.0 as PlasmaSupport
 import org.kde.ksysguard.sensors 1.0 as Sensors
+import "../code/monitor_logic.js" as MonitorLogic
 
 PlasmoidItem {
     id: root
@@ -25,9 +26,12 @@ PlasmoidItem {
     property real diskUsedBytes: 0
     property real diskTotalBytes: 0
     property string lastRefresh: "--:--:--"
+    property string dataStatus: "WAITING FOR DATA"
+    property int staleAfterMs: 15000
+    property var domainUpdateMs: ({cpu: 0, gpu: 0, memory: 0, network: 0, disk: 0, system: 0})
     property int gpuProcessCount: 0
     property string gpuTopProcess: "NO ACTIVE COMPUTE WORKLOAD"
-    // Five largest CPU, RAM, and GPU consumers, sampled every five seconds.
+    // Two largest CPU, RAM, and GPU consumers, sampled every five seconds.
     property var topCpuProcesses: []
     property var topRamProcesses: []
     property var topGpuProcesses: []
@@ -40,8 +44,9 @@ PlasmoidItem {
     property var ramHistory: []
     property var downHistory: []
     property var upHistory: []
-    // Auto-detect: first physical network interface
+    // Prefer the default-route interface; fall back to the first physical interface.
     property string netIf: ""
+    property var currentHealth: root.healthState()
 
     // P2b: Darker muted for better contrast hierarchy
     property color ink: "#E8F7FF"
@@ -71,11 +76,19 @@ PlasmoidItem {
         if (!v || v < 1) return "--"
         return (v / 1024 / 1024 / 1024).toFixed(1) + " GiB"
     }
+    function fmtCompactCapacity(v) {
+        if (!v || v < 1) return "--"
+        return (v / 1024 / 1024 / 1024).toFixed(1) + "G"
+    }
     // P0: Fixed VRAM formatting — use MiB directly from nvidia-smi, convert to GiB only above 1024
     function fmtVram(mib) {
         if (!mib || mib < 1) return "--"
         if (mib >= 1024) return (mib / 1024).toFixed(1) + " GiB"
         return Math.round(mib) + " MiB"
+    }
+    function fmtCompactVram(mib) {
+        if (!mib || mib < 1) return "--"
+        return mib >= 1024 ? (mib / 1024).toFixed(1) + "G" : Math.round(mib) + "M"
     }
     function fmtDisk(v) {
         if (!v || v < 1) return "--"
@@ -120,12 +133,38 @@ PlasmoidItem {
         var now = new Date()
         return ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2) + ":" + ("0" + now.getSeconds()).slice(-2)
     }
+    function markDataFresh(domain) {
+        var updates = Object.assign({}, root.domainUpdateMs)
+        updates[domain] = Date.now()
+        root.domainUpdateMs = updates
+        root.lastRefresh = root.refreshClock()
+        root.updateDataStatus(Date.now())
+    }
+    function updateDataStatus(nowMs) {
+        var stale = MonitorLogic.staleDomains(nowMs, root.domainUpdateMs, root.staleAfterMs)
+        if (stale.length === 6) root.dataStatus = "WAITING FOR DATA"
+        else if (stale.length > 0) root.dataStatus = "STALE · " + stale.join(" · ")
+        else root.dataStatus = "UPDATED " + root.lastRefresh
+    }
 
     function vramPercent() {
         if (root.gpuVramTotalMiB <= 0) return 0
         return 100 * root.gpuVramUsedMiB / root.gpuVramTotalMiB
     }
     function diskFreeBytes() { return Math.max(0, root.diskTotalBytes - root.diskUsedBytes) }
+    function requestOllamaUnload() {
+        if (root.vramReleaseInProgress) return
+        if (!root.vramReleaseArmed) {
+            root.vramReleaseArmed = true
+            root.vramReleaseStatus = "CONFIRM UNLOAD"
+            releaseConfirmTimer.restart()
+            return
+        }
+        root.vramReleaseArmed = false
+        root.vramReleaseInProgress = true
+        root.vramReleaseStatus = "UNLOADING…"
+        releaseModelsSource.connectSource(releaseModelsSource.command)
+    }
     function usageColor(value, normalColor) {
         if (value >= 95) return root.critical
         if (value >= 85) return root.warning
@@ -146,18 +185,21 @@ PlasmoidItem {
         for (var i = 0; i < root.topGpuProcesses.length && i < 2; i++) items.push(root.topGpuProcesses[i].name + " " + root.topGpuProcesses[i].gpu)
         return items.join(" · ")
     }
+    function makeHealthState(level, label, detail, cause, color) {
+        return { level: level, label: label, detail: detail, cause: cause || "", color: color }
+    }
     function healthState() {
-        if (root.gpuTemp >= 85) return { level: 2, label: "GPU CRITICAL", detail: Math.round(root.gpu) + "% LOAD · " + Math.round(root.gpuTemp) + "°C · VRAM " + Math.round(root.vramPercent()) + "%", cause: root.gpuCauseSummary(), color: root.critical }
-        if (root.cpuTemp >= 85) return { level: 2, label: "SYSTEM ALERT", detail: "CPU TEMP " + Math.round(root.cpuTemp) + "°C", color: root.critical }
-        if (root.vramPercent() >= 95) return { level: 2, label: "VRAM CRITICAL", detail: "VRAM " + Math.round(root.vramPercent()) + "% · " + root.fmtVram(root.gpuVramUsedMiB) + " / " + root.fmtVram(root.gpuVramTotalMiB), cause: root.gpuCauseSummary(), color: root.critical }
-        if (root.ram >= 95) return { level: 2, label: "SYSTEM ALERT", detail: "MEMORY " + Math.round(root.ram) + "% USED", color: root.critical }
-        if (root.diskUsedPercent >= 95) return { level: 2, label: "SYSTEM ALERT", detail: "DISK SPACE " + Math.round(root.diskUsedPercent) + "% USED", color: root.critical }
-        if (root.gpuTemp >= 75) return { level: 1, label: "SYSTEM ATTENTION", detail: "GPU TEMP " + Math.round(root.gpuTemp) + "°C", color: root.warning }
-        if (root.cpuTemp >= 75) return { level: 1, label: "SYSTEM ATTENTION", detail: "CPU TEMP " + Math.round(root.cpuTemp) + "°C", color: root.warning }
-        if (root.vramPercent() >= 85) return { level: 1, label: "SYSTEM ATTENTION", detail: "GPU VRAM " + Math.round(root.vramPercent()) + "% USED", color: root.warning }
-        if (root.ram >= 85) return { level: 1, label: "SYSTEM ATTENTION", detail: "MEMORY " + Math.round(root.ram) + "% USED", color: root.warning }
-        if (root.diskUsedPercent >= 85) return { level: 1, label: "SYSTEM ATTENTION", detail: "DISK SPACE " + Math.round(root.diskUsedPercent) + "% USED", color: root.warning }
-        return { level: 0, label: "NORMAL", detail: "0 ALERTS · VRAM " + Math.round(root.vramPercent()) + "% · DISK " + Math.round(root.diskUsedPercent) + "%", cause: "", color: root.cyan }
+        if (root.gpuTemp >= 85) return root.makeHealthState(2, "GPU CRITICAL", Math.round(root.gpu) + "% LOAD · " + Math.round(root.gpuTemp) + "°C · VRAM " + Math.round(root.vramPercent()) + "%", root.gpuCauseSummary(), root.critical)
+        if (root.cpuTemp >= 85) return root.makeHealthState(2, "SYSTEM ALERT", "CPU TEMP " + Math.round(root.cpuTemp) + "°C", "", root.critical)
+        if (root.vramPercent() >= 95) return root.makeHealthState(2, "VRAM CRITICAL", "VRAM " + Math.round(root.vramPercent()) + "% · " + root.fmtVram(root.gpuVramUsedMiB) + " / " + root.fmtVram(root.gpuVramTotalMiB), root.gpuCauseSummary(), root.critical)
+        if (root.ram >= 95) return root.makeHealthState(2, "SYSTEM ALERT", "MEMORY " + Math.round(root.ram) + "% USED", "", root.critical)
+        if (root.diskUsedPercent >= 95) return root.makeHealthState(2, "SYSTEM ALERT", "DISK SPACE " + Math.round(root.diskUsedPercent) + "% USED", "", root.critical)
+        if (root.gpuTemp >= 75) return root.makeHealthState(1, "SYSTEM ATTENTION", "GPU TEMP " + Math.round(root.gpuTemp) + "°C", "", root.warning)
+        if (root.cpuTemp >= 75) return root.makeHealthState(1, "SYSTEM ATTENTION", "CPU TEMP " + Math.round(root.cpuTemp) + "°C", "", root.warning)
+        if (root.vramPercent() >= 85) return root.makeHealthState(1, "SYSTEM ATTENTION", "GPU VRAM " + Math.round(root.vramPercent()) + "% USED", "", root.warning)
+        if (root.ram >= 85) return root.makeHealthState(1, "SYSTEM ATTENTION", "MEMORY " + Math.round(root.ram) + "% USED", "", root.warning)
+        if (root.diskUsedPercent >= 85) return root.makeHealthState(1, "SYSTEM ATTENTION", "DISK SPACE " + Math.round(root.diskUsedPercent) + "% USED", "", root.warning)
+        return root.makeHealthState(0, "NORMAL", "0 ALERTS · VRAM " + Math.round(root.vramPercent()) + "% · DISK " + Math.round(root.diskUsedPercent) + "%", "", root.cyan)
     }
     function metricBorderColor(metric) {
         if (metric.healthLevel >= 2) return root.critical
@@ -185,10 +227,11 @@ PlasmoidItem {
             width: parent.width - 36
             height: Math.min(parent.height - 24, content.implicitHeight + 68)
             radius: 30
-            color: "#0C4A70"
+            color: "#000000"
             border.width: 2
             border.color: root.violet
-            opacity: 0.20
+            // Reduced by another 20 percentage points: 44% transparency (56% opacity).
+            opacity: 0.56
         }
 
         Rectangle {
@@ -216,7 +259,7 @@ PlasmoidItem {
                 Layout.fillWidth: true
                 Text { text: "SKYBOX"; color: root.cyan; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 28; font.letterSpacing: 3 }
                 Item { Layout.fillWidth: true }
-                Text { text: "LIVE SYSTEM · UPDATED " + root.lastRefresh; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.letterSpacing: 1.5 }
+                Text { text: "LIVE SYSTEM · " + root.dataStatus; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.letterSpacing: 1.5 }
                 Rectangle {
                     id: healthChip
                     Layout.leftMargin: 12
@@ -225,28 +268,34 @@ PlasmoidItem {
                     radius: 14
                     color: Qt.rgba(0.035, 0.22, 0.34, 0.9)
                     border.width: 1
-                    border.color: root.healthState().color
+                    border.color: root.currentHealth.color
                     Row {
                         anchors.centerIn: parent
                         spacing: 7
-                        Rectangle { width: 6; height: 6; radius: 3; color: root.healthState().color }
-                        Text { id: healthChipText; text: root.healthState().label + (root.healthState().level === 0 ? " · 0 ALERTS" : ""); color: root.healthState().color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                        Rectangle { width: 6; height: 6; radius: 3; color: root.currentHealth.color }
+                        Text { id: healthChipText; text: root.currentHealth.label + (root.currentHealth.level === 0 ? " · 0 ALERTS" : ""); color: root.currentHealth.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                     }
                 }
                 Rectangle {
                     id: releaseVramButton
-                    Layout.leftMargin: 8
-                    Layout.preferredWidth: releaseVramButtonText.implicitWidth + 20
-                    Layout.preferredHeight: 28
-                    radius: 14
+                    Layout.leftMargin: 18
+                    Layout.preferredWidth: releaseVramButtonText.implicitWidth + 28
+                    Layout.preferredHeight: 44
+                    radius: 10
                     color: releaseVramMouse.containsMouse ? Qt.rgba(0.30, 0.10, 0.42, 0.95) : Qt.rgba(0.12, 0.06, 0.20, 0.92)
                     border.width: 1
                     border.color: root.violet
                     opacity: releaseVramMouse.pressed ? 0.72 : 1
+                    activeFocusOnTab: true
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Unload Ollama models from GPU memory"
+                    Accessible.description: "Requires confirmation and stops only locally served Ollama models"
+                    Keys.onSpacePressed: root.requestOllamaUnload()
+                    Keys.onReturnPressed: root.requestOllamaUnload()
                     Text {
                         id: releaseVramButtonText
                         anchors.centerIn: parent
-                        text: root.vramReleaseStatus
+                        text: "⇩  " + root.vramReleaseStatus
                         color: root.violet
                         font.family: "DejaVu Sans Mono"
                         font.pixelSize: 12
@@ -258,19 +307,9 @@ PlasmoidItem {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         enabled: !root.vramReleaseInProgress
-                        onClicked: {
-                            if (!root.vramReleaseArmed) {
-                                root.vramReleaseArmed = true
-                                root.vramReleaseStatus = "CONFIRM UNLOAD"
-                                releaseConfirmTimer.restart()
-                                return
-                            }
-                            root.vramReleaseArmed = false
-                            root.vramReleaseInProgress = true
-                            root.vramReleaseStatus = "UNLOADING…"
-                            releaseModelsSource.connectSource(releaseModelsSource.command)
-                        }
+                        onClicked: root.requestOllamaUnload()
                     }
+                    Rectangle { anchors.fill: parent; anchors.margins: -3; radius: 13; color: "transparent"; border.width: releaseVramButton.activeFocus ? 2 : 0; border.color: root.ink }
                 }
             }
 
@@ -280,23 +319,23 @@ PlasmoidItem {
                 id: healthBanner
                 Layout.fillWidth: true
                 Layout.preferredHeight: visible ? 66 : 0
-                visible: root.healthState().level > 0
+                visible: root.currentHealth.level > 0
                 radius: 12
                 color: Qt.rgba(0.035, 0.22, 0.34, 0.9)
                 border.width: 1
-                border.color: root.healthState().color
+                border.color: root.currentHealth.color
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 14
                     anchors.rightMargin: 14
                     spacing: 12
-                    Text { text: root.healthState().label; color: root.healthState().color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                    Rectangle { Layout.preferredWidth: 5; Layout.preferredHeight: 5; radius: 3; color: root.healthState().color }
+                    Text { text: root.currentHealth.label; color: root.currentHealth.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                    Rectangle { Layout.preferredWidth: 5; Layout.preferredHeight: 5; radius: 3; color: root.currentHealth.color }
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 3
-                        Text { text: root.healthState().detail; color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                        Text { visible: root.healthState().cause.length > 0; text: "CAUSE · " + root.healthState().cause; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Text { text: root.currentHealth.detail; color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Text { visible: root.currentHealth.cause.length > 0; text: "CAUSE · " + root.currentHealth.cause; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight; Layout.fillWidth: true }
                     }
                 }
             }
@@ -306,7 +345,7 @@ PlasmoidItem {
             Item {
                 Layout.fillWidth: true
                 // Primary graph: 50% shorter than the previous responsive panel.
-                Layout.preferredHeight: 184
+                Layout.preferredHeight: 218
                 clip: true
 
                 Text { id: headline; anchors.left: parent.left; anchors.top: parent.top; text: "SYSTEM LOAD"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
@@ -335,7 +374,8 @@ PlasmoidItem {
                     anchors.left: parent.left; anchors.leftMargin: 44
                     anchors.right: parent.right
                     anchors.top: computeLegend.bottom; anchors.topMargin: 10
-                    height: 110
+                    anchors.bottom: computeTimeline.top
+                    anchors.bottomMargin: 10
 
                     // P0a: Draw axis labels inside onPaint so they're always visible
                     onPaint: {
@@ -371,29 +411,34 @@ PlasmoidItem {
                         ctx.fillText("50%", plotLeft - 6, height / 2 + 4)
                         ctx.fillText("0%", plotLeft - 6, height - 2)
 
-                        function plot(data, color, fillColor) {
+                        function plot(data, color, fillColor, dashed) {
                             if (data.length < 2) return
+                            var firstX = MonitorLogic.historyX(0, data.length, chartWidth, root.historySeconds) + plotLeft
+                            var lastX = MonitorLogic.historyX(data.length - 1, data.length, chartWidth, root.historySeconds) + plotLeft
                             ctx.beginPath()
                             for (var f = 0; f < data.length; f++) {
-                                var fx = plotLeft + f * chartWidth / (root.historySeconds - 1)
+                                var fx = plotLeft + MonitorLogic.historyX(f, data.length, chartWidth, root.historySeconds)
                                 var fy = height - (root.clamp(data[f]) / 100) * height
                                 if (f === 0) ctx.moveTo(fx, fy); else ctx.lineTo(fx, fy)
                             }
-                            ctx.lineTo(plotLeft + chartWidth, height)
-                            ctx.lineTo(plotLeft, height)
+                            ctx.lineTo(lastX, height)
+                            ctx.lineTo(firstX, height)
                             ctx.closePath()
                             ctx.fillStyle = fillColor
                             ctx.fill()
-                            ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath()
+                            ctx.strokeStyle = color; ctx.lineWidth = 3
+                            ctx.setLineDash(dashed ? [8, 5] : [])
+                            ctx.beginPath()
                             for (var j = 0; j < data.length; j++) {
-                                var x = plotLeft + j * chartWidth / (root.historySeconds - 1)
+                                var x = plotLeft + MonitorLogic.historyX(j, data.length, chartWidth, root.historySeconds)
                                 var y = height - (root.clamp(data[j]) / 100) * height
                                 if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                             }
                             ctx.stroke()
+                            ctx.setLineDash([])
                         }
-                        plot(root.cpuHistory, root.cyan, "rgba(150,245,246,0.12)")
-                        plot(root.gpuHistory, root.violet, "rgba(219,145,255,0.12)")
+                        plot(root.cpuHistory, root.cyan, "rgba(150,245,246,0.12)", false)
+                        plot(root.gpuHistory, root.violet, "rgba(219,145,255,0.12)", true)
                     }
                 }
                 Item {
@@ -401,7 +446,7 @@ PlasmoidItem {
                     anchors.left: computeGraph.left
                     anchors.right: computeGraph.right
                     anchors.bottom: parent.bottom
-                    height: 16
+                    height: 20
                     Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                     Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "2.5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                     Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
@@ -419,37 +464,42 @@ PlasmoidItem {
                 Repeater {
                     model: [
                         {label:"CPU", value:Math.round(root.cpu) + "%", detail:Math.round(root.cpuTemp) + "°C", color:root.cyan, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel: root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0)},
-                        {label:"GPU", value:Math.round(root.gpu) + "%", detail:"VRAM " + Math.round(root.vramPercent()) + "% · " + root.fmtVram(root.gpuVramUsedMiB) + " / " + root.fmtVram(root.gpuVramTotalMiB), detail2:Math.round(root.gpuTemp) + "°C · " + root.gpuProcessCount + " WORKLOAD" + (root.gpuProcessCount === 1 ? "" : "S"), detail3:root.gpuTopProcess, color:root.violet, detailColor:root.usageColor(root.vramPercent(), root.violet), healthLevel: (root.gpuTemp >= 85 || root.vramPercent() >= 95) ? 2 : ((root.gpuTemp >= 75 || root.vramPercent() >= 85) ? 1 : 0)},
-                        {label:"RAM", value:Math.round(root.ram) + "%", detail:root.fmtGiB(root.ramUsedBytes) + " / " + root.fmtGiB(root.ramTotalBytes), color:root.blue, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel: root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0)}
+                        {label:"GPU", value:Math.round(root.gpu) + "%", detail:"VRAM " + Math.round(root.vramPercent()) + "% · " + root.fmtCompactVram(root.gpuVramUsedMiB) + " / " + root.fmtCompactVram(root.gpuVramTotalMiB), detail2:Math.round(root.gpuTemp) + "°C", detail2Color:root.tempColor(root.gpuTemp, root.muted), detail3:root.gpuTopProcess, color:root.violet, detailColor:root.usageColor(root.vramPercent(), root.violet), healthLevel: (root.gpuTemp >= 85 || root.vramPercent() >= 95) ? 2 : ((root.gpuTemp >= 75 || root.vramPercent() >= 85) ? 1 : 0)},
+                        {label:"RAM", value:Math.round(root.ram) + "%", detail:root.fmtCompactCapacity(root.ramUsedBytes) + " / " + root.fmtCompactCapacity(root.ramTotalBytes), color:root.blue, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel: root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0)}
                     ]
                     delegate: Rectangle {
                         width: (parent.width - 32) / 3; height: parent.height; radius: 16
                         clip: true
                         color: Qt.rgba(0.035, 0.22, 0.34, 0.9); border.width: modelData.healthLevel > 0 ? 2 : 1; border.color: root.metricBorderColor(modelData); opacity: 0.95
 
-                        // Every compute card reserves its detail area for the five largest
-                        // consumers of the matching resource, refreshed every five seconds.
-                        Row {
-                            anchors.fill: parent; anchors.margins: 12; spacing: 10
+                        // A fixed KPI column prevents large percentages from colliding
+                        // with process names at narrow dashboard widths.
+                        Item {
+                            anchors.fill: parent; anchors.margins: 12
                             Column {
-                                width: 48; spacing: 4
+                                id: metricKpi
+                                anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                                width: Math.max(116, parent.width * 0.34); spacing: 4
                                 Text { text: modelData.label; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                                 Text { text: modelData.value; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 28; font.bold: true }
-                                Text { text: modelData.detail; color: modelData.detailColor; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                                Text { width: parent.width - 4; text: modelData.detail; color: modelData.detailColor; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
+                                Text { width: parent.width - 4; text: modelData.detail2 || ""; visible: !!modelData.detail2; color: modelData.detail2Color || root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
                             }
-                            Rectangle { width: 1; height: parent.height; color: modelData.color; opacity: 0.38 }
+                            Rectangle { id: metricDivider; anchors.left: metricKpi.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: modelData.color; opacity: 0.38 }
                             Column {
                                 id: processDetails
-                                width: parent.width - 59; spacing: 2
+                                anchors.left: metricDivider.right; anchors.leftMargin: 10
+                                anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
+                                spacing: 3
                                 property string metricLabel: modelData.label
                                 property var processes: metricLabel === "CPU" ? root.topCpuProcesses : (metricLabel === "RAM" ? root.topRamProcesses : root.topGpuProcesses)
-                                property string heading: "TOP 2 " + metricLabel + " PROCESSES"
-                                Text { text: processDetails.heading; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                                property string heading: "TOP PROCESSES"
+                                Text { width: parent.width; text: processDetails.heading; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true; elide: Text.ElideRight }
                                 Repeater {
                                     model: parent.processes
                                     delegate: Text {
                                         width: parent.width
-                                        text: root.shortProcessName(modelData.name) + " " + root.compactProcessValue(processDetails.metricLabel, processDetails.metricLabel === "CPU" ? modelData.cpu + "%" : (processDetails.metricLabel === "RAM" ? modelData.ram : modelData.gpu))
+                                        text: root.shortProcessName(modelData.name) + "  " + root.compactProcessValue(processDetails.metricLabel, processDetails.metricLabel === "CPU" ? modelData.cpu + "%" : (processDetails.metricLabel === "RAM" ? modelData.ram : modelData.gpu))
                                         color: index === 0 ? root.ink : root.muted
                                         font.family: "DejaVu Sans Mono"; font.pixelSize: 13
                                         elide: Text.ElideRight
@@ -466,7 +516,7 @@ PlasmoidItem {
             Item {
                 Layout.fillWidth: true
                 // Network charts: 50% shorter than the previous responsive panel.
-                Layout.preferredHeight: 202
+                Layout.preferredHeight: 230
                 clip: true
 
                 Text { id: networkTitle; anchors.left: parent.left; anchors.top: parent.top; text: "NETWORK"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
@@ -477,17 +527,26 @@ PlasmoidItem {
                     Text { text: "↓ DOWNLOAD"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
                     Text { text: "↑ UPLOAD"; color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
                 }
-                Row {
-                    anchors.right: parent.right; anchors.verticalCenter: networkLegend.verticalCenter; spacing: 12
-                    Text { text: "↓ " + root.fmtRate(root.down); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
-                    Text { text: "↑ " + root.fmtRate(root.up); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
-                    Text { text: "PEAK " + root.fmtRate(root.netPeak()); color: root.blue; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
-                    Text { text: "LAST 5 MIN · AUTO SCALE"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                Column {
+                    id: networkDataBlock
+                    anchors.right: parent.right; anchors.top: networkTitle.bottom; anchors.topMargin: 22; spacing: 4
+                    Row {
+                        id: networkLiveValues
+                        anchors.right: parent.right; spacing: 16
+                        Text { text: "↓ " + root.fmtRate(root.down); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
+                        Text { text: "↑ " + root.fmtRate(root.up); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
+                    }
+                    Row {
+                        id: networkMetadata
+                        anchors.right: parent.right; spacing: 12
+                        Text { text: "SCALE 0–" + root.fmtRate(root.netPeak()); color: root.blue; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                        Text { text: "LAST 5 MIN · AUTO SCALE"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                    }
                 }
 
                 Row {
                     anchors.left: parent.left; anchors.right: parent.right
-                    anchors.top: networkLegend.bottom; anchors.topMargin: 12
+                    anchors.top: networkDataBlock.bottom; anchors.topMargin: 10
                     anchors.bottom: networkTimeline.top; anchors.bottomMargin: 6
                     spacing: 12
 
@@ -511,22 +570,24 @@ PlasmoidItem {
                                 var peak = root.netPeak()
                                 var d = root.downHistory
                                 if (d.length < 2) return
+                                var firstX = MonitorLogic.historyX(0, d.length, width, root.historySeconds)
+                                var lastX = MonitorLogic.historyX(d.length - 1, d.length, width, root.historySeconds)
                                 // P3: Filled area under the line
                                 ctx.beginPath()
                                 for (var j = 0; j < d.length; j++) {
-                                    var x = j * width / (root.historySeconds - 1)
+                                    var x = MonitorLogic.historyX(j, d.length, width, root.historySeconds)
                                     var y = height - (d[j] / peak) * height
                                     if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                                 }
-                                ctx.lineTo(width, height)
-                                ctx.lineTo(0, height)
+                                ctx.lineTo(lastX, height)
+                                ctx.lineTo(firstX, height)
                                 ctx.closePath()
                                 ctx.fillStyle = "rgba(150,245,246,0.15)"
                                 ctx.fill()
                                 // Line on top
                                 ctx.strokeStyle = root.cyan; ctx.lineWidth = 2.5; ctx.beginPath()
                                 for (var k = 0; k < d.length; k++) {
-                                    var x2 = k * width / (root.historySeconds - 1)
+                                    var x2 = MonitorLogic.historyX(k, d.length, width, root.historySeconds)
                                     var y2 = height - (d[k] / peak) * height
                                     if (k === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2)
                                 }
@@ -555,22 +616,24 @@ PlasmoidItem {
                                 var peak = root.netPeak()
                                 var d = root.upHistory
                                 if (d.length < 2) return
+                                var firstX = MonitorLogic.historyX(0, d.length, width, root.historySeconds)
+                                var lastX = MonitorLogic.historyX(d.length - 1, d.length, width, root.historySeconds)
                                 // P3: Filled area
                                 ctx.beginPath()
                                 for (var j = 0; j < d.length; j++) {
-                                    var x = j * width / (root.historySeconds - 1)
+                                    var x = MonitorLogic.historyX(j, d.length, width, root.historySeconds)
                                     var y = height - (d[j] / peak) * height
                                     if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                                 }
-                                ctx.lineTo(width, height)
-                                ctx.lineTo(0, height)
+                                ctx.lineTo(lastX, height)
+                                ctx.lineTo(firstX, height)
                                 ctx.closePath()
                                 ctx.fillStyle = "rgba(219,145,255,0.15)"
                                 ctx.fill()
                                 // Line on top
                                 ctx.strokeStyle = root.violet; ctx.lineWidth = 2.5; ctx.beginPath()
                                 for (var k = 0; k < d.length; k++) {
-                                    var x2 = k * width / (root.historySeconds - 1)
+                                    var x2 = MonitorLogic.historyX(k, d.length, width, root.historySeconds)
                                     var y2 = height - (d[k] / peak) * height
                                     if (k === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2)
                                 }
@@ -609,11 +672,11 @@ PlasmoidItem {
                     color: Qt.rgba(0.035, 0.22, 0.34, 0.9); border.width: 1; border.color: root.blue; opacity: 0.95
                     Column {
                         anchors.fill: parent; anchors.margins: 10; spacing: 2
-                        Row {
+                        Item {
                             width: parent.width
-                            Text { text: "DISK"; color: root.blue; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                            Item { width: 1; height: 1; Layout.fillWidth: true }
-                            Text { text: Math.round(root.diskUsedPercent) + "%"; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
+                            height: 26
+                            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "DISK USED"; color: root.blue; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: Math.round(root.diskUsedPercent) + "%"; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
                         // P0c: elide to prevent truncation; P1: 12px minimum
                         Text { width: parent.width; elide: Text.ElideRight; text: "FREE " + root.fmtDisk(root.diskFreeBytes()) + " · USED " + root.fmtDisk(root.diskUsedBytes); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
@@ -631,11 +694,11 @@ PlasmoidItem {
                     color: Qt.rgba(0.035, 0.22, 0.34, 0.9); border.width: 1; border.color: root.cyan; opacity: 0.95
                     Column {
                         anchors.fill: parent; anchors.margins: 10; spacing: 2
-                        Row {
+                        Item {
                             width: parent.width
-                            Text { text: "SYSTEM"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                            Item { width: 1; height: 1; Layout.fillWidth: true }
-                            Text { text: root.fmtUptime(root.uptimeSeconds); color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
+                            height: 26
+                            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "UPTIME"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtUptime(root.uptimeSeconds); color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
                         Text { width: parent.width; elide: Text.ElideRight; text: "LOAD " + root.loadAverage.toFixed(2) + " · RTX PRO 4000"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                         Text { width: parent.width; elide: Text.ElideRight; text: "DEBIAN 13 · PLASMA 6 · REFRESH " + root.lastRefresh; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
@@ -654,7 +717,7 @@ PlasmoidItem {
                 root.ramHistory = root.push(root.ramHistory, root.ram)
                 root.downHistory = root.push(root.downHistory, root.down)
                 root.upHistory = root.push(root.upHistory, root.up)
-                root.lastRefresh = root.refreshClock()
+                root.updateDataStatus(Date.now())
                 computeGraph.requestPaint()
                 downGraph.requestPaint()
                 upGraph.requestPaint()
@@ -662,7 +725,7 @@ PlasmoidItem {
         }
     }
 
-    // Current top five CPU consumers. ps %CPU is an OS rolling sample, ideal for
+    // Current top two CPU consumers. ps %CPU is an OS rolling sample, ideal for
     // an operational display without keeping a separate per-process history.
     PlasmaSupport.DataSource {
         id: topCpuSource
@@ -713,17 +776,18 @@ PlasmoidItem {
         id: vramSource
         engine: "executable"
         connectedSources: []
-        property string command: "nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits"
+        property string command: "nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv,noheader,nounits"
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
             if (data["exit code"] === undefined) return
-            var values = buffer.trim().split(",")
+            var memory = MonitorLogic.parseNvidiaMemory(buffer, 0)
             buffer = ""
             disconnectSource(source)
-            if (values.length !== 2) return
-            root.gpuVramUsedMiB = parseFloat(values[0]) || 0
-            root.gpuVramTotalMiB = parseFloat(values[1]) || 0
+            if (!memory) return
+            root.gpuVramUsedMiB = memory.usedMiB
+            root.gpuVramTotalMiB = memory.totalMiB
+            root.markDataFresh("gpu")
         }
     }
 
@@ -732,16 +796,22 @@ PlasmoidItem {
         id: releaseModelsSource
         engine: "executable"
         connectedSources: []
-        property string command: "sh -c 'models=$(curl -fsS http://127.0.0.1:11434/api/ps 2>/dev/null | jq -r \".models[]?.name\"); if [ -n \"$models\" ]; then printf \"%s\\n\" \"$models\" | while IFS= read -r model; do ollama stop \"$model\" && echo \"UNLOADED $model\"; done; else echo \"NO OLLAMA MODEL LOADED\"; fi'"
+        property string command: "sh -c 'for dep in curl jq ollama; do command -v \"$dep\" >/dev/null 2>&1 || { echo \"MISSING DEPENDENCY: $dep\"; exit 10; }; done; response=$(curl --max-time 5 -fsS http://127.0.0.1:11434/api/ps) || { echo \"OLLAMA UNREACHABLE\"; exit 11; }; printf \"%s\" \"$response\" | jq -e \".models | arrays\" >/dev/null 2>&1 || { echo \"OLLAMA INVALID RESPONSE\"; exit 12; }; models=$(printf \"%s\" \"$response\" | jq -r \".models[]?.name\"); if [ -z \"$models\" ]; then echo \"NO OLLAMA MODEL LOADED\"; exit 0; fi; failed=0; unloaded=0; printf \"%s\\n\" \"$models\" | while IFS= read -r model; do if OLLAMA_HOST=http://127.0.0.1:11434 ollama stop \"$model\" >/dev/null 2>&1; then echo \"OK\"; else echo \"FAIL\"; fi; done > /tmp/skybox-ollama-unload.$$; unloaded=$(grep -c \"^OK$\" /tmp/skybox-ollama-unload.$$); failed=$(grep -c \"^FAIL$\" /tmp/skybox-ollama-unload.$$); rm -f /tmp/skybox-ollama-unload.$$; if [ $failed -ne 0 ]; then echo \"UNLOAD PARTIAL: $unloaded\"; exit 13; fi; echo \"UNLOADED ALL: $unloaded\"'"
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
             if (data["exit code"] === undefined) return
             var output = buffer.trim()
+            var exitCode = data["exit code"]
             buffer = ""
             disconnectSource(source)
             root.vramReleaseInProgress = false
-            root.vramReleaseStatus = output.indexOf("UNLOADED ") === 0 ? "OLLAMA UNLOADED" : (output === "NO OLLAMA MODEL LOADED" ? "NO OLLAMA MODEL" : "UNLOAD FAILED")
+            if (exitCode === 0 && output.indexOf("UNLOADED ALL:") === 0) root.vramReleaseStatus = "OLLAMA UNLOADED"
+            else if (exitCode === 0 && output === "NO OLLAMA MODEL LOADED") root.vramReleaseStatus = "NO OLLAMA MODEL"
+            else if (output.indexOf("MISSING DEPENDENCY:") === 0) root.vramReleaseStatus = "MISSING DEPENDENCY"
+            else if (output === "OLLAMA UNREACHABLE") root.vramReleaseStatus = "OLLAMA UNREACHABLE"
+            else if (output.indexOf("UNLOAD PARTIAL:") === 0) root.vramReleaseStatus = "UNLOAD PARTIAL"
+            else root.vramReleaseStatus = "UNLOAD FAILED"
             releaseRefreshTimer.start()
             releaseResetTimer.start()
         }
@@ -752,7 +822,7 @@ PlasmoidItem {
         id: topGpuSource
         engine: "executable"
         connectedSources: []
-        property string command: "sh -c 'nvidia-smi --query-compute-apps=process_name,used_memory --format=csv,noheader,nounits | sort -t, -k2,2nr | head -2'"
+        property string command: "nvidia-smi --query-compute-apps=process_name,used_memory --format=csv,noheader,nounits"
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -760,25 +830,34 @@ PlasmoidItem {
             var lines = buffer.trim().split("\n")
             buffer = ""
             disconnectSource(source)
-            var processes = []
-            for (var i = 0; i < lines.length && processes.length < 2; i++) {
+            var candidates = []
+            var validProcessCount = 0
+            for (var i = 0; i < lines.length; i++) {
                 var parts = lines[i].split(",")
                 var name = (parts[0] || "GPU PROCESS").trim().split("/").pop()
                 var mib = parseFloat((parts[1] || "").trim())
-                if (!isNaN(mib)) processes.push({ name: name, gpu: root.fmtVram(mib) })
+                if (!isNaN(mib)) {
+                    validProcessCount++
+                    candidates.push({ name: name, mib: mib })
+                }
+            }
+            candidates.sort(function(a, b) { return b.mib - a.mib })
+            var processes = []
+            for (var j = 0; j < candidates.length; j++) {
+                if (processes.length < 2) processes.push({ name: candidates[j].name, gpu: root.fmtVram(candidates[j].mib) })
             }
             root.topGpuProcesses = processes
-            root.gpuProcessCount = processes.length
+            root.gpuProcessCount = validProcessCount
             root.gpuTopProcess = processes.length > 0 ? processes[0].name + " · " + processes[0].gpu : "NO ACTIVE COMPUTE WORKLOAD"
         }
     }
 
-    // Auto-detect network interface by listing /sys/class/net
+    // Detect the default-route interface, with a safe physical-interface fallback.
     PlasmaSupport.DataSource {
         id: netDetectSource
         engine: "executable"
         connectedSources: []
-        property string command: "ls /sys/class/net/ | grep -v lo | grep -v docker | grep -v br- | grep -v veth | grep -v tailscale | grep -v wlxd | head -1"
+        property string command: "sh -c 'set -- $(ip -o route show default 2>/dev/null); iface=$5; if [ -n \"$iface\" ]; then printf \"%s\\n\" \"$iface\"; exit 0; fi; for iface in $(ls /sys/class/net/); do case \"$iface\" in lo|docker*|br-*|veth*|tailscale*|wlxd*) continue ;; esac; printf \"%s\\n\" \"$iface\"; break; done'"
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -862,26 +941,26 @@ PlasmoidItem {
     }
 
     // Dynamic sensor bindings use root.netIf
-    Sensors.Sensor { sensorId: "cpu/all/usage"; enabled: true; onValueChanged: root.cpu = root.clamp(parseFloat(value)) }
-    Sensors.Sensor { sensorId: "cpu/all/averageTemperature"; enabled: true; onValueChanged: root.cpuTemp = parseFloat(value) || root.cpuTemp }
-    Sensors.Sensor { sensorId: "gpu/gpu1/usage"; enabled: true; onValueChanged: root.gpu = root.clamp(parseFloat(value)) }
-    Sensors.Sensor { sensorId: "gpu/gpu1/temperature"; enabled: true; onValueChanged: root.gpuTemp = parseFloat(value) || root.gpuTemp }
-    Sensors.Sensor { sensorId: "memory/physical/usedPercent"; enabled: true; onValueChanged: root.ram = root.clamp(parseFloat(value)) }
-    Sensors.Sensor { sensorId: "memory/physical/used"; enabled: true; onValueChanged: root.ramUsedBytes = parseFloat(value) || 0 }
-    Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; onValueChanged: root.ramTotalBytes = parseFloat(value) || 0 }
+    Sensors.Sensor { sensorId: "cpu/all/usage"; enabled: true; onValueChanged: { root.cpu = root.clamp(parseFloat(value)); root.markDataFresh("cpu") } }
+    Sensors.Sensor { sensorId: "cpu/all/averageTemperature"; enabled: true; onValueChanged: { root.cpuTemp = parseFloat(value) || root.cpuTemp; root.markDataFresh("cpu") } }
+    Sensors.Sensor { sensorId: "gpu/gpu1/usage"; enabled: true; onValueChanged: { root.gpu = root.clamp(parseFloat(value)); root.markDataFresh("gpu") } }
+    Sensors.Sensor { sensorId: "gpu/gpu1/temperature"; enabled: true; onValueChanged: { root.gpuTemp = parseFloat(value) || root.gpuTemp; root.markDataFresh("gpu") } }
+    Sensors.Sensor { sensorId: "memory/physical/usedPercent"; enabled: true; onValueChanged: { root.ram = root.clamp(parseFloat(value)); root.markDataFresh("memory") } }
+    Sensors.Sensor { sensorId: "memory/physical/used"; enabled: true; onValueChanged: { root.ramUsedBytes = parseFloat(value) || 0; root.markDataFresh("memory") } }
+    Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; onValueChanged: { root.ramTotalBytes = parseFloat(value) || 0; root.markDataFresh("memory") } }
     Sensors.Sensor {
         sensorId: "network/" + root.netIf + "/download"
         enabled: true
-        onValueChanged: root.down = parseFloat(value) || 0
+        onValueChanged: { root.down = parseFloat(value) || 0; root.markDataFresh("network") }
     }
     Sensors.Sensor {
         sensorId: "network/" + root.netIf + "/upload"
         enabled: true
-        onValueChanged: root.up = parseFloat(value) || 0
+        onValueChanged: { root.up = parseFloat(value) || 0; root.markDataFresh("network") }
     }
-    Sensors.Sensor { sensorId: "os/system/uptime"; enabled: true; onValueChanged: root.uptimeSeconds = parseFloat(value) || 0 }
-    Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage1"; enabled: true; onValueChanged: root.loadAverage = parseFloat(value) || 0 }
-    Sensors.Sensor { sensorId: "disk/all/usedPercent"; enabled: true; onValueChanged: root.diskUsedPercent = parseFloat(value) || 0 }
-    Sensors.Sensor { sensorId: "disk/all/used"; enabled: true; onValueChanged: root.diskUsedBytes = parseFloat(value) || 0 }
-    Sensors.Sensor { sensorId: "disk/all/total"; enabled: true; onValueChanged: root.diskTotalBytes = parseFloat(value) || 0 }
+    Sensors.Sensor { sensorId: "os/system/uptime"; enabled: true; onValueChanged: { root.uptimeSeconds = parseFloat(value) || 0; root.markDataFresh("system") } }
+    Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage1"; enabled: true; onValueChanged: { root.loadAverage = parseFloat(value) || 0; root.markDataFresh("system") } }
+    Sensors.Sensor { sensorId: "disk/all/usedPercent"; enabled: true; onValueChanged: { root.diskUsedPercent = parseFloat(value) || 0; root.markDataFresh("disk") } }
+    Sensors.Sensor { sensorId: "disk/all/used"; enabled: true; onValueChanged: { root.diskUsedBytes = parseFloat(value) || 0; root.markDataFresh("disk") } }
+    Sensors.Sensor { sensorId: "disk/all/total"; enabled: true; onValueChanged: { root.diskTotalBytes = parseFloat(value) || 0; root.markDataFresh("disk") } }
 }
