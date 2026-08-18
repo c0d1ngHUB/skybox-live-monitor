@@ -197,6 +197,60 @@ def test_chart_series_are_distinguishable_without_color_alone():
     assert 'ctx.setLineDash([])' in text
 
 
+def test_freshness_clock_only_advances_when_all_domains_fresh():
+    """P0#1: lastRefresh must not update when any domain is stale."""
+    text = source()
+    assert 'var stale = MonitorLogic.staleDomains(now, updates, root.staleAfterMs)' in text
+    assert 'if (stale.length === 0) root.lastRefresh = root.refreshClock()' in text
+    # The old unconditional update inside markDataFresh must be gone.
+    # Extract just the markDataFresh function body to check.
+    fn_start = text.index('function markDataFresh(domain)')
+    fn_end = text.index('function updateDataStatus', fn_start)
+    fn_body = text[fn_start:fn_end]
+    assert fn_body.count('root.lastRefresh = root.refreshClock()') == 1
+    # The refresh must be conditional — preceded by an if-guard, not bare.
+    assert 'if (stale.length === 0) root.lastRefresh = root.refreshClock()' in fn_body
+
+
+def test_charts_show_filling_indicator_until_history_is_full():
+    """P0#2 + P1#3: charts show FILLING % and hide time labels while warming up."""
+    text = source()
+    assert 'function historyFillProgress()' in text
+    assert 'function historyFilling()' in text
+    assert 'FILLING' in text
+    assert 'historyFillProgress() * 100' in text
+    # Time labels must be gated on !historyFilling()
+    assert 'visible: !root.historyFilling()' in text
+
+
+def test_health_banner_is_an_overlay_not_a_layout_element():
+    """P1#4: banner floats above content with z:10, no Layout properties on the Rectangle."""
+    text = source()
+    banner_start = text.index('id: healthBanner')
+    # Find the opening brace of the Rectangle containing healthBanner
+    rect_start = text.rindex('Rectangle {', 0, banner_start)
+    # Find the matching closing brace
+    depth = 0
+    i = rect_start
+    while i < len(text):
+        if text[i] == '{':
+            depth += 1
+        elif text[i] == '}':
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    banner = text[rect_start:i+1]
+    assert 'z: 10' in banner
+    assert 'anchors.top: parent.top' in banner
+    # The Rectangle itself must not have Layout properties (the RowLayout inside may).
+    # Check the first 4 lines after the Rectangle opening — that's where Rectangle
+    # properties live before nested children begin.
+    header = banner[:banner.index('RowLayout')]
+    assert 'Layout.fillWidth' not in header
+    assert 'Layout.preferredHeight' not in header
+
+
 if __name__ == "__main__":
     tests = [value for name, value in globals().items() if name.startswith("test_")]
     failures = []
