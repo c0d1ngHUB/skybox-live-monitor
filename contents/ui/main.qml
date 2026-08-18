@@ -129,16 +129,26 @@ PlasmoidItem {
     function networkIdle() {
         return root.historyPeak(root.downHistory) < 1 && root.historyPeak(root.upHistory) < 1
     }
+    function historyFillProgress() {
+        return Math.min(1, root.cpuHistory.length / root.historySeconds)
+    }
+    function historyFilling() {
+        return root.cpuHistory.length < root.historySeconds
+    }
     function refreshClock() {
         var now = new Date()
         return ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2) + ":" + ("0" + now.getSeconds()).slice(-2)
     }
     function markDataFresh(domain) {
+        var now = Date.now()
         var updates = Object.assign({}, root.domainUpdateMs)
-        updates[domain] = Date.now()
+        updates[domain] = now
         root.domainUpdateMs = updates
-        root.lastRefresh = root.refreshClock()
-        root.updateDataStatus(Date.now())
+        // Only advance the header clock when every domain is fresh —
+        // a stale domain must not masquerade as a recent refresh.
+        var stale = MonitorLogic.staleDomains(now, updates, root.staleAfterMs)
+        if (stale.length === 0) root.lastRefresh = root.refreshClock()
+        root.updateDataStatus(now)
     }
     function updateDataStatus(nowMs) {
         var stale = MonitorLogic.staleDomains(nowMs, root.domainUpdateMs, root.staleAfterMs)
@@ -315,15 +325,22 @@ PlasmoidItem {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.cyan; opacity: 0.45 }
 
+            // Health banner is an overlay — it floats above the charts
+            // instead of displacing layout space when an alert fires.
             Rectangle {
                 id: healthBanner
-                Layout.fillWidth: true
-                Layout.preferredHeight: visible ? 66 : 0
+                // Anchor to the frame so the overlay sits above the content column.
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: 76
                 visible: root.currentHealth.level > 0
+                height: 56
                 radius: 12
                 color: Qt.rgba(0.035, 0.22, 0.34, 0.9)
                 border.width: 1
                 border.color: root.currentHealth.color
+                z: 10
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 14
@@ -447,9 +464,9 @@ PlasmoidItem {
                     anchors.right: computeGraph.right
                     anchors.bottom: parent.bottom
                     height: 20
-                    Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "2.5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                    Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; visible: !root.historyFilling() }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "2.5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; visible: !root.historyFilling() }
+                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "FILLING " + Math.round(root.historyFillProgress() * 100) + "%" : "NOW"; color: root.historyFilling() ? root.warning : root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                 }
             }
 
@@ -655,9 +672,9 @@ PlasmoidItem {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     height: 16
-                    Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "2.5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                    Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; visible: !root.historyFilling() }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "2.5 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; visible: !root.historyFilling() }
+                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "FILLING " + Math.round(root.historyFillProgress() * 100) + "%" : "NOW"; color: root.historyFilling() ? root.warning : root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                 }
             }
 
