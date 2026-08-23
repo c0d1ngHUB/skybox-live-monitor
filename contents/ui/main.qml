@@ -20,6 +20,9 @@ PlasmoidItem {
     property real gpuVramTotalMiB: 0
     property real down: 0
     property real up: 0
+    property real previousRxBytes: -1
+    property real previousTxBytes: -1
+    property double previousNetworkSampleMs: 0
     property real uptimeSeconds: 0
     property real loadAverage: 0
     property real diskUsedPercent: 0
@@ -884,7 +887,49 @@ PlasmoidItem {
             disconnectSource(source)
             if (iface.length > 0 && iface !== root.netIf) {
                 root.netIf = iface
+                root.previousRxBytes = -1
+                root.previousTxBytes = -1
+                root.previousNetworkSampleMs = 0
+                networkCountersSource.connectSource(networkCountersSource.command)
             }
+        }
+    }
+
+    // Read cumulative byte counters directly from /proc/net/dev. KDE's dynamic
+    // network Sensor bindings can remain stuck on the empty startup interface.
+    PlasmaSupport.DataSource {
+        id: networkCountersSource
+        engine: "executable"
+        connectedSources: []
+        property string scriptPath: Qt.resolvedUrl("../code/network_counters.sh").toString().replace("file://", "")
+        property string command: "sh " + scriptPath + " " + root.netIf
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            var output = buffer.trim()
+            var exitCode = data["exit code"]
+            buffer = ""
+            disconnectSource(source)
+            if (exitCode !== 0) return
+            var fields = output.split(/\s+/)
+            if (fields.length !== 2) return
+            var rxBytes = parseFloat(fields[0])
+            var txBytes = parseFloat(fields[1])
+            var now = Date.now()
+            if (isNaN(rxBytes) || isNaN(txBytes)) return
+            if (root.previousNetworkSampleMs > 0 && now > root.previousNetworkSampleMs) {
+                var elapsedSeconds = (now - root.previousNetworkSampleMs) / 1000
+                root.down = Math.max(0, rxBytes - root.previousRxBytes) / elapsedSeconds
+                root.up = Math.max(0, txBytes - root.previousTxBytes) / elapsedSeconds
+            } else {
+                root.down = 0
+                root.up = 0
+            }
+            root.previousRxBytes = rxBytes
+            root.previousTxBytes = txBytes
+            root.previousNetworkSampleMs = now
+            root.markDataFresh("network")
         }
     }
 
@@ -949,6 +994,15 @@ PlasmoidItem {
         onTriggered: { root.vramReleaseArmed = false; root.vramReleaseStatus = "UNLOAD OLLAMA" }
     }
 
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: {
+            if (root.netIf.length > 0) networkCountersSource.connectSource(networkCountersSource.command)
+        }
+    }
+
     // Re-detect network interface every 30s in case of hotplug
     Timer {
         interval: 30000
@@ -957,7 +1011,7 @@ PlasmoidItem {
         onTriggered: netDetectSource.connectSource(netDetectSource.command)
     }
 
-    // Dynamic sensor bindings use root.netIf
+    // Static ksystemstats bindings for the remaining telemetry domains.
     Sensors.Sensor { sensorId: "cpu/all/usage"; enabled: true; onValueChanged: { root.cpu = root.clamp(parseFloat(value)); root.markDataFresh("cpu") } }
     Sensors.Sensor { sensorId: "cpu/all/averageTemperature"; enabled: true; onValueChanged: { root.cpuTemp = parseFloat(value) || root.cpuTemp; root.markDataFresh("cpu") } }
     Sensors.Sensor { sensorId: "gpu/gpu1/usage"; enabled: true; onValueChanged: { root.gpu = root.clamp(parseFloat(value)); root.markDataFresh("gpu") } }
@@ -965,16 +1019,6 @@ PlasmoidItem {
     Sensors.Sensor { sensorId: "memory/physical/usedPercent"; enabled: true; onValueChanged: { root.ram = root.clamp(parseFloat(value)); root.markDataFresh("memory") } }
     Sensors.Sensor { sensorId: "memory/physical/used"; enabled: true; onValueChanged: { root.ramUsedBytes = parseFloat(value) || 0; root.markDataFresh("memory") } }
     Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; onValueChanged: { root.ramTotalBytes = parseFloat(value) || 0; root.markDataFresh("memory") } }
-    Sensors.Sensor {
-        sensorId: "network/" + root.netIf + "/download"
-        enabled: true
-        onValueChanged: { root.down = parseFloat(value) || 0; root.markDataFresh("network") }
-    }
-    Sensors.Sensor {
-        sensorId: "network/" + root.netIf + "/upload"
-        enabled: true
-        onValueChanged: { root.up = parseFloat(value) || 0; root.markDataFresh("network") }
-    }
     Sensors.Sensor { sensorId: "os/system/uptime"; enabled: true; onValueChanged: { root.uptimeSeconds = parseFloat(value) || 0; root.markDataFresh("system") } }
     Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage1"; enabled: true; onValueChanged: { root.loadAverage = parseFloat(value) || 0; root.markDataFresh("system") } }
     Sensors.Sensor { sensorId: "disk/all/usedPercent"; enabled: true; onValueChanged: { root.diskUsedPercent = parseFloat(value) || 0; root.markDataFresh("disk") } }

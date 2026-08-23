@@ -13,6 +13,7 @@ import unittest
 ROOT = Path(__file__).parents[1]
 QML = ROOT / "contents/ui/main.qml"
 LOGIC = ROOT / "contents/code/monitor_logic.js"
+NETWORK_COUNTERS = ROOT / "contents/code/network_counters.sh"
 README = ROOT / "README.md"
 
 
@@ -84,6 +85,30 @@ class MonitorBehaviorTests(unittest.TestCase):
             env["PATH"] = f"{bindir}:/usr/bin:/bin"
             result = subprocess.run(command, shell=True, text=True, capture_output=True, env=env, check=True)
             self.assertEqual(result.stdout.strip(), "wlo1")
+
+    def test_network_counters_read_requested_interface_from_proc_fixture(self):
+        fixture = """Inter-| Receive | Transmit
+ face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed
+    lo: 10 1 0 0 0 0 0 0 10 1 0 0 0 0 0 0
+ enp7s0: 123456 20 0 0 0 0 0 0 654321 30 0 0 0 0 0 0
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            proc_net_dev = Path(tmp) / "net-dev"
+            proc_net_dev.write_text(fixture)
+            result = subprocess.run(
+                ["sh", str(NETWORK_COUNTERS), "enp7s0", str(proc_net_dev)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(result.stdout.strip(), "123456 654321")
+
+    def test_qml_polls_proc_network_counters_instead_of_dynamic_ksystemstats_ids(self):
+        text = QML.read_text()
+        self.assertIn("id: networkCountersSource", text)
+        self.assertIn("network_counters.sh", text)
+        self.assertIn('root.markDataFresh("network")', text)
+        self.assertNotIn('sensorId: "network/" + root.netIf', text)
 
     def test_ollama_stop_is_forced_to_the_same_local_endpoint_as_discovery(self):
         command = command_for("releaseModelsSource")
