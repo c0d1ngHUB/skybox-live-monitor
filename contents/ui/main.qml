@@ -20,6 +20,9 @@ PlasmoidItem {
     property real gpuVramTotalMiB: 0
     property real down: 0
     property real up: 0
+    // Independent fixed network chart scales, expressed internally as bytes/s.
+    property real downloadScaleBytesPerSecond: 600000000 / 8
+    property real uploadScaleBytesPerSecond: 50000000 / 8
     property real previousRxBytes: -1
     property real previousTxBytes: -1
     property double previousNetworkSampleMs: 0
@@ -272,58 +275,6 @@ PlasmoidItem {
                 Layout.fillWidth: true
                 Text { text: "SKYBOX"; color: root.cyan; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 28; font.letterSpacing: 3 }
                 Item { Layout.fillWidth: true }
-                Text { text: "LIVE SYSTEM · " + root.dataStatus; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.letterSpacing: 1.5 }
-                Rectangle {
-                    id: healthChip
-                    Layout.leftMargin: 12
-                    Layout.preferredWidth: healthChipText.implicitWidth + 22
-                    Layout.preferredHeight: 28
-                    radius: 14
-                    color: Qt.rgba(0.035, 0.22, 0.34, 0.9)
-                    border.width: 1
-                    border.color: root.currentHealth.color
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 7
-                        Rectangle { width: 6; height: 6; radius: 3; color: root.currentHealth.color }
-                        Text { id: healthChipText; text: root.currentHealth.label + (root.currentHealth.level === 0 ? " · 0 ALERTS" : ""); color: root.currentHealth.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                    }
-                }
-                Rectangle {
-                    id: releaseVramButton
-                    Layout.leftMargin: 18
-                    Layout.preferredWidth: releaseVramButtonText.implicitWidth + 28
-                    Layout.preferredHeight: 44
-                    radius: 10
-                    color: releaseVramMouse.containsMouse ? Qt.rgba(0.30, 0.10, 0.42, 0.95) : Qt.rgba(0.12, 0.06, 0.20, 0.92)
-                    border.width: 1
-                    border.color: root.violet
-                    opacity: releaseVramMouse.pressed ? 0.72 : 1
-                    activeFocusOnTab: true
-                    Accessible.role: Accessible.Button
-                    Accessible.name: "Unload Ollama models from GPU memory"
-                    Accessible.description: "Requires confirmation and stops only locally served Ollama models"
-                    Keys.onSpacePressed: root.requestOllamaUnload()
-                    Keys.onReturnPressed: root.requestOllamaUnload()
-                    Text {
-                        id: releaseVramButtonText
-                        anchors.centerIn: parent
-                        text: "⇩  " + root.vramReleaseStatus
-                        color: root.violet
-                        font.family: "DejaVu Sans Mono"
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
-                    MouseArea {
-                        id: releaseVramMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        enabled: !root.vramReleaseInProgress
-                        onClicked: root.requestOllamaUnload()
-                    }
-                    Rectangle { anchors.fill: parent; anchors.margins: -3; radius: 13; color: "transparent"; border.width: releaseVramButton.activeFocus ? 2 : 0; border.color: root.ink }
-                }
             }
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.cyan; opacity: 0.45 }
@@ -369,22 +320,11 @@ PlasmoidItem {
                 clip: true
 
                 Text { id: headline; anchors.left: parent.left; anchors.top: parent.top; text: "SYSTEM LOAD"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
-                // P1: Minimum 12px for secondary text
-                Text { anchors.left: parent.left; anchors.top: headline.bottom; anchors.topMargin: 4; text: "CPU · GPU UTILIZATION"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
                 Row {
                     id: computeLegend
                     anchors.left: parent.left; anchors.top: headline.bottom; anchors.topMargin: 26; spacing: 18
                     Text { text: "● CPU LOAD"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
                     Text { text: "● GPU LOAD"; color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
-                }
-                Row {
-                    anchors.right: parent.right; anchors.verticalCenter: computeLegend.verticalCenter; spacing: 14
-                    Text {
-                        visible: root.historyPeak(root.gpuHistory) >= 75
-                        text: "GPU PEAK " + Math.round(root.historyPeak(root.gpuHistory)) + "% · " + root.fmtAge(root.peakAge(root.gpuHistory)) + " AGO"
-                        color: root.violet; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true
-                    }
-                    Text { text: "LAST 5 MIN · FIXED SCALE · 0–100%"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
                 }
 
                 // P0a: Y-axis labels positioned INSIDE the graph area, not with negative margins
@@ -413,15 +353,6 @@ PlasmoidItem {
                         ctx.beginPath(); ctx.moveTo(tick1, 0); ctx.lineTo(tick1, height); ctx.stroke()
                         ctx.beginPath(); ctx.moveTo(tick2, 0); ctx.lineTo(tick2, height); ctx.stroke()
 
-                        // Operational thresholds keep the fixed scale actionable.
-                        ctx.setLineDash([4, 4]); ctx.lineWidth = 1
-                        ctx.strokeStyle = "rgba(255,209,102,0.55)"
-                        var warningY = height - height * 0.75
-                        ctx.beginPath(); ctx.moveTo(plotLeft, warningY); ctx.lineTo(width, warningY); ctx.stroke()
-                        ctx.strokeStyle = "rgba(255,107,107,0.62)"
-                        var criticalY = height - height * 0.85
-                        ctx.beginPath(); ctx.moveTo(plotLeft, criticalY); ctx.lineTo(width, criticalY); ctx.stroke()
-                        ctx.setLineDash([])
 
                         // Labels live inside the Canvas gutter so they are never clipped.
                         ctx.fillStyle = root.muted.toString()
@@ -431,7 +362,7 @@ PlasmoidItem {
                         ctx.fillText("50%", plotLeft - 6, height / 2 + 4)
                         ctx.fillText("0%", plotLeft - 6, height - 2)
 
-                        function plot(data, color, fillColor, dashed) {
+                        function plot(data, color, fillColor) {
                             if (data.length < 2) return
                             var firstX = MonitorLogic.historyX(0, data.length, chartWidth, root.historySeconds) + plotLeft
                             var lastX = MonitorLogic.historyX(data.length - 1, data.length, chartWidth, root.historySeconds) + plotLeft
@@ -447,7 +378,6 @@ PlasmoidItem {
                             ctx.fillStyle = fillColor
                             ctx.fill()
                             ctx.strokeStyle = color; ctx.lineWidth = 3
-                            ctx.setLineDash(dashed ? [8, 5] : [])
                             ctx.beginPath()
                             for (var j = 0; j < data.length; j++) {
                                 var x = plotLeft + MonitorLogic.historyX(j, data.length, chartWidth, root.historySeconds)
@@ -455,10 +385,10 @@ PlasmoidItem {
                                 if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                             }
                             ctx.stroke()
-                            ctx.setLineDash([])
                         }
-                        plot(root.cpuHistory, root.cyan, "rgba(150,245,246,0.12)", false)
-                        plot(root.gpuHistory, root.violet, "rgba(219,145,255,0.12)", true)
+                        // GPU is painted last so its solid trace remains in the foreground.
+                        plot(root.cpuHistory, root.cyan, "rgba(150,245,246,0.12)")
+                        plot(root.gpuHistory, root.violet, "rgba(219,145,255,0.12)")
                     }
                 }
                 Item {
@@ -535,12 +465,11 @@ PlasmoidItem {
             // --- NETWORK section with split sub-charts ---
             Item {
                 Layout.fillWidth: true
-                // Network charts: 50% shorter than the previous responsive panel.
-                Layout.preferredHeight: 230
+                // About 25% taller than the previous 230 px network panel.
+                Layout.preferredHeight: 288
                 clip: true
 
                 Text { id: networkTitle; anchors.left: parent.left; anchors.top: parent.top; text: "NETWORK"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
-                Text { anchors.left: parent.left; anchors.top: networkTitle.bottom; anchors.topMargin: 4; text: "LAN · " + root.netIf + " · LIVE THROUGHPUT · AUTO SCALE"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
                 Row {
                     id: networkLegend
                     anchors.left: parent.left; anchors.top: networkTitle.bottom; anchors.topMargin: 26; spacing: 18
@@ -555,12 +484,6 @@ PlasmoidItem {
                         anchors.right: parent.right; spacing: 16
                         Text { text: "↓ " + root.fmtRate(root.down); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
                         Text { text: "↑ " + root.fmtRate(root.up); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
-                    }
-                    Row {
-                        id: networkMetadata
-                        anchors.right: parent.right; spacing: 12
-                        Text { text: "SCALE 0–" + root.fmtRate(root.netPeak()); color: root.blue; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                        Text { text: "LAST 5 MIN · AUTO SCALE"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                     }
                 }
 
@@ -587,7 +510,6 @@ PlasmoidItem {
                                 var tick1 = width / 5; var tick2 = width * 4 / 5
                                 ctx.beginPath(); ctx.moveTo(tick1, 0); ctx.lineTo(tick1, height); ctx.stroke()
                                 ctx.beginPath(); ctx.moveTo(tick2, 0); ctx.lineTo(tick2, height); ctx.stroke()
-                                var peak = root.netPeak()
                                 var d = root.downHistory
                                 if (d.length < 2) return
                                 var firstX = MonitorLogic.historyX(0, d.length, width, root.historySeconds)
@@ -596,7 +518,7 @@ PlasmoidItem {
                                 ctx.beginPath()
                                 for (var j = 0; j < d.length; j++) {
                                     var x = MonitorLogic.historyX(j, d.length, width, root.historySeconds)
-                                    var y = height - (d[j] / peak) * height
+                                    var y = height - Math.min(1, d[j] / root.downloadScaleBytesPerSecond) * height
                                     if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                                 }
                                 ctx.lineTo(lastX, height)
@@ -608,7 +530,7 @@ PlasmoidItem {
                                 ctx.strokeStyle = root.cyan; ctx.lineWidth = 2.5; ctx.beginPath()
                                 for (var k = 0; k < d.length; k++) {
                                     var x2 = MonitorLogic.historyX(k, d.length, width, root.historySeconds)
-                                    var y2 = height - (d[k] / peak) * height
+                                    var y2 = height - Math.min(1, d[k] / root.downloadScaleBytesPerSecond) * height
                                     if (k === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2)
                                 }
                                 ctx.stroke()
@@ -633,7 +555,6 @@ PlasmoidItem {
                                 var tick1 = width / 5; var tick2 = width * 4 / 5
                                 ctx.beginPath(); ctx.moveTo(tick1, 0); ctx.lineTo(tick1, height); ctx.stroke()
                                 ctx.beginPath(); ctx.moveTo(tick2, 0); ctx.lineTo(tick2, height); ctx.stroke()
-                                var peak = root.netPeak()
                                 var d = root.upHistory
                                 if (d.length < 2) return
                                 var firstX = MonitorLogic.historyX(0, d.length, width, root.historySeconds)
@@ -642,7 +563,7 @@ PlasmoidItem {
                                 ctx.beginPath()
                                 for (var j = 0; j < d.length; j++) {
                                     var x = MonitorLogic.historyX(j, d.length, width, root.historySeconds)
-                                    var y = height - (d[j] / peak) * height
+                                    var y = height - Math.min(1, d[j] / root.uploadScaleBytesPerSecond) * height
                                     if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                                 }
                                 ctx.lineTo(lastX, height)
@@ -654,7 +575,7 @@ PlasmoidItem {
                                 ctx.strokeStyle = root.violet; ctx.lineWidth = 2.5; ctx.beginPath()
                                 for (var k = 0; k < d.length; k++) {
                                     var x2 = MonitorLogic.historyX(k, d.length, width, root.historySeconds)
-                                    var y2 = height - (d[k] / peak) * height
+                                    var y2 = height - Math.min(1, d[k] / root.uploadScaleBytesPerSecond) * height
                                     if (k === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2)
                                 }
                                 ctx.stroke()
@@ -720,8 +641,6 @@ PlasmoidItem {
                             Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "UPTIME"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                             Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtUptime(root.uptimeSeconds); color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
-                        Text { width: parent.width; elide: Text.ElideRight; text: "LOAD " + root.loadAverage.toFixed(2) + " · RTX PRO 4000"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                        Text { width: parent.width; elide: Text.ElideRight; text: "DEBIAN 13 · PLASMA 6 · REFRESH " + root.lastRefresh; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                     }
                 }
             }

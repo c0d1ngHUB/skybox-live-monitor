@@ -9,20 +9,21 @@ def source():
     return SOURCE.read_text()
 
 
-def test_operational_status_explains_normal_state_and_thresholds():
+def test_operational_status_logic_keeps_thresholds_without_header_labels():
     text = source()
-    assert 'root.currentHealth.level === 0 ? " · 0 ALERTS"' in text
+    assert 'id: healthChip' not in text
+    assert 'id: releaseVramButton' not in text
     assert '"0 ALERTS · VRAM "' in text
     assert '"SYSTEM ATTENTION"' in text
     assert '"SYSTEM ALERT"' in text
     assert 'root.vramPercent() >= 95' in text
 
 
-def test_header_and_footer_disclose_freshness():
+def test_freshness_is_tracked_without_the_removed_header_and_footer_labels():
     text = source()
     assert 'property string lastRefresh' in text
-    assert '"LIVE SYSTEM · " + root.dataStatus' in text
-    assert '"DEBIAN 13 · PLASMA 6 · REFRESH " + root.lastRefresh' in text
+    assert '"LIVE SYSTEM · " + root.dataStatus' not in text
+    assert '"DEBIAN 13 · PLASMA 6 · REFRESH " + root.lastRefresh' not in text
     assert 'function refreshClock()' in text
 
 
@@ -81,8 +82,8 @@ def test_gpu_card_shows_top_two_processes_but_counts_all_workloads():
 def test_charts_are_five_minute_and_visually_readable():
     text = source()
     assert 'property int historySeconds: 300' in text
-    assert 'LAST 5 MIN · FIXED SCALE · 0–100%' in text
-    assert 'LAST 5 MIN · AUTO SCALE' in text
+    assert 'LAST 5 MIN · FIXED SCALE · 0–100%' not in text
+    assert 'LAST 5 MIN · AUTO SCALE' not in text
     assert 'ctx.fillStyle = fillColor' in text
     assert 'ctx.fillStyle = "rgba(150,245,246,0.15)"' in text
     assert 'ctx.fillStyle = "rgba(219,145,255,0.15)"' in text
@@ -99,10 +100,9 @@ def test_compact_cards_preserve_legible_operational_detail():
     assert '"FREE " + root.fmtDisk(root.diskFreeBytes()) + " · USED "' in text
 
 
-def test_header_exposes_a_guarded_llm_vram_release_button():
+def test_removed_header_no_longer_exposes_the_vram_release_button():
     text = source()
-    assert 'id: releaseVramButton' in text
-    assert 'root.vramReleaseStatus' in text
+    assert 'id: releaseVramButton' not in text
     assert 'id: releaseModelsSource' in text
     assert 'ollama stop' in text
     assert 'CONFIRM UNLOAD' in text
@@ -135,13 +135,15 @@ def test_compute_chart_has_dedicated_graph_and_timeline_space():
     assert 'height: 20' in text
 
 
-def test_network_header_separates_live_values_from_chart_metadata():
+def test_network_uses_fixed_independent_scales_without_metadata_labels():
     text = source()
     assert 'id: networkLiveValues' in text
-    assert 'id: networkMetadata' in text
-    block = text[text.index('id: networkDataBlock'):text.index('// Download sub-chart')]
-    assert 'anchors.top: networkLiveValues.bottom' not in block
-    assert 'text: "SCALE 0–" + root.fmtRate(root.netPeak())' in text
+    assert 'id: networkMetadata' not in text
+    assert 'property real downloadScaleBytesPerSecond: 600000000 / 8' in text
+    assert 'property real uploadScaleBytesPerSecond: 50000000 / 8' in text
+    assert 'Math.min(1, d[j] / root.downloadScaleBytesPerSecond)' in text
+    assert 'Math.min(1, d[j] / root.uploadScaleBytesPerSecond)' in text
+    assert 'Layout.preferredHeight: 288' in text
 
 
 def test_footer_uses_explicit_disk_and_uptime_labels():
@@ -151,13 +153,11 @@ def test_footer_uses_explicit_disk_and_uptime_labels():
     assert 'text: "SYSTEM"' not in text
 
 
-def test_unload_control_is_visually_and_accessibly_an_action():
+def test_removed_unload_control_has_no_visual_or_accessible_action():
     text = source()
-    assert 'Layout.preferredHeight: 44' in text
-    assert 'Accessible.role: Accessible.Button' in text
-    assert 'Accessible.name: "Unload Ollama models from GPU memory"' in text
-    assert 'Keys.onSpacePressed:' in text
-    assert 'Keys.onReturnPressed:' in text
+    assert 'Accessible.name: "Unload Ollama models from GPU memory"' not in text
+    assert 'Keys.onSpacePressed:' not in text
+    assert 'Keys.onReturnPressed:' not in text
 
 
 def test_health_state_always_exposes_a_safe_cause_string():
@@ -191,10 +191,16 @@ def test_ollama_unload_distinguishes_dependencies_connection_and_partial_failure
     assert 'data["exit code"]' in text
 
 
-def test_chart_series_are_distinguishable_without_color_alone():
+def test_gpu_chart_is_solid_and_drawn_after_cpu_in_the_foreground():
     text = source()
-    assert 'ctx.setLineDash(dashed ? [8, 5] : [])' in text
-    assert 'ctx.setLineDash([])' in text
+    assert 'ctx.setLineDash' not in text
+    cpu_plot = 'plot(root.cpuHistory, root.cyan, "rgba(150,245,246,0.12)")'
+    gpu_plot = 'plot(root.gpuHistory, root.violet, "rgba(219,145,255,0.12)")'
+    assert cpu_plot in text
+    assert gpu_plot in text
+    assert text.index(cpu_plot) < text.index(gpu_plot)
+    assert 'warningY' not in text
+    assert 'criticalY' not in text
 
 
 def test_freshness_clock_only_advances_when_all_domains_fresh():
