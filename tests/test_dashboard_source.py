@@ -183,7 +183,7 @@ def test_uptime_card_shows_load_proc_max_think_and_openai_keys():
     assert 'text: "PROC " + root.processCount; color: root.muted' in text
     assert 'text: "MAX THINK: " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.muted' in text
     assert 'text: "KEYS ACTIVE: " + root.openAiActiveKeys + "/" + root.openAiTotalKeys' in text
-    assert 'onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)' in text
+    assert 'interval: 900000\n        running: true\n        repeat: true\n        onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)' in text
     assert 'text: "MAX THINK 24H "' not in text
 
 

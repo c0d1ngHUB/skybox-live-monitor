@@ -975,7 +975,7 @@ PlasmoidItem {
     }
 
     Timer {
-        interval: 60000
+        interval: 900000
         running: true
         repeat: true
         onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
