@@ -31,3 +31,9 @@ jobs:
         run: python3 tests/test_hermes_think_time.py
       - name: Run OpenAI key-count tests
         run: python3 tests/test_openai_key_count.py
+      - name: Reject unsafe QML layout positioning
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-declarative-dev-tools
+          qmllint contents/ui/main.qml 2> qmllint.log
+          ! grep -q '\[Quick.layout-positioning\]' qmllint.log

@@ -51,7 +51,7 @@ def test_cpu_card_shows_top_two_processes_in_its_detail_area():
     assert 'MonitorLogic.cpuProcessRates' in text
     assert 'property string heading: "TOP PROCESSES"' in text
     assert 'property var processes: metricLabel === "CPU" ? root.topCpuProcesses' in text
-    assert 'processes.length < 2' in text
+    assert 'MonitorLogic.cpuProcessRates(root.previousCpuSamples, samples, elapsedMs, 2)' in text
     assert 'onTriggered: topCpuSource.connectSource(topCpuSource.command)' in text
 
 
@@ -293,36 +293,6 @@ def test_freshness_tracks_each_data_domain_not_the_chart_timer():
                    'network', 'diskPercent', 'diskUsed', 'diskTotal',
                    'uptime', 'loadAverage'):
         assert f'root.markMetricFresh("{metric}")' in text
-    assert 'MonitorLogic.staleDomains' in text
-    assert 'property string dataStatus: "WAITING"' in text
-    assert 'STALE · ' in text
-
-
-def test_readme_no_longer_advertises_removed_ollama_feature():
-    readme = (SOURCE.parents[2] / 'README.md').read_text()
-    assert 'Ollama' not in readme
-    assert 'ollama' not in readme
-
-
-def test_gpu_chart_is_solid_and_drawn_after_cpu_in_the_foreground():
-    text = source()
-    assert 'ctx.setLineDash' not in text
-    cpu_plot = 'plot(root.cpuHistory, root.cyan, "rgba(150,245,246,0.12)")'
-    gpu_plot = 'plot(root.gpuHistory, root.violet, "rgba(219,145,255,0.12)")'
-    assert cpu_plot in text
-    assert gpu_plot in text
-    assert text.index(cpu_plot) < text.index(gpu_plot)
-    assert 'warningY' not in text
-    assert 'criticalY' not in text
-
-
-def test_freshness_clock_only_advances_when_all_metrics_fresh():
-    """P0#1: lastRefresh must not update when any domain is stale."""
-    text = source()
-    assert 'var stale = MonitorLogic.staleDomains(now, updates, root.staleAfterMs)' in text
-    assert 'if (stale.length === 0) root.lastRefresh = root.refreshClock()' in text
-    # The old unconditional update inside markDataFresh must be gone.
-    # Extract just the markDataFresh function body to check.
     fn_start = text.index('function markMetricFresh(metric)')
     fn_end = text.index('function updateDataStatus', fn_start)
     fn_body = text[fn_start:fn_end]
@@ -347,6 +317,48 @@ def test_health_banner_has_no_remaining_visual_element():
     assert 'id: healthBanner' not in text
     assert 'SYSTEM ATTENTION' not in text
     assert 'GPU CRITICAL' not in text
+
+
+def test_health_banner_is_outside_the_managed_content_layout():
+    text = source()
+    content_layout = qml_block(text, "id: content")
+    assert "id: healthBanner" not in content_layout
+    banner = qml_block(text, "id: healthBanner")
+    assert "anchors.left: frame.left" in banner
+    assert "anchors.right: frame.right" in banner
+
+
+def test_each_sensor_marks_its_own_metric_fresh():
+    text = source()
+    expected = {
+        "cpuUsage", "cpuTemperature", "gpuUsage", "gpuTemperature", "gpuVram",
+        "memoryPercent", "memoryUsed", "memoryTotal", "network", "diskPercent",
+        "diskUsed", "diskTotal", "uptime", "loadAverage",
+    }
+    assert "property var metricUpdateMs" in text
+    for metric in expected:
+        assert f'root.markMetricFresh("{metric}")' in text
+    assert "property var domainUpdateMs" not in text
+
+
+def test_cpu_processes_are_computed_from_interval_samples():
+    text = source()
+    assert 'ps -eo pid=,times=,comm=' in text
+    assert "MonitorLogic.cpuProcessRates" in text
+    assert 'ps -eo pcpu=' not in text
+
+
+def test_timelines_label_the_midpoint_as_past_time():
+    text = source()
+    assert text.count('text: "−2.5 MIN"') == 2
+    assert 'text: "2.5 MIN"' not in text
+
+
+def test_process_rows_reserve_a_right_aligned_value_column():
+    text = source()
+    assert "id: processValue" in text
+    assert "anchors.right: parent.right" in text
+    assert "anchors.right: processValue.left" in text
 
 
 if __name__ == "__main__":

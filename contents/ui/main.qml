@@ -65,6 +65,8 @@ PlasmoidItem {
     property string gpuTopProcess: "NO ACTIVE COMPUTE WORKLOAD"
     // Two largest CPU, RAM, and GPU consumers, sampled every five seconds.
     property var topCpuProcesses: []
+    property var previousCpuSamples: ({})
+    property double previousCpuSampleMs: 0
     property var topRamProcesses: []
     property var topGpuProcesses: []
     property var previousCpuSamples: ({})
@@ -201,7 +203,7 @@ PlasmoidItem {
     }
     function updateDataStatus(nowMs) {
         var stale = MonitorLogic.staleDomains(nowMs, root.metricUpdateMs, root.staleAfterMs)
-        if (stale.length === 6) root.dataStatus = "WAITING"
+        if (stale.length === 6) root.dataStatus = "WAITING FOR DATA"
         else if (stale.length > 0) root.dataStatus = "STALE · " + stale.join(" · ")
         else root.dataStatus = ""
     }
@@ -549,23 +551,25 @@ PlasmoidItem {
                                     model: parent.processes
                                     delegate: Item {
                                         width: parent.width
-                                        height: 18
+                                        height: 17
+                                        property var process: modelData
+                                        property string displayValue: root.compactProcessValue(processDetails.metricLabel, processDetails.metricLabel === "CPU" ? process.cpu + "%" : (processDetails.metricLabel === "RAM" ? process.ram : process.gpu))
                                         Text {
-                                            id: processName
                                             anchors.left: parent.left
                                             anchors.right: processValue.left
                                             anchors.rightMargin: 8
-                                            text: root.shortProcessName(modelData.name)
+                                            text: root.shortProcessName(parent.process.name)
                                             color: index === 0 ? root.ink : root.muted
-                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 12
+                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 13
                                             elide: Text.ElideRight
                                         }
                                         Text {
                                             id: processValue
                                             anchors.right: parent.right
-                                            text: root.compactProcessValue(processDetails.metricLabel, processDetails.metricLabel === "CPU" ? modelData.cpu + "%" : (processDetails.metricLabel === "RAM" ? modelData.ram : modelData.gpu))
+                                            text: parent.displayValue
                                             color: index === 0 ? root.ink : root.muted
-                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 12
+                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 13
+                                            font.bold: true
                                             horizontalAlignment: Text.AlignRight
                                         }
                                     }
@@ -797,6 +801,39 @@ PlasmoidItem {
             }
         }
 
+        // Health banner is a sibling of the managed content layout. It can
+        // safely float over the charts without undefined layout positioning.
+        Rectangle {
+            id: healthBanner
+            anchors.left: frame.left
+            anchors.right: frame.right
+            anchors.leftMargin: 34
+            anchors.rightMargin: 34
+            anchors.top: frame.top
+            anchors.topMargin: 76
+            visible: root.currentHealth.level > 0
+            height: 56
+            radius: 12
+            color: Qt.rgba(0.035, 0.22, 0.34, 0.9)
+            border.width: 1
+            border.color: root.currentHealth.color
+            z: 10
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                spacing: 12
+                Text { text: root.currentHealth.label; color: root.currentHealth.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                Rectangle { Layout.preferredWidth: 5; Layout.preferredHeight: 5; radius: 3; color: root.currentHealth.color }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 3
+                    Text { text: root.currentHealth.detail; color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Text { visible: root.currentHealth.cause.length > 0; text: "CAUSE · " + root.currentHealth.cause; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight; Layout.fillWidth: true }
+                }
+            }
+        }
+
         Timer {
             interval: 1000
             running: true
@@ -907,6 +944,7 @@ PlasmoidItem {
         }
     }
 
+
     // Current top two CPU consumers. Cumulative process CPU seconds are
     // converted to percentages over the actual interval between snapshots.
     PlasmaSupport.DataSource {
@@ -978,6 +1016,32 @@ PlasmoidItem {
             root.gpuVramUsedMiB = memory.usedMiB
             root.gpuVramTotalMiB = memory.totalMiB
             root.markMetricFresh("gpuVram")
+        }
+    }
+
+    // Unload only models currently served by local Ollama; arbitrary GPU processes are never terminated.
+    PlasmaSupport.DataSource {
+        id: releaseModelsSource
+        engine: "executable"
+        connectedSources: []
+        property string command: "sh -c 'for dep in curl jq ollama; do command -v \"$dep\" >/dev/null 2>&1 || { echo \"MISSING DEPENDENCY: $dep\"; exit 10; }; done; response=$(curl --max-time 5 -fsS http://127.0.0.1:11434/api/ps) || { echo \"OLLAMA UNREACHABLE\"; exit 11; }; printf \"%s\" \"$response\" | jq -e \".models | arrays\" >/dev/null 2>&1 || { echo \"OLLAMA INVALID RESPONSE\"; exit 12; }; models=$(printf \"%s\" \"$response\" | jq -r \".models[]?.name\"); if [ -z \"$models\" ]; then echo \"NO OLLAMA MODEL LOADED\"; exit 0; fi; failed=0; unloaded=0; printf \"%s\\n\" \"$models\" | while IFS= read -r model; do if OLLAMA_HOST=http://127.0.0.1:11434 ollama stop \"$model\" >/dev/null 2>&1; then echo \"OK\"; else echo \"FAIL\"; fi; done > /tmp/skybox-ollama-unload.$$; unloaded=$(grep -c \"^OK$\" /tmp/skybox-ollama-unload.$$); failed=$(grep -c \"^FAIL$\" /tmp/skybox-ollama-unload.$$); rm -f /tmp/skybox-ollama-unload.$$; if [ $failed -ne 0 ]; then echo \"UNLOAD PARTIAL: $unloaded\"; exit 13; fi; echo \"UNLOADED ALL: $unloaded\"'"
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            var output = buffer.trim()
+            var exitCode = data["exit code"]
+            buffer = ""
+            disconnectSource(source)
+            root.vramReleaseInProgress = false
+            if (exitCode === 0 && output.indexOf("UNLOADED ALL:") === 0) root.vramReleaseStatus = "OLLAMA UNLOADED"
+            else if (exitCode === 0 && output === "NO OLLAMA MODEL LOADED") root.vramReleaseStatus = "NO OLLAMA MODEL"
+            else if (output.indexOf("MISSING DEPENDENCY:") === 0) root.vramReleaseStatus = "MISSING DEPENDENCY"
+            else if (output === "OLLAMA UNREACHABLE") root.vramReleaseStatus = "OLLAMA UNREACHABLE"
+            else if (output.indexOf("UNLOAD PARTIAL:") === 0) root.vramReleaseStatus = "UNLOAD PARTIAL"
+            else root.vramReleaseStatus = "UNLOAD FAILED"
+            releaseRefreshTimer.start()
+            releaseResetTimer.start()
         }
     }
 

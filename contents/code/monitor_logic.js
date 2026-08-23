@@ -9,23 +9,26 @@ function historyX(index, length, width, maxSamples) {
 
 function staleDomains(nowMs, updates, staleAfterMs) {
     var domains = [
-        ["CPU", ["cpuUsage", "cpuTemperature"]],
-        ["GPU", ["gpuUsage", "gpuTemperature", "gpuVram"]],
-        ["MEMORY", ["memoryPercent", "memoryUsed", "memoryTotal"]],
-        ["NETWORK", ["network"]],
-        ["DISK", ["diskPercent", "diskUsed", "diskTotal"]],
-        ["SYSTEM", ["uptime", "loadAverage"]]
+        ["cpu", "CPU", ["cpuUsage", "cpuTemperature"]],
+        ["gpu", "GPU", ["gpuUsage", "gpuTemperature", "gpuVram"]],
+        ["memory", "MEMORY", ["memoryPercent", "memoryUsed", "memoryTotal"]],
+        ["network", "NETWORK", ["network"]],
+        ["disk", "DISK", ["diskPercent", "diskUsed", "diskTotal"]],
+        ["system", "SYSTEM", ["uptime", "loadAverage"]]
     ]
     var stale = []
     for (var i = 0; i < domains.length; i++) {
-        var metrics = domains[i][1]
+        var metrics = domains[i][2]
+        var domainStale = false
         for (var j = 0; j < metrics.length; j++) {
-            var stamp = Number(updates[metrics[j]] || 0)
+            var metric = metrics[j]
+            var stamp = Number(updates[metric] || 0)
             if (stamp <= 0 || nowMs - stamp > staleAfterMs) {
-                stale.push(domains[i][0])
+                domainStale = true
                 break
             }
         }
+        if (domainStale) stale.push(domains[i][1])
     }
     return stale
 }
