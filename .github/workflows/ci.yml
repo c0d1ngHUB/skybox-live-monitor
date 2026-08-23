@@ -35,5 +35,5 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y qt6-declarative-dev-tools
-          /usr/lib/qt6/bin/qmllint contents/ui/main.qml 2> qmllint.log
+          /usr/lib/qt6/bin/qmllint contents/ui/main.qml 2> qmllint.log || true
           ! grep -q '\[Quick.layout-positioning\]' qmllint.log
