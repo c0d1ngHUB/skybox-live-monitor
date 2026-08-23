@@ -688,12 +688,13 @@ PlasmoidItem {
                             Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtUptime(root.uptimeSeconds); color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
                         Row {
+                            id: systemMetaRow
                             width: parent.width
                             height: 20
                             spacing: 14
                             Text { text: "LOAD " + root.loadAverage.toFixed(2); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
                             Text { text: "PROC " + root.processCount; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
-                            Text { text: "MAX THINK 24H " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.violet; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true }
+                            Text { text: "MAX THINK: " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true }
                         }
                     }
                 }
