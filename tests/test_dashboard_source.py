@@ -21,10 +21,13 @@ def test_attention_banner_is_completely_removed_but_card_thresholds_remain():
     assert 'healthLevel: root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0)' in text
 
 
-def test_freshness_is_tracked_without_the_removed_header_and_footer_labels():
+def test_freshness_is_tracked_per_metric_and_compact_status_is_visible():
     text = source()
     assert 'property string lastRefresh' in text
-    assert '"LIVE SYSTEM · " + root.dataStatus' not in text
+    assert 'property var metricUpdateMs' in text
+    assert 'id: telemetryStatus' in text
+    assert 'text: root.dataStatus' in text
+    assert 'visible: root.dataStatus.length > 0' in text
     assert '"DEBIAN 13 · PLASMA 6 · REFRESH " + root.lastRefresh' not in text
     assert 'function refreshClock()' in text
 
@@ -44,7 +47,8 @@ def test_cpu_card_shows_top_two_processes_in_its_detail_area():
     text = source()
     assert 'property var topCpuProcesses' in text
     assert 'id: topCpuSource' in text
-    assert 'ps -eo pcpu=,comm= --sort=-pcpu | head -2' in text
+    assert 'cpu_process_snapshot.py' in text
+    assert 'MonitorLogic.cpuProcessRates' in text
     assert 'property string heading: "TOP PROCESSES"' in text
     assert 'property var processes: metricLabel === "CPU" ? root.topCpuProcesses' in text
     assert 'processes.length < 2' in text
@@ -79,9 +83,15 @@ def test_gpu_card_shows_top_two_processes_but_counts_all_workloads():
     assert 'onTriggered: topGpuSource.connectSource(topGpuSource.command)' in text
 
 
-def test_charts_are_five_minute_and_visually_readable():
+def test_charts_are_two_minute_and_visually_readable():
     text = source()
-    assert 'property int historySeconds: 300' in text
+    assert 'property int historySeconds: 120' in text
+    assert text.count('text: "−2 MIN"') == 2
+    assert text.count('text: "−1 MIN"') == 2
+    assert text.count('var midTick = plotLeft + chartWidth / 2') == 3
+    assert 'var tick1 =' not in text
+    assert '−5 MIN' not in text
+    assert '2.5 MIN' not in text
     assert 'LAST 5 MIN · FIXED SCALE · 0–100%' not in text
     assert 'LAST 5 MIN · AUTO SCALE' not in text
     assert 'ctx.fillStyle = fillColor' in text
@@ -100,18 +110,13 @@ def test_compact_cards_preserve_legible_operational_detail():
     assert '"FREE " + root.fmtDisk(root.diskFreeBytes()) + " · USED "' in text
 
 
-def test_removed_header_no_longer_exposes_the_vram_release_button():
+def test_removed_ollama_feature_leaves_no_executable_or_state_code():
     text = source()
     assert 'id: releaseVramButton' not in text
-    assert 'id: releaseModelsSource' in text
-    assert 'ollama stop' in text
-    assert 'CONFIRM UNLOAD' in text
-    assert 'UNLOAD OLLAMA' in text
-    assert 'docker stop aeon-vllm honcho-api-1 honcho-deriver-1' not in text
-    assert 'api/ps' in text
-    assert 'arbitrary GPU processes are never terminated' in text
-    assert 'root.vramReleaseInProgress = true' in text
-    assert 'id: releaseRefreshTimer' in text
+    for obsolete in ('releaseModelsSource', 'requestOllamaUnload', 'ollama stop',
+                     'CONFIRM UNLOAD', 'UNLOAD OLLAMA', 'vramRelease',
+                     'releaseRefreshTimer', 'releaseConfirmTimer', 'releaseResetTimer'):
+        assert obsolete not in text
 
 
 def test_metric_cards_reserve_a_real_kpi_column_without_overlap():
@@ -125,6 +130,9 @@ def test_metric_cards_reserve_a_real_kpi_column_without_overlap():
     assert 'function fmtCompactCapacity' in text
     assert 'detail:root.fmtCompactCapacity(root.ramUsedBytes)' in text
     assert 'root.fmtCompactVram(root.gpuVramUsedMiB)' in text
+    assert 'id: processName' in text
+    assert 'id: processValue' in text
+    assert 'anchors.right: parent.right' in text
 
 
 def test_compute_chart_has_dedicated_graph_and_timeline_space():
@@ -231,22 +239,21 @@ def test_freshness_tracks_each_data_domain_not_the_chart_timer():
     text = source()
     timer_block = text[text.index('interval: 1000'):text.index('    // Current top', text.index('interval: 1000'))]
     assert 'root.lastRefresh = root.refreshClock()' not in timer_block
-    assert 'function markDataFresh(domain)' in text
-    for domain in ('cpu', 'gpu', 'memory', 'network', 'disk', 'system'):
-        assert f'root.markDataFresh("{domain}")' in text
+    assert 'function markMetricFresh(metric)' in text
+    for metric in ('cpuUsage', 'cpuTemperature', 'gpuUsage', 'gpuTemperature',
+                   'gpuVram', 'memoryPercent', 'memoryUsed', 'memoryTotal',
+                   'network', 'diskPercent', 'diskUsed', 'diskTotal',
+                   'uptime', 'loadAverage'):
+        assert f'root.markMetricFresh("{metric}")' in text
     assert 'MonitorLogic.staleDomains' in text
-    assert 'property string dataStatus: "WAITING FOR DATA"' in text
+    assert 'property string dataStatus: "WAITING"' in text
     assert 'STALE · ' in text
 
 
-def test_ollama_unload_distinguishes_dependencies_connection_and_partial_failure():
-    text = source()
-    assert 'for dep in curl jq ollama' in text
-    assert 'command -v \\\"$dep\\\"' in text
-    assert 'OLLAMA UNREACHABLE' in text
-    assert 'UNLOAD PARTIAL' in text
-    assert 'MISSING DEPENDENCY' in text
-    assert 'data["exit code"]' in text
+def test_readme_no_longer_advertises_removed_ollama_feature():
+    readme = (SOURCE.parents[2] / 'README.md').read_text()
+    assert 'Ollama' not in readme
+    assert 'ollama' not in readme
 
 
 def test_gpu_chart_is_solid_and_drawn_after_cpu_in_the_foreground():
@@ -261,14 +268,14 @@ def test_gpu_chart_is_solid_and_drawn_after_cpu_in_the_foreground():
     assert 'criticalY' not in text
 
 
-def test_freshness_clock_only_advances_when_all_domains_fresh():
+def test_freshness_clock_only_advances_when_all_metrics_fresh():
     """P0#1: lastRefresh must not update when any domain is stale."""
     text = source()
     assert 'var stale = MonitorLogic.staleDomains(now, updates, root.staleAfterMs)' in text
     assert 'if (stale.length === 0) root.lastRefresh = root.refreshClock()' in text
     # The old unconditional update inside markDataFresh must be gone.
     # Extract just the markDataFresh function body to check.
-    fn_start = text.index('function markDataFresh(domain)')
+    fn_start = text.index('function markMetricFresh(metric)')
     fn_end = text.index('function updateDataStatus', fn_start)
     fn_body = text[fn_start:fn_end]
     assert fn_body.count('root.lastRefresh = root.refreshClock()') == 1

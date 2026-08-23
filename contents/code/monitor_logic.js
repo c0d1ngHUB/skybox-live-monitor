@@ -9,20 +9,44 @@ function historyX(index, length, width, maxSamples) {
 
 function staleDomains(nowMs, updates, staleAfterMs) {
     var domains = [
-        ["cpu", "CPU"],
-        ["gpu", "GPU"],
-        ["memory", "MEMORY"],
-        ["network", "NETWORK"],
-        ["disk", "DISK"],
-        ["system", "SYSTEM"]
+        ["CPU", ["cpuUsage", "cpuTemperature"]],
+        ["GPU", ["gpuUsage", "gpuTemperature", "gpuVram"]],
+        ["MEMORY", ["memoryPercent", "memoryUsed", "memoryTotal"]],
+        ["NETWORK", ["network"]],
+        ["DISK", ["diskPercent", "diskUsed", "diskTotal"]],
+        ["SYSTEM", ["uptime", "loadAverage"]]
     ]
     var stale = []
     for (var i = 0; i < domains.length; i++) {
-        var key = domains[i][0]
-        var stamp = Number(updates[key] || 0)
-        if (stamp <= 0 || nowMs - stamp > staleAfterMs) stale.push(domains[i][1])
+        var metrics = domains[i][1]
+        for (var j = 0; j < metrics.length; j++) {
+            var stamp = Number(updates[metrics[j]] || 0)
+            if (stamp <= 0 || nowMs - stamp > staleAfterMs) {
+                stale.push(domains[i][0])
+                break
+            }
+        }
     }
     return stale
+}
+
+function cpuProcessRates(previousByPid, samples, elapsedMs, limit) {
+    if (elapsedMs <= 0) return []
+    var rates = []
+    for (var i = 0; i < samples.length; i++) {
+        var sample = samples[i]
+        var previous = previousByPid[String(sample.pid)]
+        if (!previous) continue
+        var deltaSeconds = Number(sample.cpuSeconds) - Number(previous.cpuSeconds)
+        if (!isFinite(deltaSeconds) || deltaSeconds < 0) continue
+        rates.push({
+            pid: sample.pid,
+            name: sample.name,
+            cpu: (deltaSeconds * 100000 / elapsedMs).toFixed(1)
+        })
+    }
+    rates.sort(function(a, b) { return parseFloat(b.cpu) - parseFloat(a.cpu) })
+    return rates.slice(0, Math.max(0, limit || 0))
 }
 
 function parseNvidiaMemory(output, gpuIndex) {
@@ -41,6 +65,7 @@ if (typeof module !== "undefined") {
     module.exports = {
         historyX: historyX,
         staleDomains: staleDomains,
-        parseNvidiaMemory: parseNvidiaMemory
+        parseNvidiaMemory: parseNvidiaMemory,
+        cpuProcessRates: cpuProcessRates
     }
 }

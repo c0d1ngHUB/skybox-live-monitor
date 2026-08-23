@@ -15,6 +15,13 @@ class HermesThinkTimeTests(unittest.TestCase):
     def make_db(self, path: Path) -> sqlite3.Connection:
         connection = sqlite3.connect(path)
         connection.execute(
+            """CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                parent_session_id TEXT
+            )"""
+        )
+        connection.execute(
             """CREATE TABLE messages (
                 id INTEGER PRIMARY KEY,
                 session_id TEXT NOT NULL,
@@ -39,6 +46,10 @@ class HermesThinkTimeTests(unittest.TestCase):
             db = Path(tmp) / "state.db"
             connection = self.make_db(db)
             connection.executemany(
+                "INSERT INTO sessions VALUES (?, ?, ?)",
+                [("a", "telegram", None), ("b", "telegram", None)],
+            )
+            connection.executemany(
                 "INSERT INTO messages VALUES (?, ?, ?, ?, ?)",
                 [
                     (1, "a", "user", "quick", 199000),
@@ -59,6 +70,7 @@ class HermesThinkTimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "state.db"
             connection = self.make_db(db)
+            connection.execute("INSERT INTO sessions VALUES ('a', 'telegram', NULL)")
             connection.executemany(
                 "INSERT INTO messages VALUES (?, ?, ?, ?, ?)",
                 [
@@ -71,6 +83,50 @@ class HermesThinkTimeTests(unittest.TestCase):
             connection.commit()
             connection.close()
             self.assertEqual(self.run_metric(db), "0")
+
+    def test_finishes_turn_at_first_nonempty_assistant_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "state.db"
+            connection = self.make_db(db)
+            connection.execute("INSERT INTO sessions VALUES ('a', 'telegram', NULL)")
+            connection.executemany(
+                "INSERT INTO messages VALUES (?, ?, ?, ?, ?)",
+                [
+                    (1, "a", "user", "question", 199000),
+                    (2, "a", "assistant", "", 199010),
+                    (3, "a", "tool", "result", 199020),
+                    (4, "a", "assistant", "final", 199030),
+                    (5, "a", "assistant", "later housekeeping", 199400),
+                ],
+            )
+            connection.commit()
+            connection.close()
+            self.assertEqual(self.run_metric(db), "30")
+
+    def test_pairs_turn_across_parent_lineage_and_excludes_subagents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "state.db"
+            connection = self.make_db(db)
+            connection.executemany(
+                "INSERT INTO sessions VALUES (?, ?, ?)",
+                [
+                    ("root", "telegram", None),
+                    ("child", "telegram", "root"),
+                    ("delegate", "subagent", "root"),
+                ],
+            )
+            connection.executemany(
+                "INSERT INTO messages VALUES (?, ?, ?, ?, ?)",
+                [
+                    (1, "root", "user", "question", 199000),
+                    (2, "child", "assistant", "final", 199045),
+                    (3, "delegate", "user", "task", 199100),
+                    (4, "delegate", "assistant", "result", 199900),
+                ],
+            )
+            connection.commit()
+            connection.close()
+            self.assertEqual(self.run_metric(db), "45")
 
 
 if __name__ == "__main__":

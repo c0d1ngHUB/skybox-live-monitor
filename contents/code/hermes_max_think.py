@@ -19,24 +19,36 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
     connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
     try:
         rows = connection.execute(
-            """SELECT session_id, role, content, timestamp
+            """WITH RECURSIVE lineage(session_id, root_id, source) AS (
+                   SELECT id, id, source
+                   FROM sessions
+                   WHERE parent_session_id IS NULL
+                   UNION ALL
+                   SELECT child.id, lineage.root_id, child.source
+                   FROM sessions AS child
+                   JOIN lineage ON child.parent_session_id = lineage.session_id
+               )
+               SELECT lineage.root_id, messages.role, messages.content,
+                      messages.timestamp, messages.id
                FROM messages
-               WHERE timestamp >= ? AND timestamp <= ?
-               ORDER BY session_id, timestamp, id""",
+               JOIN lineage ON lineage.session_id = messages.session_id
+               WHERE messages.timestamp >= ? AND messages.timestamp <= ?
+                 AND lineage.source != 'subagent'
+               ORDER BY messages.timestamp, messages.id""",
             (cutoff, now),
         )
 
         active_turn = {}
         longest = 0.0
-        for session_id, role, content, timestamp in rows:
+        for lineage_id, role, content, timestamp, _message_id in rows:
             if role == "user":
-                active_turn[session_id] = timestamp
+                active_turn[lineage_id] = timestamp
                 continue
-            if role != "assistant" or session_id not in active_turn:
+            if role != "assistant" or lineage_id not in active_turn:
                 continue
             if not content or not content.strip():
                 continue
-            duration = timestamp - active_turn[session_id]
+            duration = timestamp - active_turn.pop(lineage_id)
             if duration >= 0:
                 longest = max(longest, duration)
         return max(0, round(longest))

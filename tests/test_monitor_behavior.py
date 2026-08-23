@@ -14,6 +14,7 @@ ROOT = Path(__file__).parents[1]
 QML = ROOT / "contents/ui/main.qml"
 LOGIC = ROOT / "contents/code/monitor_logic.js"
 NETWORK_COUNTERS = ROOT / "contents/code/network_counters.sh"
+CPU_SNAPSHOT = ROOT / "contents/code/cpu_process_snapshot.py"
 README = ROOT / "README.md"
 
 
@@ -50,10 +51,37 @@ class MonitorBehaviorTests(unittest.TestCase):
     def test_freshness_reports_each_stale_domain(self):
         script = (
             f"const m=require({json.dumps(str(LOGIC))});"
-            "console.log(JSON.stringify(m.staleDomains(20000,{cpu:19000,gpu:0,memory:18000,network:10000,disk:19500,system:19000},6000)));"
+            "console.log(JSON.stringify(m.staleDomains(20000,{cpuUsage:19000,cpuTemperature:19000,gpuUsage:19000,gpuTemperature:0,gpuVram:19000,memoryPercent:18000,memoryUsed:18000,memoryTotal:18000,network:10000,diskPercent:19500,diskUsed:19500,diskTotal:19500,uptime:19000,loadAverage:19000},6000)));"
         )
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout), ["GPU", "NETWORK"])
+
+    def test_cpu_process_rates_use_per_pid_cpu_time_deltas(self):
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            "const previous={'10':{cpuSeconds:4},'20':{cpuSeconds:8}};"
+            "const current=[{pid:10,cpuSeconds:6,name:'fast'},{pid:20,cpuSeconds:8.5,name:'slow'},{pid:30,cpuSeconds:9,name:'new'}];"
+            "console.log(JSON.stringify(m.cpuProcessRates(previous,current,5000,2)));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), [
+            {"pid": 10, "name": "fast", "cpu": "40.0"},
+            {"pid": 20, "name": "slow", "cpu": "10.0"},
+        ])
+
+    def test_cpu_snapshot_reads_precise_proc_jiffies_and_process_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = Path(tmp)
+            (proc / "42").mkdir()
+            # Fields 14 and 15 are utime/stime; the comm field may contain spaces.
+            (proc / "42/stat").write_text(
+                "42 (render worker) S 1 2 3 4 5 6 7 8 9 10 125 25 0 0 0 0 0 0 0 0\n"
+            )
+            result = subprocess.run(
+                ["python3", str(CPU_SNAPSHOT), "--proc-root", str(proc), "--clock-ticks", "100"],
+                text=True, capture_output=True, check=True,
+            )
+            self.assertEqual(result.stdout.strip(), "42 1.500000 render worker")
 
     def test_nvidia_memory_parser_selects_first_gpu_from_multi_gpu_output(self):
         output = "0, 100, 1000\n1, 200, 2000"
@@ -107,25 +135,9 @@ class MonitorBehaviorTests(unittest.TestCase):
         text = QML.read_text()
         self.assertIn("id: networkCountersSource", text)
         self.assertIn("network_counters.sh", text)
-        self.assertIn('root.markDataFresh("network")', text)
+        self.assertIn('root.markMetricFresh("network")', text)
         self.assertNotIn('sensorId: "network/" + root.netIf', text)
 
-    def test_ollama_stop_is_forced_to_the_same_local_endpoint_as_discovery(self):
-        command = command_for("releaseModelsSource")
-        with tempfile.TemporaryDirectory() as tmp:
-            bindir = Path(tmp)
-            log = bindir / "ollama.log"
-            executable(bindir / "curl", "printf '%s' '{\"models\":[{\"name\":\"test-model\"}]}'\n")
-            executable(
-                bindir / "jq",
-                "case \"$*\" in *arrays*) exit 0;; *) printf '%s\\n' test-model;; esac\n",
-            )
-            executable(bindir / "ollama", f"printf '%s' \"$OLLAMA_HOST\" > {log}\nexit 0\n")
-            env = os.environ.copy()
-            env["PATH"] = f"{bindir}:/usr/bin:/bin"
-            env["OLLAMA_HOST"] = "http://remote.invalid:11434"
-            subprocess.run(command, shell=True, text=True, capture_output=True, env=env, check=True)
-            self.assertEqual(log.read_text(), "http://127.0.0.1:11434")
 
     def test_readme_uses_installable_repository_root(self):
         text = README.read_text()
