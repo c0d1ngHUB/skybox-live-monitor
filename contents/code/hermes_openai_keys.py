@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Print active and total OpenAI OAuth credential counts from ``hermes auth list``.
+
+Only aggregate counts are emitted; credential labels and identifiers are never
+forwarded to the Plasma widget.
+"""
+
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+
+
+UNAVAILABLE_MARKERS = ("rate-limited", "exhausted", "dead", "disabled", "invalid")
+
+
+def count_openai_credentials(output: str) -> tuple[int, int]:
+    """Return ``(active, total)`` for OpenAI Codex OAuth credentials."""
+    in_provider = False
+    active = 0
+    total = 0
+
+    for raw_line in output.splitlines():
+        line = raw_line.rstrip()
+        if re.match(r"^openai-codex \(\d+ credentials?\):$", line):
+            in_provider = True
+            continue
+        if in_provider and line and not line[0].isspace():
+            break
+        if not in_provider or not re.match(r"^\s+#\d+\s+", line):
+            continue
+        if not re.search(r"\soauth\s", f" {line.strip()} "):
+            continue
+
+        total += 1
+        lowered = line.lower()
+        if not any(marker in lowered for marker in UNAVAILABLE_MARKERS):
+            active += 1
+
+    return active, total
+
+
+def hermes_executable() -> str | None:
+    found = shutil.which("hermes")
+    if found:
+        return found
+    fallback = Path.home() / ".local/bin/hermes"
+    return str(fallback) if fallback.is_file() else None
+
+
+def main() -> int:
+    executable = hermes_executable()
+    if not executable:
+        return 1
+    try:
+        result = subprocess.run(
+            [executable, "auth", "list"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 1
+
+    active, total = count_openai_credentials(result.stdout)
+    print(f"{active} {total}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

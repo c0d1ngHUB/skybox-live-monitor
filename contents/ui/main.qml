@@ -30,6 +30,8 @@ PlasmoidItem {
     property real loadAverage: 0
     property int processCount: 0
     property real hermesMaxThinkSeconds: 0
+    property int openAiActiveKeys: -1
+    property int openAiTotalKeys: -1
     property real diskUsedPercent: 0
     property real diskUsedBytes: 0
     property real diskTotalBytes: 0
@@ -642,6 +644,14 @@ PlasmoidItem {
                             Text { text: "PROC " + root.processCount; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
                             Text { text: "MAX THINK: " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true }
                         }
+                        Text {
+                            visible: root.openAiActiveKeys >= 0 && root.openAiTotalKeys >= 0
+                            text: "KEYS ACTIVE: " + root.openAiActiveKeys + "/" + root.openAiTotalKeys
+                            color: root.cyan
+                            font.family: "DejaVu Sans Mono"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
                     }
                 }
             }
@@ -697,6 +707,27 @@ PlasmoidItem {
             buffer = ""
             disconnectSource(source)
             if (!isNaN(seconds)) root.hermesMaxThinkSeconds = Math.max(0, seconds)
+        }
+    }
+
+    // Exposes aggregate OpenAI OAuth availability only; no credential details
+    // are passed to the UI.
+    PlasmaSupport.DataSource {
+        id: openAiKeysSource
+        engine: "executable"
+        connectedSources: []
+        property string scriptPath: Qt.resolvedUrl("../code/hermes_openai_keys.py").toString().replace("file://", "")
+        property string command: "python3 " + scriptPath
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            var match = buffer.trim().match(/^(\d+)\s+(\d+)$/)
+            buffer = ""
+            disconnectSource(source)
+            if (!match) return
+            root.openAiActiveKeys = parseInt(match[1])
+            root.openAiTotalKeys = parseInt(match[2])
         }
     }
 
@@ -895,6 +926,7 @@ PlasmoidItem {
         topRamSource.connectSource(topRamSource.command)
         processCountSource.connectSource(processCountSource.command)
         hermesThinkSource.connectSource(hermesThinkSource.command)
+        openAiKeysSource.connectSource(openAiKeysSource.command)
         netDetectSource.connectSource(netDetectSource.command)
         root.currentTime = root.refreshClock()
         root.lastRefresh = root.refreshClock()
@@ -940,6 +972,13 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: hermesThinkSource.connectSource(hermesThinkSource.command)
+    }
+
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
     }
 
     Timer {

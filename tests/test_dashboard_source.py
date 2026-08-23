@@ -165,19 +165,25 @@ def test_footer_uses_explicit_disk_and_uptime_labels():
     assert 'text: "SYSTEM"' not in text
 
 
-def test_uptime_card_shows_load_proc_and_max_think_on_one_muted_row():
+def test_uptime_card_shows_load_proc_max_think_and_openai_keys():
     text = source()
     assert 'property int processCount: 0' in text
     assert 'property real hermesMaxThinkSeconds: 0' in text
+    assert 'property int openAiActiveKeys: -1' in text
+    assert 'property int openAiTotalKeys: -1' in text
     assert 'function fmtDuration(seconds)' in text
     assert 'id: processCountSource' in text
     assert 'ps -e --no-headers | wc -l' in text
     assert 'id: hermesThinkSource' in text
     assert 'hermes_max_think.py' in text
+    assert 'id: openAiKeysSource' in text
+    assert 'hermes_openai_keys.py' in text
     assert 'id: systemMetaRow' in text
     assert 'text: "LOAD " + root.loadAverage.toFixed(2); color: root.muted' in text
     assert 'text: "PROC " + root.processCount; color: root.muted' in text
     assert 'text: "MAX THINK: " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.muted' in text
+    assert 'text: "KEYS ACTIVE: " + root.openAiActiveKeys + "/" + root.openAiTotalKeys' in text
+    assert 'onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)' in text
     assert 'text: "MAX THINK 24H "' not in text
 
 
