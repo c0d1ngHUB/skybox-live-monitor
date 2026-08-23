@@ -219,6 +219,15 @@ def test_header_shows_a_live_clock_centered_at_skybox_font_size():
     assert 'root.currentTime = root.refreshClock()' in text
 
 
+def test_header_clock_uses_hours_and_minutes_without_seconds():
+    text = source()
+    clock = text[text.index('function refreshClock()'):text.index('function markMetricFresh', text.index('function refreshClock()'))]
+    assert 'property string lastRefresh: "--:--"' in text
+    assert 'now.getHours()' in clock
+    assert 'now.getMinutes()' in clock
+    assert 'now.getSeconds()' not in clock
+
+
 def test_removed_unload_control_has_no_visual_or_accessible_action():
     text = source()
     assert 'Accessible.name: "Unload Ollama models from GPU memory"' not in text

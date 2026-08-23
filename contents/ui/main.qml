@@ -35,7 +35,7 @@ PlasmoidItem {
     property real diskUsedPercent: 0
     property real diskUsedBytes: 0
     property real diskTotalBytes: 0
-    property string lastRefresh: "--:--:--"
+    property string lastRefresh: "--:--"
     property string currentTime: refreshClock()
     property string dataStatus: "WAITING"
     property int staleAfterMs: 15000
@@ -162,7 +162,7 @@ PlasmoidItem {
     }
     function refreshClock() {
         var now = new Date()
-        return ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2) + ":" + ("0" + now.getSeconds()).slice(-2)
+        return ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2)
     }
     function markMetricFresh(metric) {
         var now = Date.now()
