@@ -9,14 +9,16 @@ def source():
     return SOURCE.read_text()
 
 
-def test_operational_status_logic_keeps_thresholds_without_header_labels():
+def test_attention_banner_is_completely_removed_but_card_thresholds_remain():
     text = source()
     assert 'id: healthChip' not in text
+    assert 'id: healthBanner' not in text
+    assert 'property var currentHealth' not in text
+    assert 'function healthState()' not in text
+    assert '"SYSTEM ATTENTION"' not in text
     assert 'id: releaseVramButton' not in text
-    assert '"0 ALERTS · VRAM "' in text
-    assert '"SYSTEM ATTENTION"' in text
-    assert '"SYSTEM ALERT"' in text
     assert 'root.vramPercent() >= 95' in text
+    assert 'healthLevel: root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0)' in text
 
 
 def test_freshness_is_tracked_without_the_removed_header_and_footer_labels():
@@ -31,8 +33,6 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     text = source()
     assert 'function shortProcessName(name)' in text
     assert 'function compactProcessValue(metricLabel, value)' in text
-    assert 'function gpuCauseSummary()' in text
-    assert 'root.gpuCauseSummary(), root.critical' in text
     assert 'detail:"VRAM " + Math.round(root.vramPercent())' in text
     assert 'topGpuSource' in text
     assert '--query-compute-apps=process_name,used_memory' in text
@@ -212,13 +212,13 @@ def test_removed_unload_control_has_no_visual_or_accessible_action():
     assert 'Keys.onReturnPressed:' not in text
 
 
-def test_health_state_always_exposes_a_safe_cause_string():
+def test_removed_attention_banner_leaves_no_health_state_or_cause_label():
     text = source()
-    assert 'property var currentHealth: root.healthState()' in text
-    assert 'visible: root.currentHealth.cause.length > 0' in text
-    assert 'function makeHealthState(level, label, detail, cause, color)' in text
-    assert 'cause: cause || ""' in text
-    assert 'root.healthState().cause.length' not in text
+    assert 'property var currentHealth' not in text
+    assert 'function makeHealthState' not in text
+    assert 'function healthState()' not in text
+    assert 'root.currentHealth' not in text
+    assert 'text: "CAUSE · "' not in text
 
 
 def test_freshness_tracks_each_data_domain_not_the_chart_timer():
@@ -281,32 +281,11 @@ def test_charts_show_filling_indicator_until_history_is_full():
     assert 'visible: !root.historyFilling()' in text
 
 
-def test_health_banner_is_an_overlay_not_a_layout_element():
-    """P1#4: banner floats above content with z:10, no Layout properties on the Rectangle."""
+def test_health_banner_has_no_remaining_visual_element():
     text = source()
-    banner_start = text.index('id: healthBanner')
-    # Find the opening brace of the Rectangle containing healthBanner
-    rect_start = text.rindex('Rectangle {', 0, banner_start)
-    # Find the matching closing brace
-    depth = 0
-    i = rect_start
-    while i < len(text):
-        if text[i] == '{':
-            depth += 1
-        elif text[i] == '}':
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    banner = text[rect_start:i+1]
-    assert 'z: 10' in banner
-    assert 'anchors.top: parent.top' in banner
-    # The Rectangle itself must not have Layout properties (the RowLayout inside may).
-    # Check the first 4 lines after the Rectangle opening — that's where Rectangle
-    # properties live before nested children begin.
-    header = banner[:banner.index('RowLayout')]
-    assert 'Layout.fillWidth' not in header
-    assert 'Layout.preferredHeight' not in header
+    assert 'id: healthBanner' not in text
+    assert 'SYSTEM ATTENTION' not in text
+    assert 'GPU CRITICAL' not in text
 
 
 if __name__ == "__main__":

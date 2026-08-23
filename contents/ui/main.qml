@@ -55,7 +55,6 @@ PlasmoidItem {
     property var upHistory: []
     // Prefer the default-route interface; fall back to the first physical interface.
     property string netIf: ""
-    property var currentHealth: root.healthState()
 
     // P2b: Darker muted for better contrast hierarchy
     property color ink: "#E8F7FF"
@@ -207,28 +206,6 @@ PlasmoidItem {
         if (metricLabel === "RAM") return (value || "").replace(" MiB", "M")
         return value || ""
     }
-    function gpuCauseSummary() {
-        if (root.topGpuProcesses.length === 0) return "NO GPU COMPUTE WORKLOAD DETECTED"
-        var items = []
-        for (var i = 0; i < root.topGpuProcesses.length && i < 2; i++) items.push(root.topGpuProcesses[i].name + " " + root.topGpuProcesses[i].gpu)
-        return items.join(" · ")
-    }
-    function makeHealthState(level, label, detail, cause, color) {
-        return { level: level, label: label, detail: detail, cause: cause || "", color: color }
-    }
-    function healthState() {
-        if (root.gpuTemp >= 85) return root.makeHealthState(2, "GPU CRITICAL", Math.round(root.gpu) + "% LOAD · " + Math.round(root.gpuTemp) + "°C · VRAM " + Math.round(root.vramPercent()) + "%", root.gpuCauseSummary(), root.critical)
-        if (root.cpuTemp >= 85) return root.makeHealthState(2, "SYSTEM ALERT", "CPU TEMP " + Math.round(root.cpuTemp) + "°C", "", root.critical)
-        if (root.vramPercent() >= 95) return root.makeHealthState(2, "VRAM CRITICAL", "VRAM " + Math.round(root.vramPercent()) + "% · " + root.fmtVram(root.gpuVramUsedMiB) + " / " + root.fmtVram(root.gpuVramTotalMiB), root.gpuCauseSummary(), root.critical)
-        if (root.ram >= 95) return root.makeHealthState(2, "SYSTEM ALERT", "MEMORY " + Math.round(root.ram) + "% USED", "", root.critical)
-        if (root.diskUsedPercent >= 95) return root.makeHealthState(2, "SYSTEM ALERT", "DISK SPACE " + Math.round(root.diskUsedPercent) + "% USED", "", root.critical)
-        if (root.gpuTemp >= 75) return root.makeHealthState(1, "SYSTEM ATTENTION", "GPU TEMP " + Math.round(root.gpuTemp) + "°C", "", root.warning)
-        if (root.cpuTemp >= 75) return root.makeHealthState(1, "SYSTEM ATTENTION", "CPU TEMP " + Math.round(root.cpuTemp) + "°C", "", root.warning)
-        if (root.vramPercent() >= 85) return root.makeHealthState(1, "SYSTEM ATTENTION", "GPU VRAM " + Math.round(root.vramPercent()) + "% USED", "", root.warning)
-        if (root.ram >= 85) return root.makeHealthState(1, "SYSTEM ATTENTION", "MEMORY " + Math.round(root.ram) + "% USED", "", root.warning)
-        if (root.diskUsedPercent >= 85) return root.makeHealthState(1, "SYSTEM ATTENTION", "DISK SPACE " + Math.round(root.diskUsedPercent) + "% USED", "", root.warning)
-        return root.makeHealthState(0, "NORMAL", "0 ALERTS · VRAM " + Math.round(root.vramPercent()) + "% · DISK " + Math.round(root.diskUsedPercent) + "%", "", root.cyan)
-    }
     function metricBorderColor(metric) {
         if (metric.healthLevel >= 2) return root.critical
         if (metric.healthLevel >= 1) return root.warning
@@ -303,37 +280,6 @@ PlasmoidItem {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.cyan; opacity: 0.45 }
 
-            // Health banner is an overlay — it floats above the charts
-            // instead of displacing layout space when an alert fires.
-            Rectangle {
-                id: healthBanner
-                // Anchor to the frame so the overlay sits above the content column.
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.topMargin: 76
-                visible: root.currentHealth.level > 0
-                height: 56
-                radius: 12
-                color: Qt.rgba(0.035, 0.22, 0.34, 0.9)
-                border.width: 1
-                border.color: root.currentHealth.color
-                z: 10
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 14
-                    anchors.rightMargin: 14
-                    spacing: 12
-                    Text { text: root.currentHealth.label; color: root.currentHealth.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                    Rectangle { Layout.preferredWidth: 5; Layout.preferredHeight: 5; radius: 3; color: root.currentHealth.color }
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 3
-                        Text { text: root.currentHealth.detail; color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                        Text { visible: root.currentHealth.cause.length > 0; text: "CAUSE · " + root.currentHealth.cause; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight; Layout.fillWidth: true }
-                    }
-                }
-            }
 
             // --- SYSTEM LOAD section ---
             // P1d: All sections use fillHeight + preferredHeight ratio — no fixed heights
