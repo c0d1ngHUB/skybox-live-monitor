@@ -32,6 +32,7 @@ PlasmoidItem {
     property real diskUsedBytes: 0
     property real diskTotalBytes: 0
     property string lastRefresh: "--:--:--"
+    property string currentTime: refreshClock()
     property string dataStatus: "WAITING FOR DATA"
     property int staleAfterMs: 15000
     property var domainUpdateMs: ({cpu: 0, gpu: 0, memory: 0, network: 0, disk: 0, system: 0})
@@ -235,13 +236,12 @@ PlasmoidItem {
         anchors.fill: parent
         clip: true
 
-        // Compact fixed-content cockpit: charts use half the former height and
-        // the frame hugs the content instead of consuming the full display.
+        // Use the complete plasmoid area so the dashboard starts directly below
+        // the Telegram window and no fixed-height content is clipped.
         Rectangle {
             id: frame
-            anchors.centerIn: parent
-            width: parent.width - 36
-            height: Math.min(parent.height - 24, content.implicitHeight + 68)
+            anchors.fill: parent
+            anchors.margins: 8
             radius: 30
             color: "#000000"
             border.width: 2
@@ -261,20 +261,33 @@ PlasmoidItem {
             opacity: 0.40
         }
 
-        // Let the content determine the dashboard height; do not stretch into
-        // unused vertical screen space.
+        // Fit the content into the available height. The charts absorb height
+        // changes while cards and labels retain their readable dimensions.
         ColumnLayout {
             id: content
-            anchors.centerIn: frame
-            width: frame.width - 68
-            height: implicitHeight
-            spacing: 12
+            anchors.fill: frame
+            anchors.leftMargin: 34
+            anchors.rightMargin: 34
+            anchors.topMargin: 20
+            anchors.bottomMargin: 20
+            spacing: 10
 
             // --- Header ---
-            RowLayout {
+            Item {
                 Layout.fillWidth: true
-                Text { text: "SKYBOX"; color: root.cyan; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 28; font.letterSpacing: 3 }
-                Item { Layout.fillWidth: true }
+                Layout.preferredHeight: 34
+                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "SKYBOX"; color: root.cyan; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 28; font.letterSpacing: 3 }
+                Text {
+                    id: headerClock
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.currentTime
+                    color: root.cyan
+                    font.family: "DejaVu Sans"
+                    font.bold: true
+                    font.pixelSize: 28
+                    font.letterSpacing: 3
+                }
             }
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.cyan; opacity: 0.45 }
@@ -315,8 +328,10 @@ PlasmoidItem {
             // P1d: All sections use fillHeight + preferredHeight ratio — no fixed heights
             Item {
                 Layout.fillWidth: true
+                Layout.fillHeight: true
                 // Primary graph: 50% shorter than the previous responsive panel.
                 Layout.preferredHeight: 218
+                Layout.minimumHeight: 180
                 clip: true
 
                 Text { id: headline; anchors.left: parent.left; anchors.top: parent.top; text: "SYSTEM LOAD"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
@@ -465,8 +480,10 @@ PlasmoidItem {
             // --- NETWORK section with split sub-charts ---
             Item {
                 Layout.fillWidth: true
+                Layout.fillHeight: true
                 // About 25% taller than the previous 230 px network panel.
                 Layout.preferredHeight: 288
+                Layout.minimumHeight: 230
                 clip: true
 
                 Text { id: networkTitle; anchors.left: parent.left; anchors.top: parent.top; text: "NETWORK"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
@@ -651,6 +668,7 @@ PlasmoidItem {
             running: true
             repeat: true
             onTriggered: {
+                root.currentTime = root.refreshClock()
                 root.cpuHistory = root.push(root.cpuHistory, root.cpu)
                 root.gpuHistory = root.push(root.gpuHistory, root.gpu)
                 root.ramHistory = root.push(root.ramHistory, root.ram)
@@ -858,6 +876,7 @@ PlasmoidItem {
         topCpuSource.connectSource(topCpuSource.command)
         topRamSource.connectSource(topRamSource.command)
         netDetectSource.connectSource(netDetectSource.command)
+        root.currentTime = root.refreshClock()
         root.lastRefresh = root.refreshClock()
     }
 

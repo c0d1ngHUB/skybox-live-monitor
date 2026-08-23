@@ -153,6 +153,30 @@ def test_footer_uses_explicit_disk_and_uptime_labels():
     assert 'text: "SYSTEM"' not in text
 
 
+def test_dashboard_uses_the_full_available_height_without_clipping_content():
+    text = source()
+    assert 'anchors.fill: parent' in text
+    assert 'anchors.margins: 8' in text
+    assert 'height: Math.min(parent.height - 24, content.implicitHeight + 68)' not in text
+    assert 'anchors.fill: frame' in text
+    assert 'anchors.topMargin: 20' in text
+    assert 'anchors.bottomMargin: 20' in text
+    assert 'height: implicitHeight' not in text
+    assert 'Layout.fillHeight: true' in text
+    assert 'Layout.minimumHeight: 180' in text
+    assert 'Layout.minimumHeight: 230' in text
+
+
+def test_header_shows_a_live_clock_centered_at_skybox_font_size():
+    text = source()
+    assert 'property string currentTime: refreshClock()' in text
+    assert 'id: headerClock' in text
+    assert 'text: root.currentTime' in text
+    assert 'anchors.horizontalCenter: parent.horizontalCenter' in text
+    assert 'font.pixelSize: 28' in text
+    assert 'root.currentTime = root.refreshClock()' in text
+
+
 def test_removed_unload_control_has_no_visual_or_accessible_action():
     text = source()
     assert 'Accessible.name: "Unload Ollama models from GPU memory"' not in text
