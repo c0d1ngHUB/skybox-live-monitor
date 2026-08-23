@@ -165,6 +165,20 @@ def test_footer_uses_explicit_disk_and_uptime_labels():
     assert 'text: "SYSTEM"' not in text
 
 
+def test_uptime_card_shows_load_processes_and_token_free_hermes_max_think():
+    text = source()
+    assert 'property int processCount: 0' in text
+    assert 'property real hermesMaxThinkSeconds: 0' in text
+    assert 'function fmtDuration(seconds)' in text
+    assert 'id: processCountSource' in text
+    assert 'ps -e --no-headers | wc -l' in text
+    assert 'id: hermesThinkSource' in text
+    assert 'hermes_max_think.py' in text
+    assert 'text: "LOAD " + root.loadAverage.toFixed(2)' in text
+    assert 'text: "PROC " + root.processCount' in text
+    assert 'text: "MAX THINK 24H " + root.fmtDuration(root.hermesMaxThinkSeconds)' in text
+
+
 def test_dashboard_uses_the_full_available_height_without_clipping_content():
     text = source()
     assert 'anchors.fill: parent' in text

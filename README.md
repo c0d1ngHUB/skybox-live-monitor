@@ -46,6 +46,7 @@ The control requires two clicks within five seconds. It queries the local Ollama
 ```bash
 python3 tests/test_dashboard_source.py
 python3 tests/test_monitor_behavior.py
+python3 tests/test_hermes_think_time.py
 node --check contents/code/monitor_logic.js
 qmllint contents/ui/main.qml
 ```

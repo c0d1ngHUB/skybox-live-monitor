@@ -28,6 +28,8 @@ PlasmoidItem {
     property double previousNetworkSampleMs: 0
     property real uptimeSeconds: 0
     property real loadAverage: 0
+    property int processCount: 0
+    property real hermesMaxThinkSeconds: 0
     property real diskUsedPercent: 0
     property real diskUsedBytes: 0
     property real diskTotalBytes: 0
@@ -109,6 +111,15 @@ PlasmoidItem {
         if (days > 0) return days + "d " + hours + "h"
         if (hours > 0) return hours + "h " + mins + "m"
         return mins + "m"
+    }
+    function fmtDuration(seconds) {
+        var total = Math.max(0, Math.round(seconds || 0))
+        var hours = Math.floor(total / 3600)
+        var mins = Math.floor((total % 3600) / 60)
+        var secs = total % 60
+        if (hours > 0) return hours + "h " + ("0" + mins).slice(-2) + "m"
+        if (mins > 0) return mins + "m " + ("0" + secs).slice(-2) + "s"
+        return secs + "s"
     }
     // Keep typical idle and low-bandwidth traffic visible while preventing a zero-range chart.
     function netPeak() {
@@ -676,6 +687,14 @@ PlasmoidItem {
                             Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "UPTIME"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                             Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtUptime(root.uptimeSeconds); color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
+                        Row {
+                            width: parent.width
+                            height: 20
+                            spacing: 14
+                            Text { text: "LOAD " + root.loadAverage.toFixed(2); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
+                            Text { text: "PROC " + root.processCount; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
+                            Text { text: "MAX THINK 24H " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.violet; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true }
+                        }
                     }
                 }
             }
@@ -697,6 +716,40 @@ PlasmoidItem {
                 downGraph.requestPaint()
                 upGraph.requestPaint()
             }
+        }
+    }
+
+    PlasmaSupport.DataSource {
+        id: processCountSource
+        engine: "executable"
+        connectedSources: []
+        property string command: "sh -c 'ps -e --no-headers | wc -l'"
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            var count = parseInt(buffer.trim())
+            buffer = ""
+            disconnectSource(source)
+            if (!isNaN(count)) root.processCount = count
+        }
+    }
+
+    // Local SQLite read only: this metric performs no model/API call and uses no tokens.
+    PlasmaSupport.DataSource {
+        id: hermesThinkSource
+        engine: "executable"
+        connectedSources: []
+        property string scriptPath: Qt.resolvedUrl("../code/hermes_max_think.py").toString().replace("file://", "")
+        property string command: "python3 " + scriptPath + " --db $HOME/.hermes/state.db"
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            var seconds = parseFloat(buffer.trim())
+            buffer = ""
+            disconnectSource(source)
+            if (!isNaN(seconds)) root.hermesMaxThinkSeconds = Math.max(0, seconds)
         }
     }
 
@@ -893,6 +946,8 @@ PlasmoidItem {
         topGpuSource.connectSource(topGpuSource.command)
         topCpuSource.connectSource(topCpuSource.command)
         topRamSource.connectSource(topRamSource.command)
+        processCountSource.connectSource(processCountSource.command)
+        hermesThinkSource.connectSource(hermesThinkSource.command)
         netDetectSource.connectSource(netDetectSource.command)
         root.currentTime = root.refreshClock()
         root.lastRefresh = root.refreshClock()
@@ -924,6 +979,20 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: topRamSource.connectSource(topRamSource.command)
+    }
+
+    Timer {
+        interval: 10000
+        running: true
+        repeat: true
+        onTriggered: processCountSource.connectSource(processCountSource.command)
+    }
+
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        onTriggered: hermesThinkSource.connectSource(hermesThinkSource.command)
     }
 
     Timer {
