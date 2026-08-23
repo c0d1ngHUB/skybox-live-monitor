@@ -42,8 +42,8 @@ class MonitorBehaviorTests(unittest.TestCase):
 
     def test_history_fills_close_at_visible_sample_bounds(self):
         text = QML.read_text()
-        self.assertEqual(text.count("var firstX = MonitorLogic.historyX"), 3)
-        self.assertEqual(text.count("var lastX = MonitorLogic.historyX"), 3)
+        self.assertEqual(text.count("var firstX ="), 3)
+        self.assertEqual(text.count("var lastX ="), 3)
         self.assertEqual(text.count("ctx.lineTo(firstX, height)"), 3)
         self.assertEqual(text.count("ctx.lineTo(lastX, height)"), 3)
 

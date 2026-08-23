@@ -146,6 +146,18 @@ def test_network_uses_fixed_independent_scales_without_metadata_labels():
     assert 'Layout.preferredHeight: 288' in text
 
 
+def test_network_axes_show_100_mbit_download_and_10_mbit_upload_steps():
+    text = source()
+    assert 'text: "↓ MBIT/S"' in text
+    assert 'text: "↑ MBIT/S"' in text
+    assert 'for (var i = 0; i <= 6; i++)' in text
+    assert '600 - i * 100' in text
+    assert 'for (var i = 0; i <= 5; i++)' in text
+    assert '50 - i * 10' in text
+    assert text.count('var plotLeft = 44') >= 2
+    assert text.count('var chartWidth = width - plotLeft') >= 2
+
+
 def test_footer_uses_explicit_disk_and_uptime_labels():
     text = source()
     assert 'text: "DISK USED"' in text

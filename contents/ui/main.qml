@@ -513,7 +513,7 @@ PlasmoidItem {
                     // Download sub-chart (P3: filled-area style for better visibility)
                     Item {
                         width: (parent.width - 12) / 2; height: parent.height
-                        Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: -2; text: "↓"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                        Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: -2; text: "↓ MBIT/S"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                         Canvas {
                             id: downGraph
                             anchors.fill: parent
@@ -521,20 +521,29 @@ PlasmoidItem {
                             onPaint: {
                                 var ctx = getContext("2d"); ctx.reset()
                                 ctx.imageSmoothingEnabled = true
+                                var plotLeft = 44
+                                var chartWidth = width - plotLeft
                                 ctx.strokeStyle = "rgba(160,200,216,0.22)"; ctx.lineWidth = 1
-                                for (var i = 0; i < 3; i++) { var y = height * i / 2; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke() }
+                                ctx.fillStyle = root.muted.toString()
+                                ctx.font = "11px 'DejaVu Sans Mono'"
+                                ctx.textAlign = "right"
+                                for (var i = 0; i <= 6; i++) {
+                                    var y = height * i / 6
+                                    ctx.beginPath(); ctx.moveTo(plotLeft, y); ctx.lineTo(width, y); ctx.stroke()
+                                    ctx.fillText(String(600 - i * 100), plotLeft - 6, Math.max(10, Math.min(height - 2, y + 4)))
+                                }
                                 ctx.strokeStyle = "rgba(160,200,216,0.12)"; ctx.lineWidth = 1
-                                var tick1 = width / 5; var tick2 = width * 4 / 5
+                                var tick1 = plotLeft + chartWidth / 5; var tick2 = plotLeft + chartWidth * 4 / 5
                                 ctx.beginPath(); ctx.moveTo(tick1, 0); ctx.lineTo(tick1, height); ctx.stroke()
                                 ctx.beginPath(); ctx.moveTo(tick2, 0); ctx.lineTo(tick2, height); ctx.stroke()
                                 var d = root.downHistory
                                 if (d.length < 2) return
-                                var firstX = MonitorLogic.historyX(0, d.length, width, root.historySeconds)
-                                var lastX = MonitorLogic.historyX(d.length - 1, d.length, width, root.historySeconds)
+                                var firstX = plotLeft + MonitorLogic.historyX(0, d.length, chartWidth, root.historySeconds)
+                                var lastX = plotLeft + MonitorLogic.historyX(d.length - 1, d.length, chartWidth, root.historySeconds)
                                 // P3: Filled area under the line
                                 ctx.beginPath()
                                 for (var j = 0; j < d.length; j++) {
-                                    var x = MonitorLogic.historyX(j, d.length, width, root.historySeconds)
+                                    var x = plotLeft + MonitorLogic.historyX(j, d.length, chartWidth, root.historySeconds)
                                     var y = height - Math.min(1, d[j] / root.downloadScaleBytesPerSecond) * height
                                     if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                                 }
@@ -546,7 +555,7 @@ PlasmoidItem {
                                 // Line on top
                                 ctx.strokeStyle = root.cyan; ctx.lineWidth = 2.5; ctx.beginPath()
                                 for (var k = 0; k < d.length; k++) {
-                                    var x2 = MonitorLogic.historyX(k, d.length, width, root.historySeconds)
+                                    var x2 = plotLeft + MonitorLogic.historyX(k, d.length, chartWidth, root.historySeconds)
                                     var y2 = height - Math.min(1, d[k] / root.downloadScaleBytesPerSecond) * height
                                     if (k === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2)
                                 }
@@ -558,7 +567,7 @@ PlasmoidItem {
                     // Upload sub-chart (P3: filled-area style)
                     Item {
                         width: (parent.width - 12) / 2; height: parent.height
-                        Text { anchors.right: parent.right; anchors.top: parent.top; anchors.topMargin: -2; text: "↑"; color: root.violet; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                        Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: -2; text: "↑ MBIT/S"; color: root.violet; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                         Canvas {
                             id: upGraph
                             anchors.fill: parent
@@ -566,20 +575,29 @@ PlasmoidItem {
                             onPaint: {
                                 var ctx = getContext("2d"); ctx.reset()
                                 ctx.imageSmoothingEnabled = true
+                                var plotLeft = 44
+                                var chartWidth = width - plotLeft
                                 ctx.strokeStyle = "rgba(160,200,216,0.22)"; ctx.lineWidth = 1
-                                for (var i = 0; i < 3; i++) { var y = height * i / 2; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke() }
+                                ctx.fillStyle = root.muted.toString()
+                                ctx.font = "11px 'DejaVu Sans Mono'"
+                                ctx.textAlign = "right"
+                                for (var i = 0; i <= 5; i++) {
+                                    var y = height * i / 5
+                                    ctx.beginPath(); ctx.moveTo(plotLeft, y); ctx.lineTo(width, y); ctx.stroke()
+                                    ctx.fillText(String(50 - i * 10), plotLeft - 6, Math.max(10, Math.min(height - 2, y + 4)))
+                                }
                                 ctx.strokeStyle = "rgba(160,200,216,0.12)"; ctx.lineWidth = 1
-                                var tick1 = width / 5; var tick2 = width * 4 / 5
+                                var tick1 = plotLeft + chartWidth / 5; var tick2 = plotLeft + chartWidth * 4 / 5
                                 ctx.beginPath(); ctx.moveTo(tick1, 0); ctx.lineTo(tick1, height); ctx.stroke()
                                 ctx.beginPath(); ctx.moveTo(tick2, 0); ctx.lineTo(tick2, height); ctx.stroke()
                                 var d = root.upHistory
                                 if (d.length < 2) return
-                                var firstX = MonitorLogic.historyX(0, d.length, width, root.historySeconds)
-                                var lastX = MonitorLogic.historyX(d.length - 1, d.length, width, root.historySeconds)
+                                var firstX = plotLeft + MonitorLogic.historyX(0, d.length, chartWidth, root.historySeconds)
+                                var lastX = plotLeft + MonitorLogic.historyX(d.length - 1, d.length, chartWidth, root.historySeconds)
                                 // P3: Filled area
                                 ctx.beginPath()
                                 for (var j = 0; j < d.length; j++) {
-                                    var x = MonitorLogic.historyX(j, d.length, width, root.historySeconds)
+                                    var x = plotLeft + MonitorLogic.historyX(j, d.length, chartWidth, root.historySeconds)
                                     var y = height - Math.min(1, d[j] / root.uploadScaleBytesPerSecond) * height
                                     if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                                 }
@@ -591,7 +609,7 @@ PlasmoidItem {
                                 // Line on top
                                 ctx.strokeStyle = root.violet; ctx.lineWidth = 2.5; ctx.beginPath()
                                 for (var k = 0; k < d.length; k++) {
-                                    var x2 = MonitorLogic.historyX(k, d.length, width, root.historySeconds)
+                                    var x2 = plotLeft + MonitorLogic.historyX(k, d.length, chartWidth, root.historySeconds)
                                     var y2 = height - Math.min(1, d[k] / root.uploadScaleBytesPerSecond) * height
                                     if (k === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2)
                                 }
