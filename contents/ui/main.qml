@@ -296,37 +296,6 @@ PlasmoidItem {
                     font.pixelSize: 28
                     font.letterSpacing: 3
                 }
-                Rectangle {
-                    id: odysseusToggle
-                    anchors.top: headerClock.bottom
-                    anchors.topMargin: 14
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    height: 30
-                    width: toggleLabel.width + 28
-                    radius: 15
-                    color: root.odysseusRunning
-                        ? (toggleHover.containsMouse ? Qt.rgba(0.15, 0.65, 0.7, 0.85) : Qt.rgba(0.035, 0.45, 0.52, 0.85))
-                        : (toggleHover.containsMouse ? Qt.rgba(0.15, 0.35, 0.5, 0.9) : Qt.rgba(0.035, 0.22, 0.34, 0.9))
-                    border.width: root.odysseusRunning ? 2 : 1
-                    border.color: root.odysseusRunning ? root.cyan : root.muted
-                    Behavior on color { ColorAnimation { duration: 200 } }
-                    Text {
-                        id: toggleLabel
-                        anchors.centerIn: parent
-                        text: root.odysseusTogglePending ? "ODYSSEUS …" : ("ODYSSEUS " + (root.odysseusRunning ? "ON" : "OFF"))
-                        color: root.odysseusTogglePending ? root.warning : (root.odysseusRunning ? root.cyan : root.muted)
-                        font.family: "DejaVu Sans Mono"
-                        font.pixelSize: 13
-                        font.bold: true
-                    }
-                    MouseArea {
-                        id: toggleHover
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.requestOdysseusToggle()
-                    }
-                }
                 Text {
                     id: telemetryStatus
                     anchors.right: parent.right
@@ -357,6 +326,36 @@ PlasmoidItem {
                 clip: true
 
                 Text { id: headline; anchors.left: parent.left; anchors.top: parent.top; text: "SYSTEM LOAD"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
+                Rectangle {
+                    id: odysseusToggle
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 30
+                    width: toggleLabel.width + 28
+                    radius: 15
+                    color: root.odysseusRunning
+                        ? (toggleHover.containsMouse ? Qt.rgba(0.15, 0.65, 0.7, 0.85) : Qt.rgba(0.035, 0.45, 0.52, 0.85))
+                        : (toggleHover.containsMouse ? Qt.rgba(0.15, 0.35, 0.5, 0.9) : Qt.rgba(0.035, 0.22, 0.34, 0.9))
+                    border.width: root.odysseusRunning ? 2 : 1
+                    border.color: root.odysseusRunning ? root.cyan : root.muted
+                    Behavior on color { ColorAnimation { duration: 200 } }
+                    Text {
+                        id: toggleLabel
+                        anchors.centerIn: parent
+                        text: root.odysseusTogglePending ? "ODYSSEUS …" : ("ODYSSEUS " + (root.odysseusRunning ? "ON" : "OFF"))
+                        color: root.odysseusTogglePending ? root.warning : (root.odysseusRunning ? root.cyan : root.muted)
+                        font.family: "DejaVu Sans Mono"
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
+                    MouseArea {
+                        id: toggleHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.requestOdysseusToggle()
+                    }
+                }
                 Row {
                     id: computeLegend
                     anchors.left: parent.left; anchors.top: headline.bottom; anchors.topMargin: 26; spacing: 18
@@ -504,10 +503,19 @@ PlasmoidItem {
                                     }
                                 }
 
-                                // --- CPU / RAM cards: original layout ---
-                                Text { visible: modelData.label !== "GPU"; text: modelData.value; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 28; font.bold: true }
-                                Text { visible: modelData.label !== "GPU"; width: parent.width - 4; text: modelData.detail; color: modelData.detailColor; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
-                                Text { visible: modelData.label !== "GPU" && !!modelData.detail2; text: modelData.detail2 || ""; color: modelData.detail2Color || root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
+                                // --- CPU card: temperature as large metric (like GPU) ---
+                                Text {
+                                    visible: modelData.label === "CPU"
+                                    text: Math.round(root.cpuTemp) + "°C"
+                                    color: root.cyan
+                                    font.family: "DejaVu Sans"
+                                    font.pixelSize: 28
+                                    font.bold: true
+                                }
+                                // --- RAM card: original layout ---
+                                Text { visible: modelData.label === "RAM"; text: modelData.value; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 28; font.bold: true }
+                                Text { visible: modelData.label === "RAM"; width: parent.width - 4; text: modelData.detail; color: modelData.detailColor; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
+                                Text { visible: modelData.label === "RAM" && !!modelData.detail2; text: modelData.detail2 || ""; color: modelData.detail2Color || root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
                                 // VRAM fill bar — only on GPU card (original position, kept for non-GPU safety)
                                 Item {
                                     width: parent.width - 4
