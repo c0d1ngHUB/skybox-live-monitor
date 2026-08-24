@@ -1,21 +1,23 @@
 # Skybox Live Monitor
 
+![Skybox Live Monitor](screenshots/dashboard-preview.jpg)
+
 A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is designed for a dedicated status display and shows CPU, GPU, VRAM, RAM, network throughput, disk space, and the most relevant active processes.
 
 ## Highlights
 
-- Incident-oriented GPU/VRAM alerts with the two largest GPU consumers
-- Compact CPU, GPU, and RAM process summaries
-- Five-minute CPU/GPU and network history charts
+- CPU temperature display (like GPU card — no percentage, no progress bar)
+- GPU utilization and VRAM telemetry with top GPU processes
+- Compact CPU and RAM process summaries
+- Two-minute CPU/GPU and network history charts
+- Odysseus toggle button integrated into the SYSTEM LOAD row
 - NVIDIA VRAM telemetry via `nvidia-smi`
-- A deliberately scoped two-click **Unload Ollama** control for local Ollama models only
 - No telemetry, no external network requests, and no credentials
 
 ## Requirements
 
-- KDE Plasma 6
+- KDE Plasma 6 (Wayland or X11)
 - NVIDIA GPU and `nvidia-smi` for GPU/VRAM metrics (other panels still work without it)
-- `curl`, `jq`, and `ollama` are needed only for the optional unload control
 
 ## Install
 
@@ -34,23 +36,21 @@ Then add **Skybox Vertical System Dashboard** from Plasma's *Add Widgets* dialog
 For a development refresh:
 
 ```bash
+rm -rf ~/.cache/qmlcache
 systemctl --user restart plasma-plasmashell.service
 ```
-
-## Safety of “Unload Ollama”
-
-The control requires two clicks within five seconds. It queries the local Ollama API and stops only models currently served by the local Ollama daemon. It does **not** terminate arbitrary GPU processes, containers, system services, or remote workloads.
 
 ## Tests
 
 ```bash
 python3 tests/test_dashboard_source.py
 python3 tests/test_monitor_behavior.py
+python3 tests/test_hermes_think_time.py
 node --check contents/code/monitor_logic.js
 qmllint contents/ui/main.qml
 ```
 
-The Python behavior suite executes the actual network-detection and Ollama commands in isolated temporary environments. `qmllint` may report unresolved Plasma types when run outside Plasma's import environment; run the widget inside Plasma as the final integration check.
+The Python behavior suite executes the network-detection command in an isolated temporary environment. `qmllint` may report unresolved Plasma types when run outside Plasma's import environment; run the widget inside Plasma as the final integration check.
 
 ## License
 

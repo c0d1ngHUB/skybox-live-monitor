@@ -9,20 +9,26 @@ def source():
     return SOURCE.read_text()
 
 
-def test_operational_status_explains_normal_state_and_thresholds():
+def test_attention_banner_is_completely_removed_but_card_thresholds_remain():
     text = source()
-    assert 'root.currentHealth.level === 0 ? " · 0 ALERTS"' in text
-    assert '"0 ALERTS · VRAM "' in text
-    assert '"SYSTEM ATTENTION"' in text
-    assert '"SYSTEM ALERT"' in text
+    assert 'id: healthChip' not in text
+    assert 'id: healthBanner' not in text
+    assert 'property var currentHealth' not in text
+    assert 'function healthState()' not in text
+    assert '"SYSTEM ATTENTION"' not in text
+    assert 'id: releaseVramButton' not in text
     assert 'root.vramPercent() >= 95' in text
+    assert 'healthLevel: root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0)' in text
 
 
-def test_header_and_footer_disclose_freshness():
+def test_freshness_is_tracked_per_metric_and_compact_status_is_visible():
     text = source()
     assert 'property string lastRefresh' in text
-    assert '"LIVE SYSTEM · " + root.dataStatus' in text
-    assert '"DEBIAN 13 · PLASMA 6 · REFRESH " + root.lastRefresh' in text
+    assert 'property var metricUpdateMs' in text
+    assert 'id: telemetryStatus' in text
+    assert 'text: root.dataStatus' in text
+    assert 'visible: root.dataStatus.length > 0' in text
+    assert '"DEBIAN 13 · PLASMA 6 · REFRESH " + root.lastRefresh' not in text
     assert 'function refreshClock()' in text
 
 
@@ -30,8 +36,6 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     text = source()
     assert 'function shortProcessName(name)' in text
     assert 'function compactProcessValue(metricLabel, value)' in text
-    assert 'function gpuCauseSummary()' in text
-    assert 'root.gpuCauseSummary(), root.critical' in text
     assert 'detail:"VRAM " + Math.round(root.vramPercent())' in text
     assert 'topGpuSource' in text
     assert '--query-compute-apps=process_name,used_memory' in text
@@ -43,7 +47,8 @@ def test_cpu_card_shows_top_two_processes_in_its_detail_area():
     text = source()
     assert 'property var topCpuProcesses' in text
     assert 'id: topCpuSource' in text
-    assert 'ps -eo pcpu=,comm= --sort=-pcpu | head -2' in text
+    assert 'cpu_process_snapshot.py' in text
+    assert 'MonitorLogic.cpuProcessRates' in text
     assert 'property string heading: "TOP PROCESSES"' in text
     assert 'property var processes: metricLabel === "CPU" ? root.topCpuProcesses' in text
     assert 'processes.length < 2' in text
@@ -78,11 +83,17 @@ def test_gpu_card_shows_top_two_processes_but_counts_all_workloads():
     assert 'onTriggered: topGpuSource.connectSource(topGpuSource.command)' in text
 
 
-def test_charts_are_five_minute_and_visually_readable():
+def test_charts_are_two_minute_and_visually_readable():
     text = source()
-    assert 'property int historySeconds: 300' in text
-    assert 'LAST 5 MIN · FIXED SCALE · 0–100%' in text
-    assert 'LAST 5 MIN · AUTO SCALE' in text
+    assert 'property int historySeconds: 120' in text
+    assert text.count('text: "−2 MIN"') == 2
+    assert text.count('text: "−1 MIN"') == 2
+    assert text.count('var midTick = plotLeft + chartWidth / 2') == 3
+    assert 'var tick1 =' not in text
+    assert '−5 MIN' not in text
+    assert '2.5 MIN' not in text
+    assert 'LAST 5 MIN · FIXED SCALE · 0–100%' not in text
+    assert 'LAST 5 MIN · AUTO SCALE' not in text
     assert 'ctx.fillStyle = fillColor' in text
     assert 'ctx.fillStyle = "rgba(150,245,246,0.15)"' in text
     assert 'ctx.fillStyle = "rgba(219,145,255,0.15)"' in text
@@ -99,19 +110,13 @@ def test_compact_cards_preserve_legible_operational_detail():
     assert '"FREE " + root.fmtDisk(root.diskFreeBytes()) + " · USED "' in text
 
 
-def test_header_exposes_a_guarded_llm_vram_release_button():
+def test_removed_ollama_feature_leaves_no_executable_or_state_code():
     text = source()
-    assert 'id: releaseVramButton' in text
-    assert 'root.vramReleaseStatus' in text
-    assert 'id: releaseModelsSource' in text
-    assert 'ollama stop' in text
-    assert 'CONFIRM UNLOAD' in text
-    assert 'UNLOAD OLLAMA' in text
-    assert 'docker stop aeon-vllm honcho-api-1 honcho-deriver-1' not in text
-    assert 'api/ps' in text
-    assert 'arbitrary GPU processes are never terminated' in text
-    assert 'root.vramReleaseInProgress = true' in text
-    assert 'id: releaseRefreshTimer' in text
+    assert 'id: releaseVramButton' not in text
+    for obsolete in ('releaseModelsSource', 'requestOllamaUnload', 'ollama stop',
+                     'CONFIRM UNLOAD', 'UNLOAD OLLAMA', 'vramRelease',
+                     'releaseRefreshTimer', 'releaseConfirmTimer', 'releaseResetTimer'):
+        assert obsolete not in text
 
 
 def test_metric_cards_reserve_a_real_kpi_column_without_overlap():
@@ -124,7 +129,10 @@ def test_metric_cards_reserve_a_real_kpi_column_without_overlap():
     assert 'property string heading: "TOP PROCESSES"' in text
     assert 'function fmtCompactCapacity' in text
     assert 'detail:root.fmtCompactCapacity(root.ramUsedBytes)' in text
-    assert 'root.fmtCompactVram(root.gpuVramUsedMiB)' in text
+    assert '"VRAM " + Math.round(root.vramPercent()) + "%"' in text
+    assert 'id: processName' in text
+    assert 'id: processValue' in text
+    assert 'anchors.right: parent.right' in text
 
 
 def test_compute_chart_has_dedicated_graph_and_timeline_space():
@@ -135,13 +143,30 @@ def test_compute_chart_has_dedicated_graph_and_timeline_space():
     assert 'height: 20' in text
 
 
-def test_network_header_separates_live_values_from_chart_metadata():
+def test_network_uses_dynamic_scale_ceilings_without_metadata_labels():
     text = source()
     assert 'id: networkLiveValues' in text
-    assert 'id: networkMetadata' in text
-    block = text[text.index('id: networkDataBlock'):text.index('// Download sub-chart')]
-    assert 'anchors.top: networkLiveValues.bottom' not in block
-    assert 'text: "SCALE 0–" + root.fmtRate(root.netPeak())' in text
+    assert 'id: networkMetadata' not in text
+    assert 'MonitorLogic.networkScaleMbit(root.downHistory, 50, 600)' in text
+    assert 'MonitorLogic.networkScaleMbit(root.upHistory, 5, 50)' in text
+    assert 'Math.min(1, d[j] / root.downloadScaleBytesPerSecond)' in text
+    assert 'Math.min(1, d[j] / root.uploadScaleBytesPerSecond)' in text
+    assert 'Layout.preferredHeight: 288' in text
+
+
+def test_network_axes_follow_dynamic_ceilings_in_50_and_5_mbit_steps():
+    text = source()
+    assert 'text: "↓ MBIT/S"' in text
+    assert 'text: "↑ MBIT/S"' in text
+    assert 'Math.round(maxMbit / 50)' in text  # download grid: 50 Mbit steps
+    assert 'maxMbit - i * 50' in text
+    assert 'Math.round(maxMbit / 5)' in text   # upload grid: 5 Mbit steps
+    assert 'maxMbit - i * 5' in text
+    assert text.count('var plotLeft = 44') >= 2
+    assert text.count('var chartWidth = width - plotLeft') >= 2
+    # Axis labels must not be clipped by Canvas left edge (gutter fix)
+    assert 'ctx.fillText(String(maxMbit - i * 50), 40 - 6' in text
+    assert 'ctx.fillText(String(maxMbit - i * 5), 40 - 6' in text
 
 
 def test_footer_uses_explicit_disk_and_uptime_labels():
@@ -151,60 +176,154 @@ def test_footer_uses_explicit_disk_and_uptime_labels():
     assert 'text: "SYSTEM"' not in text
 
 
-def test_unload_control_is_visually_and_accessibly_an_action():
+def test_uptime_card_shows_load_proc_max_think_and_openai_keys():
     text = source()
-    assert 'Layout.preferredHeight: 44' in text
-    assert 'Accessible.role: Accessible.Button' in text
-    assert 'Accessible.name: "Unload Ollama models from GPU memory"' in text
-    assert 'Keys.onSpacePressed:' in text
-    assert 'Keys.onReturnPressed:' in text
+    assert 'property int processCount: 0' in text
+    assert 'property real hermesMaxThinkSeconds: 0' in text
+    assert 'property int openAiActiveKeys: -1' in text
+    assert 'property int openAiTotalKeys: -1' in text
+    assert 'function fmtDuration(seconds)' in text
+    assert 'id: processCountSource' in text
+    assert 'ps -e --no-headers | wc -l' in text
+    assert 'id: hermesThinkSource' in text
+    assert 'hermes_max_think.py' in text
+    assert 'id: openAiKeysSource' in text
+    assert 'hermes_openai_keys.py' in text
+    assert 'id: systemMetaRow' in text
+    assert 'text: "LOAD " + root.loadAverage.toFixed(2); color: root.muted' in text
+    assert 'text: "PROC " + root.processCount; color: root.muted' in text
+    assert 'text: "MAX THINK: " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.muted' in text
+    assert 'text: "KEYS " + root.openAiActiveKeys + "/' in text
+    assert 'interval: 900000\n        running: true\n        repeat: true\n        onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)' in text
+    assert 'text: "MAX THINK 24H "' not in text
 
 
-def test_health_state_always_exposes_a_safe_cause_string():
+def test_odysseus_toggle_is_wired_to_native_app_process():
     text = source()
-    assert 'property var currentHealth: root.healthState()' in text
-    assert 'visible: root.currentHealth.cause.length > 0' in text
-    assert 'function makeHealthState(level, label, detail, cause, color)' in text
-    assert 'cause: cause || ""' in text
-    assert 'root.healthState().cause.length' not in text
+    # UI: toggle next to the clock header
+    assert 'id: odysseusToggle' in text
+    assert 'anchors.top: headerClock.bottom' in text
+    assert 'ODYSSEUS' in text
+    # State properties
+    assert 'property bool odysseusRunning: false' in text
+    assert 'property bool odysseusTogglePending: false' in text
+    # Status poller via pgrep
+    assert 'id: odysseusStatusSource' in text
+    assert "pgrep -f '[o]dysseus/venv/bin/python.*app.py'" in text
+    # Toggle source: start with venv python, stop via pkill
+    assert 'id: odysseusToggleSource' in text
+    assert '/venv/bin/python' in text
+    assert "pkill -f '[o]dysseus/venv/bin/python.*app.py'" in text
+    # Status polled periodically and once at startup
+    assert 'onTriggered: odysseusStatusSource.connectSource(odysseusStatusSource.command)' in text
+    assert text.count('odysseusStatusSource.connectSource(odysseusStatusSource.command)') >= 2
+
+
+def test_vram_fill_bar_replaces_vram_text_and_uses_orange_track():
+    text = source()
+    # Orange colour token exists for the VRAM bar
+    assert 'property color orange: "#FF9F43"' in text
+    # GPU card carries a vramFill field instead of the long "used / total" text
+    assert 'vramFill: root.vramPercent()' in text
+    assert '"VRAM " + Math.round(root.vramPercent()) + "%"' in text
+    # Bar renders when vramFill is present, orange by default, red at ≥85%
+    assert 'modelData.vramFill !== undefined' in text
+    assert 'Math.min(1, (modelData.vramFill || 0) / 100)' in text
+    assert '(modelData.vramFill || 0) >= 85 ? root.critical : root.orange' in text
+    # Old verbose VRAM text with used / total is gone
+    assert 'fmtCompactVram(root.gpuVramUsedMiB) + " / " + root.fmtCompactVram(root.gpuVramTotalMiB)' not in text
+
+
+def test_dashboard_uses_the_full_available_height_without_clipping_content():
+    text = source()
+    assert 'anchors.fill: parent' in text
+    assert 'anchors.margins: 8' in text
+    assert 'height: Math.min(parent.height - 24, content.implicitHeight + 68)' not in text
+    assert 'anchors.fill: frame' in text
+    assert 'anchors.topMargin: 20' in text
+    assert 'anchors.bottomMargin: 20' in text
+    assert 'height: implicitHeight' not in text
+    assert 'Layout.fillHeight: true' in text
+    assert 'Layout.minimumHeight: 180' in text
+    assert 'Layout.minimumHeight: 230' in text
+
+
+def test_header_shows_a_live_clock_centered_at_skybox_font_size():
+    text = source()
+    assert 'property string currentTime: refreshClock()' in text
+    assert 'id: headerClock' in text
+    assert 'text: root.currentTime' in text
+    assert 'anchors.horizontalCenter: parent.horizontalCenter' in text
+    assert 'font.pixelSize: 28' in text
+    assert 'root.currentTime = root.refreshClock()' in text
+
+
+def test_header_clock_uses_hours_and_minutes_without_seconds():
+    text = source()
+    clock = text[text.index('function refreshClock()'):text.index('function markMetricFresh', text.index('function refreshClock()'))]
+    assert 'property string lastRefresh: "--:--"' in text
+    assert 'now.getHours()' in clock
+    assert 'now.getMinutes()' in clock
+    assert 'now.getSeconds()' not in clock
+
+
+def test_removed_unload_control_has_no_visual_or_accessible_action():
+    text = source()
+    assert 'Accessible.name: "Unload Ollama models from GPU memory"' not in text
+    assert 'Keys.onSpacePressed:' not in text
+    assert 'Keys.onReturnPressed:' not in text
+
+
+def test_removed_attention_banner_leaves_no_health_state_or_cause_label():
+    text = source()
+    assert 'property var currentHealth' not in text
+    assert 'function makeHealthState' not in text
+    assert 'function healthState()' not in text
+    assert 'root.currentHealth' not in text
+    assert 'text: "CAUSE · "' not in text
 
 
 def test_freshness_tracks_each_data_domain_not_the_chart_timer():
     text = source()
     timer_block = text[text.index('interval: 1000'):text.index('    // Current top', text.index('interval: 1000'))]
     assert 'root.lastRefresh = root.refreshClock()' not in timer_block
-    assert 'function markDataFresh(domain)' in text
-    for domain in ('cpu', 'gpu', 'memory', 'network', 'disk', 'system'):
-        assert f'root.markDataFresh("{domain}")' in text
+    assert 'function markMetricFresh(metric)' in text
+    for metric in ('cpuUsage', 'cpuTemperature', 'gpuUsage', 'gpuTemperature',
+                   'gpuVram', 'memoryPercent', 'memoryUsed', 'memoryTotal',
+                   'network', 'diskPercent', 'diskUsed', 'diskTotal',
+                   'uptime', 'loadAverage'):
+        assert f'root.markMetricFresh("{metric}")' in text
     assert 'MonitorLogic.staleDomains' in text
-    assert 'property string dataStatus: "WAITING FOR DATA"' in text
+    assert 'property string dataStatus: "WAITING"' in text
     assert 'STALE · ' in text
 
 
-def test_ollama_unload_distinguishes_dependencies_connection_and_partial_failure():
+def test_readme_no_longer_advertises_removed_ollama_feature():
+    readme = (SOURCE.parents[2] / 'README.md').read_text()
+    assert 'Ollama' not in readme
+    assert 'ollama' not in readme
+
+
+def test_gpu_chart_is_solid_and_drawn_after_cpu_in_the_foreground():
     text = source()
-    assert 'for dep in curl jq ollama' in text
-    assert 'command -v \\\"$dep\\\"' in text
-    assert 'OLLAMA UNREACHABLE' in text
-    assert 'UNLOAD PARTIAL' in text
-    assert 'MISSING DEPENDENCY' in text
-    assert 'data["exit code"]' in text
+    assert 'ctx.setLineDash' not in text
+    cpu_plot = 'plot(root.cpuHistory, root.cyan, "rgba(150,245,246,0.12)")'
+    gpu_plot = 'plot(root.gpuHistory, root.violet, "rgba(219,145,255,0.12)")'
+    assert cpu_plot in text
+    assert gpu_plot in text
+    assert text.index(cpu_plot) < text.index(gpu_plot)
+    assert 'warningY' not in text
+    assert 'criticalY' not in text
 
 
-def test_chart_series_are_distinguishable_without_color_alone():
-    text = source()
-    assert 'ctx.setLineDash(dashed ? [8, 5] : [])' in text
-    assert 'ctx.setLineDash([])' in text
-
-
-def test_freshness_clock_only_advances_when_all_domains_fresh():
+def test_freshness_clock_only_advances_when_all_metrics_fresh():
     """P0#1: lastRefresh must not update when any domain is stale."""
     text = source()
     assert 'var stale = MonitorLogic.staleDomains(now, updates, root.staleAfterMs)' in text
     assert 'if (stale.length === 0) root.lastRefresh = root.refreshClock()' in text
     # The old unconditional update inside markDataFresh must be gone.
     # Extract just the markDataFresh function body to check.
-    fn_start = text.index('function markDataFresh(domain)')
+    fn_start = text.index('function markMetricFresh(metric)')
     fn_end = text.index('function updateDataStatus', fn_start)
     fn_body = text[fn_start:fn_end]
     assert fn_body.count('root.lastRefresh = root.refreshClock()') == 1
@@ -223,32 +342,11 @@ def test_charts_show_filling_indicator_until_history_is_full():
     assert 'visible: !root.historyFilling()' in text
 
 
-def test_health_banner_is_an_overlay_not_a_layout_element():
-    """P1#4: banner floats above content with z:10, no Layout properties on the Rectangle."""
+def test_health_banner_has_no_remaining_visual_element():
     text = source()
-    banner_start = text.index('id: healthBanner')
-    # Find the opening brace of the Rectangle containing healthBanner
-    rect_start = text.rindex('Rectangle {', 0, banner_start)
-    # Find the matching closing brace
-    depth = 0
-    i = rect_start
-    while i < len(text):
-        if text[i] == '{':
-            depth += 1
-        elif text[i] == '}':
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    banner = text[rect_start:i+1]
-    assert 'z: 10' in banner
-    assert 'anchors.top: parent.top' in banner
-    # The Rectangle itself must not have Layout properties (the RowLayout inside may).
-    # Check the first 4 lines after the Rectangle opening — that's where Rectangle
-    # properties live before nested children begin.
-    header = banner[:banner.index('RowLayout')]
-    assert 'Layout.fillWidth' not in header
-    assert 'Layout.preferredHeight' not in header
+    assert 'id: healthBanner' not in text
+    assert 'SYSTEM ATTENTION' not in text
+    assert 'GPU CRITICAL' not in text
 
 
 if __name__ == "__main__":
