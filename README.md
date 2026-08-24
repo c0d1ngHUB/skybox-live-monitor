@@ -1,18 +1,22 @@
 # Skybox Live Monitor
 
+![Skybox Live Monitor](screenshots/dashboard-preview.jpg)
+
 A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is designed for a dedicated status display and shows CPU, GPU, VRAM, RAM, network throughput, disk space, and the most relevant active processes.
 
 ## Highlights
 
-- Incident-oriented GPU/VRAM alerts with the two largest GPU consumers
-- Compact CPU, GPU, and RAM process summaries
+- CPU temperature display (like GPU card — no percentage, no progress bar)
+- GPU utilization and VRAM telemetry with top GPU processes
+- Compact CPU and RAM process summaries
 - Two-minute CPU/GPU and network history charts
+- Odysseus toggle button integrated into the SYSTEM LOAD row
 - NVIDIA VRAM telemetry via `nvidia-smi`
 - No telemetry, no external network requests, and no credentials
 
 ## Requirements
 
-- KDE Plasma 6
+- KDE Plasma 6 (Wayland or X11)
 - NVIDIA GPU and `nvidia-smi` for GPU/VRAM metrics (other panels still work without it)
 
 ## Install
@@ -32,6 +36,7 @@ Then add **Skybox Vertical System Dashboard** from Plasma's *Add Widgets* dialog
 For a development refresh:
 
 ```bash
+rm -rf ~/.cache/qmlcache
 systemctl --user restart plasma-plasmashell.service
 ```
 
