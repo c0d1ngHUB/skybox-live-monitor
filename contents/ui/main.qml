@@ -69,8 +69,6 @@ PlasmoidItem {
     property double previousCpuSampleMs: 0
     property var topRamProcesses: []
     property var topGpuProcesses: []
-    property var previousCpuSamples: ({})
-    property double previousCpuSampleMs: 0
     property int historySeconds: 120
     property var cpuHistory: []
     property var gpuHistory: []
