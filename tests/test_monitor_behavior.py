@@ -92,6 +92,44 @@ class MonitorBehaviorTests(unittest.TestCase):
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout), {"usedMiB": 100, "totalMiB": 1000})
 
+    def test_network_scale_uses_50_mbit_steps_for_download(self):
+        # 180 Mbit/s peak → 180/0.85 ≈ 207 Mbit → ceil(207/50)·50 = 250
+        samples = [180000000/8] * 5
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            f"console.log(m.networkScaleMbit({json.dumps(samples)},50,600));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(int(result.stdout.strip()), 250)
+
+    def test_network_scale_caps_at_600_mbit(self):
+        samples = [700000000/8] * 3
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            f"console.log(m.networkScaleMbit({json.dumps(samples)},50,600));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(int(result.stdout.strip()), 600)
+
+    def test_network_scale_uses_5_mbit_steps_for_upload(self):
+        # 12 Mbit/s peak → 12/0.85 ≈ 13.8 → ceil(13.8/5)·5 = 15
+        samples = [12000000/8] * 5
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            f"console.log(m.networkScaleMbit({json.dumps(samples)},5,50));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(int(result.stdout.strip()), 15)
+
+    def test_network_scale_idle_stays_at_minimum_step(self):
+        samples = [0, 1024, 2048]
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            f"console.log(m.networkScaleMbit({json.dumps(samples)},50,600)+\" \"+m.networkScaleMbit({json.dumps(samples)},5,50));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(result.stdout.strip(), "50 5")
+
     def test_network_detection_prefers_default_route_over_first_interface(self):
         command = command_for("netDetectSource")
         with tempfile.TemporaryDirectory() as tmp:

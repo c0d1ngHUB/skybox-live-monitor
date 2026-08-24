@@ -3,3 +3,4 @@ __pycache__/
 *.bak
 *.before-*
 .worktrees/
+.pytest_cache/

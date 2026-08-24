@@ -129,7 +129,7 @@ def test_metric_cards_reserve_a_real_kpi_column_without_overlap():
     assert 'property string heading: "TOP PROCESSES"' in text
     assert 'function fmtCompactCapacity' in text
     assert 'detail:root.fmtCompactCapacity(root.ramUsedBytes)' in text
-    assert 'root.fmtCompactVram(root.gpuVramUsedMiB)' in text
+    assert '"VRAM " + Math.round(root.vramPercent()) + "%"' in text
     assert 'id: processName' in text
     assert 'id: processValue' in text
     assert 'anchors.right: parent.right' in text
@@ -143,27 +143,30 @@ def test_compute_chart_has_dedicated_graph_and_timeline_space():
     assert 'height: 20' in text
 
 
-def test_network_uses_fixed_independent_scales_without_metadata_labels():
+def test_network_uses_dynamic_scale_ceilings_without_metadata_labels():
     text = source()
     assert 'id: networkLiveValues' in text
     assert 'id: networkMetadata' not in text
-    assert 'property real downloadScaleBytesPerSecond: 600000000 / 8' in text
-    assert 'property real uploadScaleBytesPerSecond: 50000000 / 8' in text
+    assert 'MonitorLogic.networkScaleMbit(root.downHistory, 50, 600)' in text
+    assert 'MonitorLogic.networkScaleMbit(root.upHistory, 5, 50)' in text
     assert 'Math.min(1, d[j] / root.downloadScaleBytesPerSecond)' in text
     assert 'Math.min(1, d[j] / root.uploadScaleBytesPerSecond)' in text
     assert 'Layout.preferredHeight: 288' in text
 
 
-def test_network_axes_show_100_mbit_download_and_10_mbit_upload_steps():
+def test_network_axes_follow_dynamic_ceilings_in_50_and_5_mbit_steps():
     text = source()
     assert 'text: "↓ MBIT/S"' in text
     assert 'text: "↑ MBIT/S"' in text
-    assert 'for (var i = 0; i <= 6; i++)' in text
-    assert '600 - i * 100' in text
-    assert 'for (var i = 0; i <= 5; i++)' in text
-    assert '50 - i * 10' in text
+    assert 'Math.round(maxMbit / 50)' in text  # download grid: 50 Mbit steps
+    assert 'maxMbit - i * 50' in text
+    assert 'Math.round(maxMbit / 5)' in text   # upload grid: 5 Mbit steps
+    assert 'maxMbit - i * 5' in text
     assert text.count('var plotLeft = 44') >= 2
     assert text.count('var chartWidth = width - plotLeft') >= 2
+    # Axis labels must not be clipped by Canvas left edge (gutter fix)
+    assert 'ctx.fillText(String(maxMbit - i * 50), 40 - 6' in text
+    assert 'ctx.fillText(String(maxMbit - i * 5), 40 - 6' in text
 
 
 def test_footer_uses_explicit_disk_and_uptime_labels():
@@ -190,9 +193,45 @@ def test_uptime_card_shows_load_proc_max_think_and_openai_keys():
     assert 'text: "LOAD " + root.loadAverage.toFixed(2); color: root.muted' in text
     assert 'text: "PROC " + root.processCount; color: root.muted' in text
     assert 'text: "MAX THINK: " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.muted' in text
-    assert 'text: "KEYS ACTIVE: " + root.openAiActiveKeys + "/" + root.openAiTotalKeys' in text
+    assert 'text: "KEYS " + root.openAiActiveKeys + "/' in text
     assert 'interval: 900000\n        running: true\n        repeat: true\n        onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)' in text
     assert 'text: "MAX THINK 24H "' not in text
+
+
+def test_odysseus_toggle_is_wired_to_native_app_process():
+    text = source()
+    # UI: toggle next to the clock header
+    assert 'id: odysseusToggle' in text
+    assert 'anchors.top: headerClock.bottom' in text
+    assert 'ODYSSEUS' in text
+    # State properties
+    assert 'property bool odysseusRunning: false' in text
+    assert 'property bool odysseusTogglePending: false' in text
+    # Status poller via pgrep
+    assert 'id: odysseusStatusSource' in text
+    assert "pgrep -f '[o]dysseus/venv/bin/python.*app.py'" in text
+    # Toggle source: start with venv python, stop via pkill
+    assert 'id: odysseusToggleSource' in text
+    assert '/venv/bin/python' in text
+    assert "pkill -f '[o]dysseus/venv/bin/python.*app.py'" in text
+    # Status polled periodically and once at startup
+    assert 'onTriggered: odysseusStatusSource.connectSource(odysseusStatusSource.command)' in text
+    assert text.count('odysseusStatusSource.connectSource(odysseusStatusSource.command)') >= 2
+
+
+def test_vram_fill_bar_replaces_vram_text_and_uses_orange_track():
+    text = source()
+    # Orange colour token exists for the VRAM bar
+    assert 'property color orange: "#FF9F43"' in text
+    # GPU card carries a vramFill field instead of the long "used / total" text
+    assert 'vramFill: root.vramPercent()' in text
+    assert '"VRAM " + Math.round(root.vramPercent()) + "%"' in text
+    # Bar renders when vramFill is present, orange by default, red at ≥85%
+    assert 'modelData.vramFill !== undefined' in text
+    assert 'Math.min(1, (modelData.vramFill || 0) / 100)' in text
+    assert '(modelData.vramFill || 0) >= 85 ? root.critical : root.orange' in text
+    # Old verbose VRAM text with used / total is gone
+    assert 'fmtCompactVram(root.gpuVramUsedMiB) + " / " + root.fmtCompactVram(root.gpuVramTotalMiB)' not in text
 
 
 def test_dashboard_uses_the_full_available_height_without_clipping_content():

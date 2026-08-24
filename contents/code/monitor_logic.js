@@ -63,11 +63,27 @@ function parseNvidiaMemory(output, gpuIndex) {
     return null
 }
 
+// Network axis: pick the smallest scale ceiling (in bytes/s) so that the
+// history peak fits with ~15% headroom. Ceilings grow in fixed Mbit/s steps
+// (download: 50-step grid, upload: 5-step grid) and never exceed capMbit.
+function networkScaleMbit(samples, stepMbit, capMbit) {
+    var peakBytes = 0
+    for (var i = 0; i < samples.length; i++) {
+        var v = Number(samples[i]) || 0
+        if (v > peakBytes) peakBytes = v
+    }
+    var needed = peakBytes * 8 * 1.15 // 15% headroom above peak
+    var neededMbit = needed / 1000000
+    var steps = Math.max(1, Math.ceil(neededMbit / stepMbit))
+    return Math.min(steps * stepMbit, capMbit)
+}
+
 if (typeof module !== "undefined") {
     module.exports = {
         historyX: historyX,
         staleDomains: staleDomains,
         parseNvidiaMemory: parseNvidiaMemory,
-        cpuProcessRates: cpuProcessRates
+        cpuProcessRates: cpuProcessRates,
+        networkScaleMbit: networkScaleMbit
     }
 }

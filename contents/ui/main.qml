@@ -20,9 +20,21 @@ PlasmoidItem {
     property real gpuVramTotalMiB: 0
     property real down: 0
     property real up: 0
-    // Independent fixed network chart scales, expressed internally as bytes/s.
-    property real downloadScaleBytesPerSecond: 600000000 / 8
-    property real uploadScaleBytesPerSecond: 50000000 / 8
+    // Dynamic network scales with hysteresis: grow immediately when the peak
+    // exceeds the current ceiling, but only shrink when the peak drops below
+    // 70% of it. Prevents axis flicker from transient spikes.
+    property real downloadScaleBytesPerSecond: 0
+    property real uploadScaleBytesPerSecond: 0
+    onDownHistoryChanged: {
+        var target = MonitorLogic.networkScaleMbit(root.downHistory, 50, 600) * 1000000 / 8
+        if (target >= root.downloadScaleBytesPerSecond || target < root.downloadScaleBytesPerSecond * 0.7)
+            root.downloadScaleBytesPerSecond = target
+    }
+    onUpHistoryChanged: {
+        var target = MonitorLogic.networkScaleMbit(root.upHistory, 5, 50) * 1000000 / 8
+        if (target >= root.uploadScaleBytesPerSecond || target < root.uploadScaleBytesPerSecond * 0.7)
+            root.uploadScaleBytesPerSecond = target
+    }
     property real previousRxBytes: -1
     property real previousTxBytes: -1
     property double previousNetworkSampleMs: 0
@@ -32,6 +44,8 @@ PlasmoidItem {
     property real hermesMaxThinkSeconds: 0
     property int openAiActiveKeys: -1
     property int openAiTotalKeys: -1
+    property bool odysseusRunning: false
+    property bool odysseusTogglePending: false
     property real diskUsedPercent: 0
     property real diskUsedBytes: 0
     property real diskTotalBytes: 0
@@ -70,6 +84,7 @@ PlasmoidItem {
     property color cyan: "#96F5F6"
     property color violet: "#DB91FF"
     property color blue: "#4FC3F7"
+    property color orange: "#FF9F43"
     property color warning: "#FFD166"
     property color critical: "#FF6B6B"
 
@@ -127,6 +142,20 @@ PlasmoidItem {
         if (hours > 0) return hours + "h " + ("0" + mins).slice(-2) + "m"
         if (mins > 0) return mins + "m " + ("0" + secs).slice(-2) + "s"
         return secs + "s"
+    }
+
+    // Odysseus toggle: spawn/stop the native uvicorn app. Status is polled via
+    // pgrep; no external service or API involved.
+    property string odysseusAppPy: "/home/m3kky/projects/odysseus/app.py"
+    function requestOdysseusToggle() {
+        if (root.odysseusTogglePending) return
+        root.odysseusTogglePending = true
+        var cmd = root.odysseusRunning ? odysseusToggleSource.stopCommand : odysseusToggleSource.startCommand
+        odysseusToggleSource.connectSource(cmd)
+    }
+    function handleOdysseusToggleDone(exitCode) {
+        root.odysseusTogglePending = false
+        odysseusStatusSource.connectSource(odysseusStatusSource.command)
     }
     // Keep typical idle and low-bandwidth traffic visible while preventing a zero-range chart.
     function historyPeak(history) {
@@ -190,7 +219,7 @@ PlasmoidItem {
     }
     function shortProcessName(name) {
         var leaf = (name || "PROCESS").split("/").pop()
-        return leaf.length > 12 ? leaf.slice(0, 11) + "…" : leaf
+        return leaf.length > 18 ? leaf.slice(0, 17) + "…" : leaf
     }
     function compactProcessValue(metricLabel, value) {
         if (metricLabel === "GPU") return (value || "").replace(" GiB", "G").replace(" MiB", "M")
@@ -254,7 +283,7 @@ PlasmoidItem {
             // --- Header ---
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 34
+                Layout.preferredHeight: 58
                 Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "SKYBOX"; color: root.cyan; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 28; font.letterSpacing: 3 }
                 Text {
                     id: headerClock
@@ -266,6 +295,37 @@ PlasmoidItem {
                     font.bold: true
                     font.pixelSize: 28
                     font.letterSpacing: 3
+                }
+                Rectangle {
+                    id: odysseusToggle
+                    anchors.top: headerClock.bottom
+                    anchors.topMargin: 14
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    height: 30
+                    width: toggleLabel.width + 28
+                    radius: 15
+                    color: root.odysseusRunning
+                        ? (toggleHover.containsMouse ? Qt.rgba(0.15, 0.65, 0.7, 0.85) : Qt.rgba(0.035, 0.45, 0.52, 0.85))
+                        : (toggleHover.containsMouse ? Qt.rgba(0.15, 0.35, 0.5, 0.9) : Qt.rgba(0.035, 0.22, 0.34, 0.9))
+                    border.width: root.odysseusRunning ? 2 : 1
+                    border.color: root.odysseusRunning ? root.cyan : root.muted
+                    Behavior on color { ColorAnimation { duration: 200 } }
+                    Text {
+                        id: toggleLabel
+                        anchors.centerIn: parent
+                        text: root.odysseusTogglePending ? "ODYSSEUS …" : ("ODYSSEUS " + (root.odysseusRunning ? "ON" : "OFF"))
+                        color: root.odysseusTogglePending ? root.warning : (root.odysseusRunning ? root.cyan : root.muted)
+                        font.family: "DejaVu Sans Mono"
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
+                    MouseArea {
+                        id: toggleHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.requestOdysseusToggle()
+                    }
                 }
                 Text {
                     id: telemetryStatus
@@ -390,7 +450,7 @@ PlasmoidItem {
                 Repeater {
                     model: [
                         {label:"CPU", value:Math.round(root.cpu) + "%", detail:Math.round(root.cpuTemp) + "°C", color:root.cyan, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel: root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0)},
-                        {label:"GPU", value:Math.round(root.gpu) + "%", detail:"VRAM " + Math.round(root.vramPercent()) + "% · " + root.fmtCompactVram(root.gpuVramUsedMiB) + " / " + root.fmtCompactVram(root.gpuVramTotalMiB), detail2:Math.round(root.gpuTemp) + "°C", detail2Color:root.tempColor(root.gpuTemp, root.muted), detail3:root.gpuTopProcess, color:root.violet, detailColor:root.usageColor(root.vramPercent(), root.violet), healthLevel: (root.gpuTemp >= 85 || root.vramPercent() >= 95) ? 2 : ((root.gpuTemp >= 75 || root.vramPercent() >= 85) ? 1 : 0)},
+                        {label:"GPU", value:Math.round(root.gpu) + "%", detail:"VRAM " + Math.round(root.vramPercent()) + "%", detail2:Math.round(root.gpuTemp) + "°C", detail2Color:root.tempColor(root.gpuTemp, root.muted), detail3:root.gpuTopProcess, color:root.violet, detailColor:root.usageColor(root.vramPercent(), root.orange), healthLevel: (root.gpuTemp >= 85 || root.vramPercent() >= 95) ? 2 : ((root.gpuTemp >= 75 || root.vramPercent() >= 85) ? 1 : 0), vramFill: root.vramPercent()},
                         {label:"RAM", value:Math.round(root.ram) + "%", detail:root.fmtCompactCapacity(root.ramUsedBytes) + " / " + root.fmtCompactCapacity(root.ramTotalBytes), color:root.blue, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel: root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0)}
                     ]
                     delegate: Rectangle {
@@ -407,9 +467,65 @@ PlasmoidItem {
                                 anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
                                 width: Math.max(116, parent.width * 0.34); spacing: 4
                                 Text { text: modelData.label; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                                Text { text: modelData.value; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 28; font.bold: true }
-                                Text { width: parent.width - 4; text: modelData.detail; color: modelData.detailColor; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
-                                Text { width: parent.width - 4; text: modelData.detail2 || ""; visible: !!modelData.detail2; color: modelData.detail2Color || root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
+
+                                // --- GPU card: temperature as the large metric + utilization bar ---
+                                Text {
+                                    visible: modelData.label === "GPU"
+                                    text: Math.round(root.gpuTemp) + "°C"
+                                    color: root.cyan
+                                    font.family: "DejaVu Sans"
+                                    font.pixelSize: 28
+                                    font.bold: true
+                                }
+                                // VRAM bar with percentage overlay (GPU only)
+                                Item {
+                                    width: parent.width - 4
+                                    height: 22
+                                    visible: modelData.label === "GPU"
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 11
+                                        color: Qt.rgba(1, 1, 1, 0.08)
+                                    }
+                                    Rectangle {
+                                        height: parent.height
+                                        width: parent.width * Math.min(1, root.vramPercent() / 100)
+                                        radius: 11
+                                        color: root.vramPercent() >= 85 ? root.critical : root.orange
+                                        Behavior on width { NumberAnimation { duration: 350; easing.type: Easing.OutCubic } }
+                                    }
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: Math.round(root.vramPercent()) + "%"
+                                        color: root.vramPercent() >= 40 ? "#000000" : root.ink
+                                        font.family: "DejaVu Sans Mono"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                    }
+                                }
+
+                                // --- CPU / RAM cards: original layout ---
+                                Text { visible: modelData.label !== "GPU"; text: modelData.value; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 28; font.bold: true }
+                                Text { visible: modelData.label !== "GPU"; width: parent.width - 4; text: modelData.detail; color: modelData.detailColor; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
+                                Text { visible: modelData.label !== "GPU" && !!modelData.detail2; text: modelData.detail2 || ""; color: modelData.detail2Color || root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
+                                // VRAM fill bar — only on GPU card (original position, kept for non-GPU safety)
+                                Item {
+                                    width: parent.width - 4
+                                    height: 8
+                                    visible: modelData.label !== "GPU" && modelData.vramFill !== undefined
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 4
+                                        color: Qt.rgba(1, 1, 1, 0.08)
+                                    }
+                                    Rectangle {
+                                        height: parent.height
+                                        width: parent.width * Math.min(1, (modelData.vramFill || 0) / 100)
+                                        radius: 4
+                                        color: (modelData.vramFill || 0) >= 85 ? root.critical : root.orange
+                                        Behavior on width { NumberAnimation { duration: 350; easing.type: Easing.OutCubic } }
+                                    }
+                                }
                             }
                             Rectangle { id: metricDivider; anchors.left: metricKpi.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: modelData.color; opacity: 0.38 }
                             Column {
@@ -433,7 +549,7 @@ PlasmoidItem {
                                             anchors.rightMargin: 8
                                             text: root.shortProcessName(modelData.name)
                                             color: index === 0 ? root.ink : root.muted
-                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 13
+                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 12
                                             elide: Text.ElideRight
                                         }
                                         Text {
@@ -441,7 +557,7 @@ PlasmoidItem {
                                             anchors.right: parent.right
                                             text: root.compactProcessValue(processDetails.metricLabel, processDetails.metricLabel === "CPU" ? modelData.cpu + "%" : (processDetails.metricLabel === "RAM" ? modelData.ram : modelData.gpu))
                                             color: index === 0 ? root.ink : root.muted
-                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 13
+                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 12
                                             horizontalAlignment: Text.AlignRight
                                         }
                                     }
@@ -463,12 +579,6 @@ PlasmoidItem {
                 clip: true
 
                 Text { id: networkTitle; anchors.left: parent.left; anchors.top: parent.top; text: "NETWORK"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
-                Row {
-                    id: networkLegend
-                    anchors.left: parent.left; anchors.top: networkTitle.bottom; anchors.topMargin: 26; spacing: 18
-                    Text { text: "↓ DOWNLOAD"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
-                    Text { text: "↑ UPLOAD"; color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
-                }
                 Column {
                     id: networkDataBlock
                     anchors.right: parent.right; anchors.top: networkTitle.bottom; anchors.topMargin: 22; spacing: 4
@@ -499,14 +609,16 @@ PlasmoidItem {
                                 ctx.imageSmoothingEnabled = true
                                 var plotLeft = 44
                                 var chartWidth = width - plotLeft
+                                var maxMbit = Math.round(root.downloadScaleBytesPerSecond * 8 / 1000000)
+                                var gridDivisions = Math.max(1, Math.round(maxMbit / 50))
                                 ctx.strokeStyle = "rgba(160,200,216,0.22)"; ctx.lineWidth = 1
                                 ctx.fillStyle = root.muted.toString()
                                 ctx.font = "11px 'DejaVu Sans Mono'"
                                 ctx.textAlign = "right"
-                                for (var i = 0; i <= 6; i++) {
-                                    var y = height * i / 6
+                                for (var i = 0; i <= gridDivisions; i++) {
+                                    var y = height * i / gridDivisions
                                     ctx.beginPath(); ctx.moveTo(plotLeft, y); ctx.lineTo(width, y); ctx.stroke()
-                                    ctx.fillText(String(600 - i * 100), plotLeft - 6, Math.max(10, Math.min(height - 2, y + 4)))
+                                    ctx.fillText(String(maxMbit - i * 50), 40 - 6, Math.max(10, Math.min(height - 2, y + 4)))
                                 }
                                 ctx.strokeStyle = "rgba(160,200,216,0.12)"; ctx.lineWidth = 1
                                 var midTick = plotLeft + chartWidth / 2
@@ -552,14 +664,16 @@ PlasmoidItem {
                                 ctx.imageSmoothingEnabled = true
                                 var plotLeft = 44
                                 var chartWidth = width - plotLeft
+                                var maxMbit = Math.round(root.uploadScaleBytesPerSecond * 8 / 1000000)
+                                var gridDivisions = Math.max(1, Math.round(maxMbit / 5))
                                 ctx.strokeStyle = "rgba(160,200,216,0.22)"; ctx.lineWidth = 1
                                 ctx.fillStyle = root.muted.toString()
                                 ctx.font = "11px 'DejaVu Sans Mono'"
                                 ctx.textAlign = "right"
-                                for (var i = 0; i <= 5; i++) {
-                                    var y = height * i / 5
+                                for (var i = 0; i <= gridDivisions; i++) {
+                                    var y = height * i / gridDivisions
                                     ctx.beginPath(); ctx.moveTo(plotLeft, y); ctx.lineTo(width, y); ctx.stroke()
-                                    ctx.fillText(String(50 - i * 10), plotLeft - 6, Math.max(10, Math.min(height - 2, y + 4)))
+                                    ctx.fillText(String(maxMbit - i * 5), 40 - 6, Math.max(10, Math.min(height - 2, y + 4)))
                                 }
                                 ctx.strokeStyle = "rgba(160,200,216,0.12)"; ctx.lineWidth = 1
                                 var midTick = plotLeft + chartWidth / 2
@@ -650,22 +764,25 @@ PlasmoidItem {
                             Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "UPTIME"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                             Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtUptime(root.uptimeSeconds); color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
-                        Row {
+                        Grid {
                             id: systemMetaRow
                             width: parent.width
-                            height: 20
-                            spacing: 14
+                            columns: 2
+                            columnSpacing: 14
+                            rowSpacing: 2
                             Text { text: "LOAD " + root.loadAverage.toFixed(2); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
-                            Text { text: "PROC " + root.processCount; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
+                            Text { text: "PROC " + root.processCount; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; horizontalAlignment: Text.AlignRight; width: (parent.width - 14) / 2 }
                             Text { text: "MAX THINK: " + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true }
-                        }
-                        Text {
-                            visible: root.openAiActiveKeys >= 0 && root.openAiTotalKeys >= 0
-                            text: "KEYS ACTIVE: " + root.openAiActiveKeys + "/" + root.openAiTotalKeys
-                            color: root.cyan
-                            font.family: "DejaVu Sans Mono"
-                            font.pixelSize: 12
-                            font.bold: true
+                            Text {
+                                visible: root.openAiActiveKeys >= 0 && root.openAiTotalKeys >= 0
+                                text: "KEYS " + root.openAiActiveKeys + "/" + root.openAiTotalKeys
+                                color: root.cyan
+                                font.family: "DejaVu Sans Mono"
+                                font.pixelSize: 12
+                                font.bold: true
+                                horizontalAlignment: Text.AlignRight
+                                width: (parent.width - 14) / 2
+                            }
                         }
                     }
                 }
@@ -743,6 +860,42 @@ PlasmoidItem {
             if (!match) return
             root.openAiActiveKeys = parseInt(match[1])
             root.openAiTotalKeys = parseInt(match[2])
+        }
+    }
+
+    // Odysseus process status + control. Native app.py under venv python.
+    PlasmaSupport.DataSource {
+        id: odysseusStatusSource
+        engine: "executable"
+        connectedSources: []
+        property string command: "pgrep -f '[o]dysseus/venv/bin/python.*app.py' >/dev/null && echo 1 || echo 0"
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            var s = buffer.trim()
+            buffer = ""
+            disconnectSource(source)
+            root.odysseusRunning = (s === "1")
+        }
+    }
+
+    PlasmaSupport.DataSource {
+        id: odysseusToggleSource
+        engine: "executable"
+        connectedSources: []
+        property string appPy: root.odysseusAppPy
+        property string projectDir: appPy.replace(/\/app\.py$/, "")
+        property string venvPython: projectDir + "/venv/bin/python"
+        property string startCommand: "cd '" + projectDir + "' && setsid '" + venvPython + "' app.py >/tmp/odysseus-widget.log 2>&1 &"
+        property string stopCommand: "pkill -f '[o]dysseus/venv/bin/python.*app.py' || true"
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            buffer = ""
+            disconnectSource(source)
+            root.handleOdysseusToggleDone(data["exit code"])
         }
     }
 
@@ -924,6 +1077,7 @@ PlasmoidItem {
         processCountSource.connectSource(processCountSource.command)
         hermesThinkSource.connectSource(hermesThinkSource.command)
         openAiKeysSource.connectSource(openAiKeysSource.command)
+        odysseusStatusSource.connectSource(odysseusStatusSource.command)
         netDetectSource.connectSource(netDetectSource.command)
         root.currentTime = root.refreshClock()
         root.lastRefresh = root.refreshClock()
@@ -976,6 +1130,13 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
+    }
+
+    Timer {
+        interval: 5000
+        running: true
+        repeat: true
+        onTriggered: odysseusStatusSource.connectSource(odysseusStatusSource.command)
     }
 
     Timer {
