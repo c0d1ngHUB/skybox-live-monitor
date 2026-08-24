@@ -39,6 +39,8 @@ function cpuProcessRates(previousByPid, samples, elapsedMs, limit) {
         if (!previous) continue
         var deltaSeconds = Number(sample.cpuSeconds) - Number(previous.cpuSeconds)
         if (!isFinite(deltaSeconds) || deltaSeconds < 0) continue
+        // percent = delta CPU-seconds / elapsed seconds * 100
+        // (elapsedMs in ms → *1000 for seconds, *100 for percent → 100000)
         rates.push({
             pid: sample.pid,
             name: sample.name,

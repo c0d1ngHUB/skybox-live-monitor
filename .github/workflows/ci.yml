@@ -27,3 +27,7 @@ jobs:
         run: python3 tests/test_dashboard_source.py
       - name: Run behavioral regression tests
         run: python3 tests/test_monitor_behavior.py
+      - name: Run Hermes think-time tests
+        run: python3 tests/test_hermes_think_time.py
+      - name: Run OpenAI key-count tests
+        run: python3 tests/test_openai_key_count.py

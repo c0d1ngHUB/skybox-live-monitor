@@ -129,11 +129,6 @@ PlasmoidItem {
         return secs + "s"
     }
     // Keep typical idle and low-bandwidth traffic visible while preventing a zero-range chart.
-    function netPeak() {
-        var peak = 16 * 1024
-        for (var n = 0; n < root.downHistory.length; n++) peak = Math.max(peak, root.downHistory[n], root.upHistory[n])
-        return peak
-    }
     function historyPeak(history) {
         var peak = 0
         for (var n = 0; n < history.length; n++) peak = Math.max(peak, history[n] || 0)
