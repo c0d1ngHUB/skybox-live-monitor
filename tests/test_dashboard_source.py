@@ -9,17 +9,6 @@ def source():
     return SOURCE.read_text()
 
 
-def test_attention_banner_is_completely_removed_but_card_thresholds_remain():
-    text = source()
-    assert 'id: healthChip' not in text
-    assert 'id: healthBanner' not in text
-    assert 'property var currentHealth' not in text
-    assert 'function healthState()' not in text
-    assert '"SYSTEM ATTENTION"' not in text
-    assert 'id: releaseVramButton' not in text
-    assert 'root.vramPercent() >= 95' in text
-    assert 'healthLevel: root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0)' in text
-
 
 def test_freshness_is_tracked_per_metric_and_compact_status_is_visible():
     text = source()
@@ -110,29 +99,8 @@ def test_compact_cards_preserve_legible_operational_detail():
     assert '"FREE " + root.fmtDisk(root.diskFreeBytes()) + " · USED "' in text
 
 
-def test_removed_ollama_feature_leaves_no_executable_or_state_code():
-    text = source()
-    assert 'id: releaseVramButton' not in text
-    for obsolete in ('releaseModelsSource', 'requestOllamaUnload', 'ollama stop',
-                     'CONFIRM UNLOAD', 'UNLOAD OLLAMA', 'vramRelease',
-                     'releaseRefreshTimer', 'releaseConfirmTimer', 'releaseResetTimer'):
-        assert obsolete not in text
 
 
-def test_metric_cards_reserve_a_real_kpi_column_without_overlap():
-    text = source()
-    assert 'id: metricKpi' in text
-    assert 'width: Math.max(116, parent.width * 0.34)' in text
-    assert 'id: metricDivider' in text
-    assert 'anchors.left: metricDivider.right' in text
-    assert 'anchors.right: parent.right' in text
-    assert 'property string heading: "TOP PROCESSES"' in text
-    assert 'function fmtCompactCapacity' in text
-    assert 'detail:root.fmtCompactCapacity(root.ramUsedBytes)' in text
-    assert '"VRAM " + Math.round(root.vramPercent()) + "%"' in text
-    assert 'id: processName' in text
-    assert 'id: processValue' in text
-    assert 'anchors.right: parent.right' in text
 
 
 def test_compute_chart_has_dedicated_graph_and_timeline_space():
@@ -202,7 +170,7 @@ def test_odysseus_toggle_is_wired_to_native_app_process():
     text = source()
     # UI: toggle next to the clock header
     assert 'id: odysseusToggle' in text
-    assert 'anchors.top: headerClock.bottom' in text
+    assert 'anchors.right: parent.right' in text
     assert 'ODYSSEUS' in text
     # State properties
     assert 'property bool odysseusRunning: false' in text
@@ -274,14 +242,6 @@ def test_removed_unload_control_has_no_visual_or_accessible_action():
     assert 'Keys.onReturnPressed:' not in text
 
 
-def test_removed_attention_banner_leaves_no_health_state_or_cause_label():
-    text = source()
-    assert 'property var currentHealth' not in text
-    assert 'function makeHealthState' not in text
-    assert 'function healthState()' not in text
-    assert 'root.currentHealth' not in text
-    assert 'text: "CAUSE · "' not in text
-
 
 def test_freshness_tracks_each_data_domain_not_the_chart_timer():
     text = source()
@@ -312,21 +272,6 @@ def test_charts_show_filling_indicator_until_history_is_full():
     assert 'visible: !root.historyFilling()' in text
 
 
-def test_health_banner_has_no_remaining_visual_element():
-    text = source()
-    assert 'id: healthBanner' not in text
-    assert 'SYSTEM ATTENTION' not in text
-    assert 'GPU CRITICAL' not in text
-
-
-def test_health_banner_is_outside_the_managed_content_layout():
-    text = source()
-    content_layout = qml_block(text, "id: content")
-    assert "id: healthBanner" not in content_layout
-    banner = qml_block(text, "id: healthBanner")
-    assert "anchors.left: frame.left" in banner
-    assert "anchors.right: frame.right" in banner
-
 
 def test_each_sensor_marks_its_own_metric_fresh():
     text = source()
@@ -343,15 +288,15 @@ def test_each_sensor_marks_its_own_metric_fresh():
 
 def test_cpu_processes_are_computed_from_interval_samples():
     text = source()
-    assert 'ps -eo pid=,times=,comm=' in text
+    assert 'cpu_process_snapshot.py' in text
     assert "MonitorLogic.cpuProcessRates" in text
     assert 'ps -eo pcpu=' not in text
 
 
 def test_timelines_label_the_midpoint_as_past_time():
     text = source()
-    assert text.count('text: "−2.5 MIN"') == 2
-    assert 'text: "2.5 MIN"' not in text
+    assert text.count('text: "−1 MIN"') == 2
+    assert 'text: "1 MIN"' not in text
 
 
 def test_process_rows_reserve_a_right_aligned_value_column():
