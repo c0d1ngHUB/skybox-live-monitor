@@ -10,7 +10,8 @@ function historyX(index, length, width, maxSamples) {
 function staleDomains(nowMs, updates, staleAfterMs) {
     var domains = [
         ["cpu", "CPU", ["cpuUsage", "cpuTemperature"]],
-        ["gpu", "GPU", ["gpuUsage", "gpuTemperature", "gpuVram"]],
+        ["gpu0", "GPU 0", ["gpu0Telemetry"]],
+        ["gpu1", "GPU 1", ["gpu1Telemetry"]],
         ["memory", "MEMORY", ["memoryPercent", "memoryUsed", "memoryTotal"]],
         ["network", "NETWORK", ["network"]],
         ["disk", "DISK", ["diskPercent", "diskUsed", "diskTotal"]],

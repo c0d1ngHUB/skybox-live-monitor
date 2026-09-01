@@ -4,6 +4,7 @@ from pathlib import Path
 
 SOURCE = Path(__file__).parents[1] / "contents/ui/main.qml"
 AI_HELPER = Path(__file__).parents[1] / "contents/code/ai_services_status.py"
+GPU_HELPER = Path(__file__).parents[1] / "contents/code/gpu_telemetry.py"
 CI_WORKFLOW = Path(__file__).parents[1] / ".github/workflows/ci.yml"
 
 
@@ -35,15 +36,15 @@ def test_telemetry_status_text_is_width_bounded_for_elision():
 
 def test_process_sources_distinguish_empty_results_from_command_failures():
     text = source()
-    vram = text[text.index("id: vramSource"):text.index("id: topCpuSource")]
+    gpu = text[text.index("id: gpuTelemetrySource"):text.index("id: topCpuSource")]
     cpu = text[text.index("id: topCpuSource"):text.index("id: topRamSource")]
-    ram = text[text.index("id: topRamSource"):text.index("id: topGpuSource")]
-    gpu = text[text.index("id: topGpuSource"):text.index("id: netDetectSource")]
-    assert "gpuProcessUnavailable" not in vram
+    ram = text[text.index("id: topRamSource"):text.index("id: netDetectSource")]
     assert 'root.cpuProcessUnavailable = Number(data["exit code"]) !== 0' in cpu
     assert 'root.ramProcessUnavailable = Number(data["exit code"]) !== 0' in ram
-    assert 'root.gpuProcessUnavailable = Number(data["exit code"]) !== 0' in gpu
-    assert 'root.gpuProcessCount === 0 ? "NO ACTIVE WORKLOAD"' in text
+    assert 'root.gpuTelemetryUnavailable = Number(data["exit code"]) !== 0' in gpu
+    assert 'root.applyGpuTelemetry(null, 0)' in gpu
+    assert 'root.applyGpuTelemetry(null, 1)' in gpu
+    assert '"NO ACTIVE WORKLOAD"' in text
 
 
 def test_ci_executes_all_pytest_suites_instead_of_importing_test_files():
@@ -56,18 +57,18 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     text = source()
     assert 'function shortProcessName(name)' in text
     assert 'function compactProcessValue(metricLabel, value)' in text
-    assert 'detail:Math.round(root.gpuTemp) + "°C"' in text
-    assert 'detail2:"VRAM " + Math.round(root.vramPercent()) + "%"' in text
-    assert 'powerText: root.gpuPowerText()' in text
-    assert 'text: modelData.detail2 || ""' in text
+    assert 'detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE"' in text
+    assert 'detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE"' in text
+    assert 'powerText:root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts)' in text
+    assert 'powerText:root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts)' in text
     assert 'text: modelData.powerText || ""' in text
-    assert 'vramFill: Math.max(0, Math.min(100, root.vramPercent()))' in text
+    assert 'vramFill:root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB)' in text
+    assert 'vramFill:root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB)' in text
     assert 'text: "VRAM " + Math.round(modelData.vramFill || 0) + "%"' in text
     assert 'gpuFill:' not in text
-    assert 'topGpuSource' in text
-    assert '--query-compute-apps=process_name,used_memory' in text
-    assert 'gpuProcessCount' in text
-    assert 'gpuTopProcess' in text
+    assert 'id: gpuTelemetrySource' in text
+    assert 'gpu_telemetry.py' in text
+    assert 'gpu0ProcessCount' in text and 'gpu1ProcessCount' in text
 
 
 def test_cpu_card_shows_top_two_processes_in_its_detail_area():
@@ -76,8 +77,8 @@ def test_cpu_card_shows_top_two_processes_in_its_detail_area():
     assert 'id: topCpuSource' in text
     assert 'cpu_process_snapshot.py' in text
     assert 'MonitorLogic.cpuProcessRates' in text
-    assert 'property string heading: metricLabel === "CPU" ? "TOP · CPU %" : (metricLabel === "GPU" ? "TOP · VRAM" : "TOP · RAM")' in text
-    assert 'property var processes: metricLabel === "CPU" ? root.topCpuProcesses' in text
+    assert 'property string heading: metricKind === "cpu" ? "TOP · CPU %" : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")' in text
+    assert 'processes:root.topCpuProcesses' in text
     assert 'MonitorLogic.cpuProcessRates(root.previousCpuSamples, samples, elapsedMs, 2)' in text
     assert 'onTriggered: topCpuSource.connectSource(topCpuSource.command)' in text
 
@@ -87,7 +88,7 @@ def test_ram_card_shows_top_two_processes_in_its_detail_area():
     assert 'property var topRamProcesses' in text
     assert 'id: topRamSource' in text
     assert 'ps -eo rss=,comm= --sort=-rss | head -2' in text
-    assert 'metricLabel === "RAM" ? root.topRamProcesses' in text
+    assert 'processes:root.topRamProcesses' in text
     assert 'if (isFinite(mib) && mib >= 1024) return (mib / 1024).toFixed(1) + " GiB"' in text
     assert 'processes.length < 2' in text
     assert 'onTriggered: topRamSource.connectSource(topRamSource.command)' in text
@@ -96,19 +97,16 @@ def test_ram_card_shows_top_two_processes_in_its_detail_area():
 def test_gpu_card_shows_top_two_processes_but_counts_all_workloads():
     """The card is capped at two rows while its workload count remains exact."""
     text = source()
-    assert 'property var topGpuProcesses: []' in text
-    assert 'id: topGpuSource' in text
-    assert '--query-compute-apps=process_name,used_memory' in text
-    gpu_source = text[text.index('id: topGpuSource'):text.index('id: netDetectSource')]
-    assert '| head -2' not in gpu_source
-    assert 'validProcessCount++' in text
-    assert 'if (processes.length < 2)' in text
-    assert 'root.gpuProcessCount = validProcessCount' in text
-    assert 'root.fmtVram(candidates[j].mib)' in text
-    assert 'root.topGpuProcesses = processes' in text
-    assert 'property string heading: metricLabel === "CPU" ? "TOP · CPU %" : (metricLabel === "GPU" ? "TOP · VRAM" : "TOP · RAM")' in text
-    assert 'metricLabel === "GPU"' in text
-    assert 'onTriggered: topGpuSource.connectSource(topGpuSource.command)' in text
+    helper = GPU_HELPER.read_text()
+    assert 'property var topGpu0Processes: []' in text
+    assert 'property var topGpu1Processes: []' in text
+    assert 'gpu_uuid,pid,process_name,used_memory' in helper
+    assert 'process_count' in helper
+    assert 'processes[:2]' in helper
+    assert 'service_name_for_pid' in helper
+    assert 'processes:root.topGpu0Processes' in text
+    assert 'processes:root.topGpu1Processes' in text
+    assert 'onTriggered: gpuTelemetrySource.connectSource(gpuTelemetrySource.command)' in text
 
 
 def test_charts_are_two_minute_and_visually_readable():
@@ -127,7 +125,8 @@ def test_charts_are_two_minute_and_visually_readable():
 
 def test_compact_cards_preserve_legible_operational_detail():
     text = source()
-    assert 'Layout.preferredHeight: 150' in text
+    assert 'Layout.preferredHeight: 278' in text
+    assert 'columns: 2' in text and 'rows: 2' in text
     assert 'Layout.preferredHeight: 94' in text
     assert 'font.pixelSize: 13' in text
     assert 'elide: Text.ElideRight' in text
@@ -142,7 +141,7 @@ def test_compact_cards_preserve_legible_operational_detail():
 
 def test_compute_chart_has_dedicated_graph_and_timeline_space():
     text = source()
-    assert 'Layout.preferredHeight: 218' in text
+    assert 'Layout.preferredHeight: 190' in text
     assert 'anchors.bottom: computeTimeline.top' in text
     assert 'anchors.bottomMargin: 10' in text
     assert 'height: 20' in text
@@ -217,14 +216,14 @@ def test_gpu_card_uses_primary_gpu_value_and_one_unambiguous_vram_bar():
     text = source()
     assert 'property color orange: "#FF9F43"' in text
     assert 'color: (modelData.vramFill || 0) >= 85 ? root.critical : root.cyan' in text
-    assert 'vramFill: Math.max(0, Math.min(100, root.vramPercent()))' in text
+    assert text.count('vramFill:root.vramPercent(') == 2
     assert 'text: "VRAM " + Math.round(modelData.vramFill || 0) + "%"' in text
     assert 'Math.max(0, Math.min(1, (modelData.vramFill || 0) / 100))' in text
     assert '(modelData.vramFill || 0) >= 85 ? root.critical : root.cyan' in text
     assert 'gpuFill:' not in text
     assert 'function fmtMemoryPair(usedBytes, totalBytes)' in text
     assert 'detail:root.fmtMemoryPair(root.ramUsedBytes, root.ramTotalBytes)' in text
-    assert 'fmtCompactVram(root.gpuVramUsedMiB) + " / " + root.fmtCompactVram(root.gpuVramTotalMiB)' not in text
+    assert 'property real gpuVramUsedMiB' not in text
 
 
 def test_dashboard_uses_the_full_available_height_without_clipping_content():
@@ -239,7 +238,7 @@ def test_dashboard_uses_the_full_available_height_without_clipping_content():
     assert 'anchors.bottomMargin: 20' in text
     assert 'height: implicitHeight' not in text
     assert 'Layout.fillHeight: true' in text
-    assert 'Layout.minimumHeight: 180' in text
+    assert 'Layout.minimumHeight: 160' in text
     assert 'Layout.minimumHeight: 230' in text
 
 
@@ -278,8 +277,8 @@ def test_freshness_tracks_each_data_domain_not_the_chart_timer():
     timer_block = text[text.index('interval: 1000', text.index('root.currentTime = root.refreshClock()')):text.index('    // Re-detect network interface every 30s in case of hotplug', text.index('interval: 1000', text.index('root.currentTime = root.refreshClock()')))]
     assert 'root.lastRefresh = root.refreshClock()' not in timer_block
     assert 'function markMetricFresh(metric)' in text
-    for metric in ('cpuUsage', 'cpuTemperature', 'gpuUsage', 'gpuTemperature',
-                   'gpuVram', 'memoryPercent', 'memoryUsed', 'memoryTotal',
+    for metric in ('cpuUsage', 'cpuTemperature', 'gpu0Telemetry', 'gpu1Telemetry',
+                   'memoryPercent', 'memoryUsed', 'memoryTotal',
                    'network', 'diskPercent', 'diskUsed', 'diskTotal',
                    'uptime', 'loadAverage'):
         assert f'root.markMetricFresh("{metric}")' in text
@@ -308,7 +307,7 @@ def test_charts_show_filling_indicator_until_history_is_full():
 def test_each_sensor_marks_its_own_metric_fresh():
     text = source()
     expected = {
-        "cpuUsage", "cpuTemperature", "gpuUsage", "gpuTemperature", "gpuVram",
+        "cpuUsage", "cpuTemperature", "gpu0Telemetry", "gpu1Telemetry",
         "memoryPercent", "memoryUsed", "memoryTotal", "network", "diskPercent",
         "diskUsed", "diskTotal", "uptime", "loadAverage",
     }
@@ -351,12 +350,16 @@ def test_oauth_state_affects_global_status_and_header_has_one_status_source():
     assert 'font.pixelSize: 15' in telemetry
 
 
-def test_system_load_graph_plots_gpu_only_without_motion():
+def test_system_load_graph_plots_both_gpus_without_cpu_or_motion():
     text = source()
-    assert 'text: "━━ GPU LOAD"' in text
+    assert 'text: "━━ GPU 0 · RTX PRO 4000"' in text
+    assert 'text: "━━ GPU 1 · RTX 3060 Ti"' in text
     assert 'CPU LOAD' not in text
     assert 'plot(root.cpuHistory' not in text
-    assert 'plot(root.gpuHistory, root.violet, "rgba(219,145,255,0.12)")' in text
+    assert 'plot(root.gpu0History, root.violet' in text
+    assert 'plot(root.gpu1History, root.cyan' in text
+    assert 'var plotHeight = Math.max(1, height - 4)' in text
+    assert 'height - plotTop - (root.clamp(data[j]) / 100) * plotHeight' in text
     assert 'NumberAnimation' not in text
 
 
@@ -369,9 +372,9 @@ def test_timelines_remain_labeled_while_history_is_filling():
 
 def test_gpu_power_uses_a_compact_bounded_draw_over_limit_label():
     text = source()
-    assert 'function gpuPowerText()' in text
+    assert 'function gpuPowerText(drawValue, limitValue)' in text
     assert 'return "POWER " + draw.toFixed(0) + "/" + limit.toFixed(0) + " W"' in text
-    power_block = text[text.index('visible: modelData.label === "GPU" && !!modelData.powerText'):text.index('// --- CPU card:')]
+    power_block = text[text.index('visible: modelData.kind === "gpu" && !!modelData.powerText'):text.index('// --- CPU card:')]
     assert 'width: parent.width - 4' in power_block
     assert 'elide: Text.ElideRight' in power_block
 
@@ -389,12 +392,12 @@ def test_ai_services_helper_is_local_only_and_null_safe_for_weekly_usage():
     assert '127.0.0.1:9177/health' in text
     assert '127.0.0.1:11435/health' in text
     assert '127.0.0.1:11435/v1/models' in text
-    assert 'nvidia-smi' in text
+    assert 'nvidia-smi' not in text
     assert 'http://' in text and '127.0.0.1' in text
     assert 'requests' not in text
 
 
-def test_ai_services_section_and_gpu_power_are_rendered_compactly():
+def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     text = source()
     assert 'AI SERVICES' in text
     assert 'root.hermesGatewayState' in text
@@ -403,8 +406,8 @@ def test_ai_services_section_and_gpu_power_are_rendered_compactly():
     assert 'root.localLlmModelName' in text
     assert 'QWEN 3.8' in text
     assert 'POWER ' in text
-    assert 'root.gpuPowerDrawWatts' in text
-    assert 'root.gpuPowerLimitWatts' in text
+    assert 'root.gpu0PowerDrawWatts' in text and 'root.gpu1PowerDrawWatts' in text
+    assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text
     assert 'elide: Text.ElideRight' in text
     assert 'height: 44' in text
     assert 'Layout.preferredHeight: 170' in text
@@ -415,14 +418,23 @@ def test_ai_services_section_and_gpu_power_are_rendered_compactly():
 def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():
     text = source()
     severity = text[text.index('function statusSeverity()'):text.index('function statusTone()')]
-    assert 'root.gpuTemp >= 90' in severity
-    assert 'root.gpuTemp >= 85' in severity
-    assert 'root.gpuTemp >= 75' not in severity
+    assert 'root.gpu0Temp >= 90' in severity and 'root.gpu1Temp >= 90' in severity
+    assert 'root.gpu0Temp >= 85' in severity and 'root.gpu1Temp >= 85' in severity
+    assert 'root.gpu0Temp >= 75' not in severity and 'root.gpu1Temp >= 75' not in severity
     assert 'function gpuTempColor(value, normalColor)' in text
-    gpu_card = text[text.index('{label:"GPU"'):text.index('{label:"RAM"')]
-    assert 'root.gpuTemp >= 90' in gpu_card
-    assert 'root.gpuTemp >= 85' in gpu_card
-    assert 'root.gpuTemp >= 75' not in gpu_card
+    gpu_cards = text[text.index('{kind:"gpu", label:"GPU 0'):text.index('{kind:"cpu"')]
+    assert 'root.gpu0Temp >= 90' in gpu_cards and 'root.gpu1Temp >= 90' in gpu_cards
+    assert 'root.gpu0Temp >= 85' in gpu_cards and 'root.gpu1Temp >= 85' in gpu_cards
+    assert 'root.gpu0Temp >= 75' not in gpu_cards and 'root.gpu1Temp >= 75' not in gpu_cards
+
+
+def test_dual_gpu_helper_is_local_and_maps_processes_by_uuid():
+    helper = GPU_HELPER.read_text()
+    assert 'nvidia-smi' in helper
+    assert 'gpu_uuid,pid,process_name,used_memory' in helper
+    assert 'by_uuid.get(gpu["uuid"], [])' in helper
+    assert '/proc' in helper or 'proc_root' in helper
+    assert 'http://' not in helper and 'https://' not in helper
 
 
 def test_removed_ollama_service_has_no_stale_references():

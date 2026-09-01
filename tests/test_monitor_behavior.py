@@ -70,7 +70,7 @@ class MonitorBehaviorTests(unittest.TestCase):
     def test_freshness_reports_each_stale_domain(self):
         updates = {
             "cpuUsage": 19_000, "cpuTemperature": 19_000,
-            "gpuUsage": 0, "gpuTemperature": 0, "gpuVram": 0,
+            "gpu0Telemetry": 0, "gpu1Telemetry": 0,
             "memoryPercent": 18_000, "memoryUsed": 18_000, "memoryTotal": 18_000,
             "network": 10_000,
             "diskPercent": 19_500, "diskUsed": 19_500, "diskTotal": 19_500,
@@ -78,10 +78,10 @@ class MonitorBehaviorTests(unittest.TestCase):
         }
         script = (
             f"const m=require({json.dumps(str(LOGIC))});"
-            "console.log(JSON.stringify(m.staleDomains(20000,{cpuUsage:19000,cpuTemperature:19000,gpuUsage:19000,gpuTemperature:0,gpuVram:19000,memoryPercent:18000,memoryUsed:18000,memoryTotal:18000,network:10000,diskPercent:19500,diskUsed:19500,diskTotal:19500,uptime:19000,loadAverage:19000},6000)));"
+            "console.log(JSON.stringify(m.staleDomains(20000,{cpuUsage:19000,cpuTemperature:19000,gpu0Telemetry:19000,gpu1Telemetry:0,memoryPercent:18000,memoryUsed:18000,memoryTotal:18000,network:10000,diskPercent:19500,diskUsed:19500,diskTotal:19500,uptime:19000,loadAverage:19000},6000)));"
         )
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
-        self.assertEqual(json.loads(result.stdout), ["GPU", "NETWORK"])
+        self.assertEqual(json.loads(result.stdout), ["GPU 1", "NETWORK"])
 
     def test_cpu_process_rates_use_per_pid_cpu_time_deltas(self):
         script = (
