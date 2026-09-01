@@ -140,17 +140,6 @@ def test_hindsight_status_accepts_live_healthy_payload():
     assert status.state == "healthy"
 
 
-def test_gpu_power_parses_csv_output_and_falls_back_cleanly():
-    original = ai.run_capture
-    ai.run_capture = lambda command, timeout=ai.TIMEOUT: "14.4, 145.0" if command[:2] == ["nvidia-smi", "--query-gpu=power.draw,power.limit"] else ""
-    try:
-        draw, limit = ai.gpu_power()
-    finally:
-        ai.run_capture = original
-    assert draw == "14.4"
-    assert limit == "145.0"
-
-
 def test_gateway_status_maps_inactive_to_down():
     original = ai.run_capture
     ai.run_capture = lambda command, timeout=ai.TIMEOUT: "inactive" if command[:3] == ["systemctl", "--user", "is-active"] else ""

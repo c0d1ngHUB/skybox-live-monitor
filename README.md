@@ -7,9 +7,10 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 ## Highlights
 
 - CPU temperature display (like GPU card — no percentage, no progress bar)
-- GPU utilization and VRAM telemetry with top GPU processes
+- Independent telemetry for both NVIDIA GPUs: utilization, temperature, VRAM,
+  power and per-GPU compute processes
 - Compact CPU and RAM process summaries
-- Two-minute CPU/GPU and network history charts
+- Two-minute dual-GPU and network history charts
 - NVIDIA VRAM telemetry via `nvidia-smi`
 - Local Qwen 3.8 service health via localhost only
 - Longest Hermes run across the default and named profiles

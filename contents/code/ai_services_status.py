@@ -78,22 +78,6 @@ def local_llm_status() -> tuple[ServiceStatus, str]:
     return ServiceStatus("healthy"), model_name
 
 
-def gpu_power() -> tuple[str, str]:
-    query = [
-        "nvidia-smi",
-        "--query-gpu=power.draw,power.limit",
-        "--format=csv,noheader,nounits",
-    ]
-    out = run_capture(query)
-    if not out:
-        return "", ""
-    line = out.splitlines()[0].strip()
-    parts = [part.strip() for part in line.split(",")]
-    if len(parts) < 2:
-        return "", ""
-    return parts[0], parts[1]
-
-
 def openai_oauth_availability() -> tuple[int, int]:
     """Read privacy-safe aggregate availability from the dedicated helper."""
     helper = Path(__file__).with_name("hermes_openai_keys.py")
@@ -108,15 +92,12 @@ def main() -> int:
     gateway = hermes_gateway_status()
     hindsight = hindsight_status()
     local_llm, model_name = local_llm_status()
-    power_draw, power_limit = gpu_power()
     openai_available, openai_total = openai_oauth_availability()
     payload = {
         "gateway": gateway.state,
         "hindsight": hindsight.state,
         "local_llm": local_llm.state,
         "local_llm_model": model_name,
-        "gpu_power_draw_w": power_draw,
-        "gpu_power_limit_w": power_limit,
         "openai_oauth_available": openai_available,
         "openai_oauth_total": openai_total,
     }
