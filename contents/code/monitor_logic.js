@@ -33,6 +33,46 @@ function staleDomains(nowMs, updates, staleAfterMs) {
     return stale
 }
 
+function normalizeServiceState(raw) {
+    var value = String(raw || "UNKNOWN").trim().toUpperCase()
+    if (value === "RUNNING" || value === "HEALTHY" || value === "OK" || value === "IDLE") return "OPERATIONAL"
+    if (value === "DEGRADED" || value === "WARN" || value === "WARNING") return "DEGRADED"
+    if (value === "DOWN" || value === "ERROR" || value === "OFFLINE" || value === "DISCONNECTED") return "OFFLINE"
+    return "UNKNOWN"
+}
+
+function serviceSymbol(state) {
+    if (state === "OPERATIONAL") return "●"
+    if (state === "DEGRADED") return "▲"
+    if (state === "OFFLINE") return "✕"
+    return "?"
+}
+
+function serviceTone(state) {
+    if (state === "OPERATIONAL") return "cyan"
+    if (state === "DEGRADED") return "warning"
+    if (state === "OFFLINE") return "critical"
+    return "muted"
+}
+
+function openAiOauthState(active, total) {
+    active = Number(active)
+    total = Number(total)
+    if (!isFinite(active) || !isFinite(total) || active < 0 || total < 0) return "UNKNOWN"
+    if (total === 0) return "OFFLINE"
+    if (active <= 0) return "OFFLINE"
+    if (active >= total) return "OPERATIONAL"
+    return "DEGRADED"
+}
+
+function openAiOauthSymbol(state) {
+    return serviceSymbol(state)
+}
+
+function openAiOauthTone(state) {
+    return serviceTone(state)
+}
+
 function cpuProcessRates(previousByPid, samples, elapsedMs, limit) {
     if (elapsedMs <= 0) return []
     var rates = []
@@ -81,12 +121,48 @@ function networkScaleMbit(samples, stepMbit, capMbit) {
     return Math.min(steps * stepMbit, capMbit)
 }
 
+// Adaptive network axis profile. Very low traffic uses Kbit-scale ceilings so
+// idle/background transfers remain visible; larger peaks progressively switch
+// to wider Mbit steps without producing an unreadable number of grid lines.
+function adaptiveNetworkScale(samples, direction) {
+    var peakBytes = 0
+    for (var i = 0; i < samples.length; i++) {
+        var value = Number(samples[i]) || 0
+        if (value > peakBytes) peakBytes = value
+    }
+    var neededMbit = peakBytes * 8 * 1.15 / 1000000
+    var upload = direction === "upload"
+    var tiers = upload
+        ? [[0.01, 0.0025], [0.1, 0.025], [0.5, 0.1], [5, 1], [50, 5]]
+        : [[0.01, 0.0025], [0.1, 0.025], [1, 0.25], [10, 2.5], [600, 50]]
+    var capMbit = upload ? 50 : 600
+    var stepMbit = tiers[tiers.length - 1][1]
+    for (var j = 0; j < tiers.length; j++) {
+        if (neededMbit <= tiers[j][0]) {
+            stepMbit = tiers[j][1]
+            break
+        }
+    }
+    var ceilingMbit = Math.max(stepMbit, Math.ceil(neededMbit / stepMbit) * stepMbit)
+    return {
+        ceilingMbit: Math.min(ceilingMbit, capMbit),
+        stepMbit: stepMbit
+    }
+}
+
 if (typeof module !== "undefined") {
     module.exports = {
         historyX: historyX,
         staleDomains: staleDomains,
         parseNvidiaMemory: parseNvidiaMemory,
+        normalizeServiceState: normalizeServiceState,
+        serviceSymbol: serviceSymbol,
+        serviceTone: serviceTone,
+        openAiOauthState: openAiOauthState,
+        openAiOauthSymbol: openAiOauthSymbol,
+        openAiOauthTone: openAiOauthTone,
         cpuProcessRates: cpuProcessRates,
-        networkScaleMbit: networkScaleMbit
+        networkScaleMbit: networkScaleMbit,
+        adaptiveNetworkScale: adaptiveNetworkScale
     }
 }

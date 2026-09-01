@@ -6,6 +6,7 @@ model or any Hermes API, so polling it does not consume inference tokens.
 """
 
 import argparse
+import json
 from pathlib import Path
 import sqlite3
 import time
@@ -56,17 +57,41 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
         connection.close()
 
 
+def service_label(db_path: Path) -> str:
+    if db_path.parent.parent.name == "profiles":
+        return db_path.parent.name
+    return "default"
+
+
+def discover_databases(root: Path) -> list[Path]:
+    databases = [root / "state.db"]
+    profiles = root / "profiles"
+    if profiles.is_dir():
+        databases.extend(sorted(profiles.glob("*/state.db")))
+    return databases
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", default=str(Path.home() / ".hermes/state.db"))
+    parser.add_argument("--db", default=None)
+    parser.add_argument("--root", default=str(Path.home() / ".hermes"))
     parser.add_argument("--now", type=float, default=None)
     args = parser.parse_args()
 
     try:
-        value = longest_completed_turn(Path(args.db).expanduser(), args.now or time.time())
+        databases = [Path(args.db).expanduser()] if args.db else discover_databases(Path(args.root).expanduser())
+        current_time = args.now or time.time()
+        value = 0
+        service = ""
+        for database in databases:
+            candidate = longest_completed_turn(database, current_time)
+            if candidate > value:
+                value = candidate
+                service = service_label(database)
     except (OSError, sqlite3.Error):
         value = 0
-    print(value)
+        service = ""
+    print(json.dumps({"seconds": value, "service": service}, separators=(",", ":")))
 
 
 if __name__ == "__main__":

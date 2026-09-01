@@ -10,8 +10,9 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 - GPU utilization and VRAM telemetry with top GPU processes
 - Compact CPU and RAM process summaries
 - Two-minute CPU/GPU and network history charts
-- Odysseus toggle button integrated into the SYSTEM LOAD row
 - NVIDIA VRAM telemetry via `nvidia-smi`
+- Local Qwen 3.8 service health via localhost only
+- Longest Hermes run across the default and named profiles
 - No telemetry, no external network requests, and no credentials
 
 ## Requirements

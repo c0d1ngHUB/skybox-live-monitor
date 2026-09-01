@@ -19,18 +19,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install Python test runner
+        run: python3 -m pip install pytest
       - name: Validate metadata
         run: python3 -m json.tool metadata.json >/dev/null
       - name: Check JavaScript syntax
         run: node --check contents/code/monitor_logic.js
-      - name: Run source regression checks
-        run: python3 tests/test_dashboard_source.py
-      - name: Run behavioral regression tests
-        run: python3 tests/test_monitor_behavior.py
-      - name: Run Hermes think-time tests
-        run: python3 tests/test_hermes_think_time.py
-      - name: Run OpenAI key-count tests
-        run: python3 tests/test_openai_key_count.py
+      - name: Run Python regression tests
+        run: python3 -m pytest -q
       - name: Reject unsafe QML layout positioning
         run: |
           sudo apt-get update

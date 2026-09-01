@@ -36,5 +36,50 @@ def test_excludes_dead_and_exhausted_credentials():
     assert MODULE.count_openai_credentials(output) == (1, 3)
 
 
+def test_excludes_credentials_explicitly_on_cooldown():
+    output = """openai-codex (3 credentials):
+  #1  first oauth device_code cooldown (2m left)
+  #2  second oauth device_code
+  #3  third oauth device_code
+"""
+    assert MODULE.count_openai_credentials(output) == (2, 3)
+
+
 def test_missing_provider_reports_zero_credentials():
     assert MODULE.count_openai_credentials("nous (1 credentials):\n  #1 device_code oauth\n") == (0, 0)
+
+
+def test_monitor_uses_coordinator_profile_by_default(monkeypatch, tmp_path):
+    profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
+    profile_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_MONITOR_PROFILE", raising=False)
+
+    env = MODULE.hermes_monitor_env()
+
+    assert env["HERMES_HOME"] == str(profile_home)
+
+
+def test_main_invokes_hermes_auth_list_in_coordinator_profile(monkeypatch, tmp_path, capsys):
+    profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
+    profile_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_MONITOR_PROFILE", raising=False)
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    seen = {}
+
+    class Result:
+        stdout = "openai-codex (3 credentials):\n  #1  first oauth device_code\n  #2  second oauth device_code rate-limited\n  #3  third oauth device_code\n"
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        seen["env"] = kwargs["env"]
+        return Result()
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    assert MODULE.main() == 0
+    assert seen["args"] == ["/usr/bin/hermes", "auth", "list"]
+    assert seen["env"]["HERMES_HOME"] == str(profile_home)
+    assert capsys.readouterr().out.strip() == "2 3"

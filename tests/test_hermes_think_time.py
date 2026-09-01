@@ -2,6 +2,7 @@
 """Behavior tests for the local, token-free Hermes turn-duration metric."""
 
 from pathlib import Path
+import json
 import sqlite3
 import subprocess
 import tempfile
@@ -32,14 +33,14 @@ class HermesThinkTimeTests(unittest.TestCase):
         )
         return connection
 
-    def run_metric(self, db: Path, now: int = 200000) -> str:
+    def run_metric(self, db: Path, now: int = 200000) -> dict[str, object]:
         result = subprocess.run(
             ["python3", str(SCRIPT), "--db", str(db), "--now", str(now)],
             text=True,
             capture_output=True,
             check=True,
         )
-        return result.stdout.strip()
+        return json.loads(result.stdout)
 
     def test_reports_longest_completed_user_turn_in_last_24_hours(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -64,7 +65,7 @@ class HermesThinkTimeTests(unittest.TestCase):
             )
             connection.commit()
             connection.close()
-            self.assertEqual(self.run_metric(db), "125")
+            self.assertEqual(self.run_metric(db)["seconds"], 125)
 
     def test_ignores_unfinished_and_older_than_24_hour_turns(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,7 +83,7 @@ class HermesThinkTimeTests(unittest.TestCase):
             )
             connection.commit()
             connection.close()
-            self.assertEqual(self.run_metric(db), "0")
+            self.assertEqual(self.run_metric(db)["seconds"], 0)
 
     def test_finishes_turn_at_first_nonempty_assistant_response(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,7 +102,7 @@ class HermesThinkTimeTests(unittest.TestCase):
             )
             connection.commit()
             connection.close()
-            self.assertEqual(self.run_metric(db), "30")
+            self.assertEqual(self.run_metric(db)["seconds"], 30)
 
     def test_pairs_turn_across_parent_lineage_and_excludes_subagents(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -126,7 +127,39 @@ class HermesThinkTimeTests(unittest.TestCase):
             )
             connection.commit()
             connection.close()
-            self.assertEqual(self.run_metric(db), "45")
+            self.assertEqual(self.run_metric(db)["seconds"], 45)
+
+    def test_default_discovery_reports_longest_named_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / ".hermes"
+            root.mkdir()
+            default_db = root / "state.db"
+            connection = self.make_db(default_db)
+            connection.execute("INSERT INTO sessions VALUES ('default', 'desktop', NULL)")
+            connection.executemany(
+                "INSERT INTO messages VALUES (?, ?, ?, ?, ?)",
+                [(1, "default", "user", "q", 199000), (2, "default", "assistant", "a", 199010)],
+            )
+            connection.commit()
+            connection.close()
+
+            coder_dir = root / "profiles" / "coder"
+            coder_dir.mkdir(parents=True)
+            coder_db = coder_dir / "state.db"
+            connection = self.make_db(coder_db)
+            connection.execute("INSERT INTO sessions VALUES ('coder', 'desktop', NULL)")
+            connection.executemany(
+                "INSERT INTO messages VALUES (?, ?, ?, ?, ?)",
+                [(1, "coder", "user", "q", 199000), (2, "coder", "assistant", "a", 199090)],
+            )
+            connection.commit()
+            connection.close()
+
+            result = subprocess.run(
+                ["python3", str(SCRIPT), "--root", str(root), "--now", "200000"],
+                text=True, capture_output=True, check=True,
+            )
+            self.assertEqual(json.loads(result.stdout), {"seconds": 90, "service": "coder"})
 
 
 if __name__ == "__main__":

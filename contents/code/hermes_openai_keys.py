@@ -1,22 +1,40 @@
 #!/usr/bin/env python3
-"""Print active and total OpenAI OAuth credential counts from ``hermes auth list``.
+"""Print available and total OpenAI OAuth credential counts from ``hermes auth list``.
 
 Only aggregate counts are emitted; credential labels and identifiers are never
 forwarded to the Plasma widget.
 """
 
 from pathlib import Path
+import os
 import re
 import shutil
 import subprocess
 import sys
 
 
-UNAVAILABLE_MARKERS = ("rate-limited", "exhausted", "dead", "disabled", "invalid")
+UNAVAILABLE_MARKERS = ("rate-limited", "cooldown", "exhausted", "dead", "disabled", "invalid")
+HERMES_MONITOR_PROFILE = os.environ.get("HERMES_MONITOR_PROFILE", "coordinator")
+
+
+def hermes_home_for_monitor() -> Path:
+    profile_home = Path.home() / ".hermes" / "profiles" / HERMES_MONITOR_PROFILE
+    if profile_home.is_dir():
+        return profile_home
+    raise SystemExit(
+        f"Hermes monitor profile not found: {profile_home} "
+        f"(set HERMES_MONITOR_PROFILE or create the profile)"
+    )
+
+
+def hermes_monitor_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["HERMES_HOME"] = str(hermes_home_for_monitor())
+    return env
 
 
 def count_openai_credentials(output: str) -> tuple[int, int]:
-    """Return ``(active, total)`` for OpenAI Codex OAuth credentials."""
+    """Return ``(available, total)`` for OpenAI Codex OAuth credentials."""
     in_provider = False
     active = 0
     total = 0
@@ -60,6 +78,7 @@ def main() -> int:
             capture_output=True,
             text=True,
             timeout=15,
+            env=hermes_monitor_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return 1

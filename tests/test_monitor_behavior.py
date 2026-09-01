@@ -48,6 +48,25 @@ class MonitorBehaviorTests(unittest.TestCase):
         self.assertEqual(text.count("ctx.lineTo(firstX, height)"), 3)
         self.assertEqual(text.count("ctx.lineTo(lastX, height)"), 3)
 
+    def test_service_state_normalization_is_semantically_stable(self):
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            "console.log(JSON.stringify(["
+            "m.normalizeServiceState('running'),"
+            "m.normalizeServiceState('healthy'),"
+            "m.normalizeServiceState('idle'),"
+            "m.normalizeServiceState('down'),"
+            "m.serviceSymbol('OPERATIONAL'),"
+            "m.serviceSymbol('DEGRADED'),"
+            "m.serviceSymbol('OFFLINE'),"
+            "m.openAiOauthState(3, 3),"
+            "m.openAiOauthState(0, 3),"
+            "m.openAiOauthState(1, 3)"
+            "]));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), ["OPERATIONAL", "OPERATIONAL", "OPERATIONAL", "OFFLINE", "●", "▲", "✕", "OPERATIONAL", "OFFLINE", "DEGRADED"])
+
     def test_freshness_reports_each_stale_domain(self):
         updates = {
             "cpuUsage": 19_000, "cpuTemperature": 19_000,
@@ -137,6 +156,28 @@ class MonitorBehaviorTests(unittest.TestCase):
         )
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
         self.assertEqual(result.stdout.strip(), "50 5")
+
+    def test_adaptive_network_scale_keeps_background_traffic_visible(self):
+        samples = [60] * 5
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            f"console.log(JSON.stringify([m.adaptiveNetworkScale({json.dumps(samples)},'download'),m.adaptiveNetworkScale({json.dumps(samples)},'upload')]));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        download, upload = json.loads(result.stdout)
+        self.assertEqual(download, {"ceilingMbit": 0.0025, "stepMbit": 0.0025})
+        self.assertEqual(upload, {"ceilingMbit": 0.0025, "stepMbit": 0.0025})
+
+    def test_adaptive_network_scale_preserves_high_throughput_caps(self):
+        samples = [700000000/8] * 3
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            f"console.log(JSON.stringify([m.adaptiveNetworkScale({json.dumps(samples)},'download'),m.adaptiveNetworkScale({json.dumps(samples)},'upload')]));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        download, upload = json.loads(result.stdout)
+        self.assertEqual(download["ceilingMbit"], 600)
+        self.assertEqual(upload["ceilingMbit"], 50)
 
     def test_network_detection_prefers_default_route_over_first_interface(self):
         command = command_for("netDetectSource")
