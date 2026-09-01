@@ -84,6 +84,12 @@ def main() -> int:
         return 1
 
     active, total = count_openai_credentials(result.stdout)
+    if total == 0:
+        # Distinguish "no OpenAI-Codex credentials configured" from "could not
+        # parse the auth list" so format drift surfaces instead of showing 0/0.
+        if "openai-codex" in result.stdout:
+            print("-1 0")
+            return 0
     print(f"{active} {total}")
     return 0
 

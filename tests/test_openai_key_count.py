@@ -49,6 +49,22 @@ def test_missing_provider_reports_zero_credentials():
     assert MODULE.count_openai_credentials("nous (1 credentials):\n  #1 device_code oauth\n") == (0, 0)
 
 
+def test_format_drift_is_signaled_as_unparseable(monkeypatch, tmp_path, capsys):
+    profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
+    profile_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_MONITOR_PROFILE", raising=False)
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    class Result:
+        stdout = "openai-codex (2 credentials):\n  unexpected future format line\n"
+
+    monkeypatch.setattr(MODULE.subprocess, "run", lambda *a, **k: Result())
+
+    assert MODULE.main() == 0
+    assert capsys.readouterr().out.strip() == "-1 0"
+
+
 def test_monitor_uses_coordinator_profile_by_default(monkeypatch, tmp_path):
     profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
     profile_home.mkdir(parents=True)

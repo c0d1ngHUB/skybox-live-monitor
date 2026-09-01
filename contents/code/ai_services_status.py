@@ -82,7 +82,7 @@ def openai_oauth_availability() -> tuple[int, int]:
     """Read privacy-safe aggregate availability from the dedicated helper."""
     helper = Path(__file__).with_name("hermes_openai_keys.py")
     out = run_capture([sys.executable, str(helper)], timeout=5.0)
-    match = re.fullmatch(r"(\d+)\s+(\d+)", out)
+    match = re.fullmatch(r"(-?\d+)\s+(\d+)", out)
     if not match:
         return -1, -1
     return int(match.group(1)), int(match.group(2))

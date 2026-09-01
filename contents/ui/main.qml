@@ -96,7 +96,6 @@ PlasmoidItem {
     property int gpu0ProcessCount: 0
     property var topGpu1Processes: []
     property int gpu1ProcessCount: 0
-    property bool gpuTelemetryUnavailable: false
     property bool gpuProcessUnavailable: false
     property int historySeconds: 120
     property var cpuHistory: []
@@ -311,8 +310,8 @@ PlasmoidItem {
     }
     function openAiOauthState() { return MonitorLogic.openAiOauthState(root.openAiActiveKeys, root.openAiTotalKeys) }
     function openAiOauthLabel() {
-        if (root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0) return "OPENAI 0AUTH ?/? verfügbar"
-        return "OPENAI 0AUTH " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " verfügbar"
+        if (root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0) return "OPENAI OAUTH ?/? verfügbar"
+        return "OPENAI OAUTH " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " verfügbar"
     }
     function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }
     function gpuPowerText(drawValue, limitValue) {
@@ -759,7 +758,6 @@ PlasmoidItem {
                                 // --- RAM card: original layout ---
                                 Text { visible: modelData.kind === "ram"; text: modelData.value; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 28; font.bold: true }
                                 Text { visible: modelData.kind === "ram"; width: parent.width - 4; text: modelData.detail; color: modelData.detailColor; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
-                                Text { visible: modelData.kind === "ram" && !!modelData.detail2; text: modelData.detail2 || ""; color: modelData.detail2Color || root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
                                 // VRAM fill bar — only on GPU card (original position, kept for non-GPU safety)
                                 Item {
                                     width: parent.width - 4
@@ -1127,7 +1125,7 @@ PlasmoidItem {
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
             if (data["exit code"] === undefined) return
-            var match = buffer.trim().match(/^(\d+)\s+(\d+)$/)
+            var match = buffer.trim().match(/^(-?\d+)\s+(\d+)$/)
             buffer = ""
             disconnectSource(source)
             if (!match) return
@@ -1176,7 +1174,6 @@ PlasmoidItem {
             disconnectSource(source)
             var fullUnavailable = Number(data["exit code"]) !== 0 || !payload || !payload.gpus
             if (!fullUnavailable) fullUnavailable = !!payload.gpu_error || (!!payload.error && !payload.process_error)
-            root.gpuTelemetryUnavailable = fullUnavailable
             root.gpuProcessUnavailable = fullUnavailable || payload === null || payload.processes_available === false
             if (fullUnavailable) {
                 root.applyGpuTelemetry(null, 0)

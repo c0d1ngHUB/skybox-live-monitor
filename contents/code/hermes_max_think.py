@@ -29,11 +29,11 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
                    FROM sessions AS child
                    JOIN lineage ON child.parent_session_id = lineage.session_id
                )
-               SELECT lineage.root_id, messages.role, messages.content,
-                      messages.timestamp, messages.id
+               SELECT lineage.root_id, messages.role, messages.timestamp
                FROM messages
                JOIN lineage ON lineage.session_id = messages.session_id
                WHERE messages.timestamp >= ? AND messages.timestamp <= ?
+                 AND (messages.role != 'assistant' OR (messages.content IS NOT NULL AND trim(messages.content) != ''))
                  AND lineage.source != 'subagent'
                ORDER BY messages.timestamp, messages.id""",
             (cutoff, now),
@@ -41,13 +41,11 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
 
         active_turn = {}
         longest = 0.0
-        for lineage_id, role, content, timestamp, _message_id in rows:
+        for lineage_id, role, timestamp in rows:
             if role == "user":
                 active_turn[lineage_id] = timestamp
                 continue
             if role != "assistant" or lineage_id not in active_turn:
-                continue
-            if not content or not content.strip():
                 continue
             duration = timestamp - active_turn.pop(lineage_id)
             if duration >= 0:
