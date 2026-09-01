@@ -231,6 +231,15 @@ class MonitorBehaviorTests(unittest.TestCase):
         self.assertIn("kpackagetool6 --type Plasma/Applet --install .", text)
         self.assertNotIn("cp -a com.skybox.verticalsysmonitor", text)
 
+    def test_readme_uses_pytest_as_main_test_suite(self):
+        text = README.read_text()
+        self.assertIn("python3 -m pytest -q", text)
+        self.assertIn("node --check contents/code/monitor_logic.js", text)
+        self.assertIn("qmllint contents/ui/main.qml", text)
+        self.assertNotIn("python3 tests/test_dashboard_source.py", text)
+        self.assertNotIn("python3 tests/test_monitor_behavior.py", text)
+        self.assertNotIn("python3 tests/test_hermes_think_time.py", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
-"""Emit local telemetry for every NVIDIA GPU as one JSON line."""
+"""Emit local telemetry for every NVIDIA GPU as one JSON line.
+
+Error contract:
+- Full GPU query failure: JSON with ``gpu_error`` and CLI exit 1.
+- Successful GPU query plus failed process query: GPU metrics with
+  ``processes_available=false`` and CLI exit 0.
+- Successful empty process query: ``processes_available=true`` and
+  ``process_count=0`` per GPU and CLI exit 0.
+"""
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 import subprocess
@@ -21,6 +31,8 @@ PROCESS_QUERY = [
     "--query-compute-apps=gpu_uuid,pid,process_name,used_memory",
     "--format=csv,noheader,nounits",
 ]
+GPU_ERROR = "nvidia-smi gpu query failed"
+PROCESS_ERROR = "nvidia-smi process query failed"
 
 
 def run_capture(command: list[str], timeout: float = TIMEOUT) -> tuple[int, str]:
@@ -58,8 +70,8 @@ def service_name_for_pid(pid: int, proc_root: Path = Path("/proc")) -> str:
 
 def parse_gpus(output: str) -> list[dict[str, Any]]:
     gpus: list[dict[str, Any]] = []
-    for raw_line in str(output or "").splitlines():
-        fields = [field.strip() for field in raw_line.split(",", 8)]
+    for row in csv.reader(io.StringIO(str(output or "")), skipinitialspace=True):
+        fields = [field.strip() for field in row]
         if len(fields) != 9:
             continue
         try:
@@ -90,8 +102,8 @@ def parse_gpus(output: str) -> list[dict[str, Any]]:
 
 def parse_processes(output: str, proc_root: Path = Path("/proc")) -> dict[str, list[dict[str, Any]]]:
     by_uuid: dict[str, list[dict[str, Any]]] = {}
-    for raw_line in str(output or "").splitlines():
-        fields = [field.strip() for field in raw_line.split(",", 3)]
+    for row in csv.reader(io.StringIO(str(output or "")), skipinitialspace=True):
+        fields = [field.strip() for field in row]
         if len(fields) != 4:
             continue
         try:
@@ -113,21 +125,31 @@ def parse_processes(output: str, proc_root: Path = Path("/proc")) -> dict[str, l
 
 def collect(proc_root: Path = Path("/proc")) -> dict[str, Any]:
     gpu_code, gpu_output = run_capture(GPU_QUERY)
-    process_code, process_output = run_capture(PROCESS_QUERY)
     if gpu_code != 0:
-        return {"gpus": [], "error": "nvidia-smi unavailable"}
+        return {
+            "gpus": [],
+            "processes_available": False,
+            "error": GPU_ERROR,
+            "gpu_error": GPU_ERROR,
+        }
+    process_code, process_output = run_capture(PROCESS_QUERY)
     gpus = parse_gpus(gpu_output)
-    processes_by_uuid = parse_processes(process_output, proc_root) if process_code == 0 else {}
+    processes_available = process_code == 0
+    processes_by_uuid = parse_processes(process_output, proc_root) if processes_available else {}
     for gpu in gpus:
         processes = processes_by_uuid.get(gpu["uuid"], [])
         gpu["process_count"] = len(processes)
         gpu["processes"] = processes[:2]
-    return {"gpus": gpus}
+    payload: dict[str, Any] = {"gpus": gpus, "processes_available": processes_available}
+    if not processes_available:
+        payload["process_error"] = PROCESS_ERROR
+    return payload
 
 
 def main() -> int:
-    print(json.dumps(collect(), separators=(",", ":"), ensure_ascii=False))
-    return 0
+    payload = collect()
+    print(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
+    return 1 if payload.get("gpu_error") else 0
 
 
 if __name__ == "__main__":

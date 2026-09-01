@@ -41,10 +41,23 @@ def test_process_sources_distinguish_empty_results_from_command_failures():
     ram = text[text.index("id: topRamSource"):text.index("id: netDetectSource")]
     assert 'root.cpuProcessUnavailable = Number(data["exit code"]) !== 0' in cpu
     assert 'root.ramProcessUnavailable = Number(data["exit code"]) !== 0' in ram
-    assert 'root.gpuTelemetryUnavailable = Number(data["exit code"]) !== 0' in gpu
+    assert 'var fullUnavailable = Number(data["exit code"]) !== 0 || !payload || !payload.gpus' in gpu
+    assert 'if (!fullUnavailable) fullUnavailable = !!payload.gpu_error || (!!payload.error && !payload.process_error)' in gpu
+    assert 'root.gpuTelemetryUnavailable = fullUnavailable' in gpu
+    assert 'root.gpuProcessUnavailable = fullUnavailable || payload === null || payload.processes_available === false' in gpu
     assert 'root.applyGpuTelemetry(null, 0)' in gpu
     assert 'root.applyGpuTelemetry(null, 1)' in gpu
     assert '"NO ACTIVE WORKLOAD"' in text
+
+
+def test_gpu_cards_separate_full_telemetry_failure_from_process_failure():
+    text = source()
+    assert 'property bool gpuTelemetryUnavailable: false' in text
+    assert 'property bool gpuProcessUnavailable: false' in text
+    gpu_cards = text[text.index('{kind:"gpu", label:"GPU 0'):text.index('{kind:"cpu"')]
+    assert 'processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable' in gpu_cards
+    assert 'processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable' in gpu_cards
+    assert 'gpuTelemetryUnavailable ||' not in gpu_cards
 
 
 def test_ci_executes_all_pytest_suites_instead_of_importing_test_files():
