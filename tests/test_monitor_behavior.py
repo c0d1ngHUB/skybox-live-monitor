@@ -68,14 +68,6 @@ class MonitorBehaviorTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout), ["OPERATIONAL", "OPERATIONAL", "OPERATIONAL", "OFFLINE", "●", "▲", "✕", "OPERATIONAL", "OFFLINE", "DEGRADED"])
 
     def test_freshness_reports_each_stale_domain(self):
-        updates = {
-            "cpuUsage": 19_000, "cpuTemperature": 19_000,
-            "gpu0Telemetry": 0, "gpu1Telemetry": 0,
-            "memoryPercent": 18_000, "memoryUsed": 18_000, "memoryTotal": 18_000,
-            "network": 10_000,
-            "diskPercent": 19_500, "diskUsed": 19_500, "diskTotal": 19_500,
-            "uptime": 19_000, "loadAverage": 19_000,
-        }
         script = (
             f"const m=require({json.dumps(str(LOGIC))});"
             "console.log(JSON.stringify(m.staleDomains(20000,{cpuUsage:19000,cpuTemperature:19000,gpu0Telemetry:19000,gpu1Telemetry:0,memoryPercent:18000,memoryUsed:18000,memoryTotal:18000,network:10000,diskPercent:19500,diskUsed:19500,diskTotal:19500,uptime:19000,loadAverage:19000},6000)));"

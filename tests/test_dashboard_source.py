@@ -126,7 +126,7 @@ def test_charts_are_two_minute_and_visually_readable():
     assert 'property int historySeconds: 120' in text
     assert text.count('text: "−2 MIN"') == 3
     assert text.count('text: "−1 MIN"') == 3
-    assert 'var midTick = plotLeft + chartWidth / 2' == 'var midTick = plotLeft + chartWidth / 2'
+    assert text.count('var midTick = plotLeft + chartWidth / 2') == 3
     assert 'id: computeTimeline' in text
     assert 'id: downloadTimeline' in text
     assert 'id: uploadTimeline' in text
@@ -135,16 +135,30 @@ def test_charts_are_two_minute_and_visually_readable():
     assert 'networkTimeline' not in text
 
 
+def test_warning_banner_names_the_primary_cause_and_gpu_chart_marks_now():
+    text = source()
+    assert 'function statusReason()' in text
+    assert 'return "GPU 0 VRAM " + Math.round(gpu0Vram) + "%"' in text
+    assert 'return "GPU 1 TEMP " + Math.round(root.gpu1Temp) + "°C"' in text
+    assert 'return serviceNames[i] + " " + state' in text
+    assert 'return (severity === "WARNING" ? "▲ " : "✕ ") + root.statusReason()' in text
+    assert 'var currentIndex = data.length - 1' in text
+    assert 'ctx.arc(currentX, currentY, 5, 0, Math.PI * 2)' in text
+
+
 def test_compact_cards_preserve_legible_operational_detail():
     text = source()
     assert 'Layout.preferredHeight: 278' in text
     assert 'columns: 2' in text and 'rows: 2' in text
     assert 'Layout.preferredHeight: 94' in text
     assert 'font.pixelSize: 13' in text
+    assert 'font.pixelSize: 14' in text
+    assert 'Text { width: parent.width - 4; text: modelData.label' in text
+    assert 'elide: Text.ElideMiddle' in text
     assert 'elide: Text.ElideRight' in text
     assert '"SYSTEM DISK /"' in text
-    assert '"LOAD AVG 1M " + root.loadAverage.toFixed(2)' in text
-    assert '"PROCESSES " + root.processCount' in text
+    assert 'text: "LOAD 1M"' in text
+    assert 'text: "PROZESSE"' in text
 
 
 
@@ -184,13 +198,26 @@ def test_network_axes_follow_adaptive_kbit_and_mbit_steps():
     assert text.count('ctx.fillText(root.fmtNetworkAxisValue(') >= 2
 
 
+def test_network_live_values_scale_to_kbit_and_are_labeled_with_direction():
+    """1250 B/s must render as 10 KBIT/S (×1000), not 0.01 KBIT/S."""
+    text = source()
+    assert 'if (mbit < 1) return root.fmtNetworkAxisValue(mbit * 1000) + " KBIT/S"' in text
+    assert 'return root.fmtNetworkAxisValue(mbit) + " MBIT/S"' in text
+    assert 'root.fmtNetworkAxisValue(mbit) + " " + root.networkAxisUnit(mbit)' not in text
+    # Live values are unambiguously labeled with ↓ (download) / ↑ (upload).
+    assert 'text: "↓ " + root.fmtNetworkLive(root.down, root.downloadScaleBytesPerSecond)' in text
+    assert 'text: "↑ " + root.fmtNetworkLive(root.up, root.uploadScaleBytesPerSecond)' in text
+
+
 def test_footer_uses_explicit_disk_and_uptime_labels():
     text = source()
     assert 'text: "SYSTEM DISK /"' in text
     assert 'text: "UPTIME"' in text
     assert 'text: root.fmtUptime(root.uptimeSeconds)' in text
-    assert 'text: "LOAD AVG 1M " + root.loadAverage.toFixed(2)' in text
-    assert 'text: "PROCESSES " + root.processCount' in text
+    assert 'text: "LOAD 1M"' in text
+    assert 'text: root.loadAverage.toFixed(2)' in text
+    assert 'text: "PROZESSE"' in text
+    assert 'text: root.processCount' in text
     assert 'font.pixelSize: 12' not in text
 
 
@@ -208,19 +235,21 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'hermes_max_think.py' in text
     assert 'id: openAiKeysSource' in text
     assert 'hermes_openai_keys.py' in text
-    assert 'id: systemMetaRow' in text
-    assert 'text: "LOAD AVG 1M " + root.loadAverage.toFixed(2)' in text
-    assert 'text: "PROCESSES " + root.processCount' in text
-    assert 'text: "LÄNGSTER KI-RUN" + (root.hermesMaxThinkService.length > 0 ? " · " + root.hermesMaxThinkService : "") + ": " + root.fmtDuration(root.hermesMaxThinkSeconds)' in text
-    assert 'return "OPENAI OAUTH " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " verfügbar"' in text
+    assert 'id: systemMetaGrid' in text
+    assert 'columns: 2' in text and 'rows: 2' in text
+    assert 'text: "LOAD 1M"' in text
+    assert 'text: "PROZESSE"' in text
+    assert 'text: "KI-RUN" + (root.hermesMaxThinkService.length > 0 ? " · " + root.hermesMaxThinkService : "")' in text
+    assert 'return root.openAiActiveKeys + "/" + root.openAiTotalKeys + " BEREIT"' in text
     assert 'OPENAI 0AUTH' not in text
+    assert 'id: openAiOauthCard' in text
     assert 'root.openAiOauthLabel()' in text
     assert 'root.openAiOauthTone()' in text
     assert 'function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }' in text
     assert 'payload.openai_oauth_available' in text
     assert 'payload.openai_oauth_total' in text
-    assert 'font.pixelSize: 13' in text
-    assert 'Layout.preferredHeight: 170' in text
+    assert 'font.pixelSize: 14' in text
+    assert 'Layout.preferredHeight: 148' in text
 
 
 
@@ -422,9 +451,9 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text
     assert 'elide: Text.ElideRight' in text
     assert 'height: 44' in text
-    assert 'Layout.preferredHeight: 170' in text
-    assert 'Layout.minimumHeight: 166' in text
-    assert 'root.openAiActiveKeys >= 0 && root.openAiTotalKeys >= 0' in text
+    assert 'Layout.preferredHeight: 148' in text
+    assert 'Layout.minimumHeight: 144' in text
+    assert 'id: openAiOauthCard' in text
 
 
 def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():
@@ -433,6 +462,8 @@ def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():
     assert 'root.gpu0Temp >= 90' in severity and 'root.gpu1Temp >= 90' in severity
     assert 'root.gpu0Temp >= 85' in severity and 'root.gpu1Temp >= 85' in severity
     assert 'root.gpu0Temp >= 75' not in severity and 'root.gpu1Temp >= 75' not in severity
+    assert severity.index('if (state === "OFFLINE") return "CRITICAL"') < severity.index('root.cpuTemp >= 75')
+    assert severity.index('if (oauthState === "OFFLINE") return "CRITICAL"') < severity.index('root.cpuTemp >= 75')
     assert 'function gpuTempColor(value, normalColor)' in text
     gpu_cards = text[text.index('{kind:"gpu", label:"GPU 0'):text.index('{kind:"cpu"')]
     assert 'root.gpu0Temp >= 90' in gpu_cards and 'root.gpu1Temp >= 90' in gpu_cards
