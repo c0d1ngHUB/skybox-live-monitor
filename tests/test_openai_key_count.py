@@ -76,6 +76,29 @@ def test_monitor_uses_coordinator_profile_by_default(monkeypatch, tmp_path):
     assert env["HERMES_HOME"] == str(profile_home)
 
 
+def test_main_invokes_hermes_auth_list_even_when_profile_directory_is_missing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "does-not-exist")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    seen = {}
+
+    class Result:
+        stdout = "openai-codex (1 credentials):\n  #1  only oauth device_code\n"
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        seen["env"] = kwargs["env"]
+        return Result()
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    assert MODULE.main() == 0
+    assert seen["args"] == ["/usr/bin/hermes", "auth", "list"]
+    assert seen["env"]["HERMES_HOME"] == str(tmp_path / ".hermes" / "profiles" / "does-not-exist")
+    assert capsys.readouterr().out.strip() == "1 1"
+
+
 def test_main_invokes_hermes_auth_list_in_coordinator_profile(monkeypatch, tmp_path, capsys):
     profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
     profile_home.mkdir(parents=True)
