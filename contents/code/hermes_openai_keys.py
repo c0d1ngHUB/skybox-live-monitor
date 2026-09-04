@@ -14,17 +14,11 @@ import sys
 
 
 UNAVAILABLE_MARKERS = ("rate-limited", "cooldown", "exhausted", "dead", "disabled", "invalid")
-HERMES_MONITOR_PROFILE = os.environ.get("HERMES_MONITOR_PROFILE", "coordinator")
 
 
 def hermes_home_for_monitor() -> Path:
-    profile_home = Path.home() / ".hermes" / "profiles" / HERMES_MONITOR_PROFILE
-    if profile_home.is_dir():
-        return profile_home
-    raise SystemExit(
-        f"Hermes monitor profile not found: {profile_home} "
-        f"(set HERMES_MONITOR_PROFILE or create the profile)"
-    )
+    profile_name = os.environ.get("HERMES_MONITOR_PROFILE", "coordinator")
+    return Path.home() / ".hermes" / "profiles" / profile_name
 
 
 def hermes_monitor_env() -> dict[str, str]:
