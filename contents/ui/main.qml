@@ -1208,10 +1208,18 @@ PlasmoidItem {
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
             if (data["exit code"] === undefined) return
+            // Accepts "<available> <total>" from a valid profile and the
+            // explicit "-1 0" drift signal from every helper failure mode
+            // (missing executable, subprocess/timeout error, format drift).
+            // Unknown output resets to unknown so stale values never persist.
             var match = buffer.trim().match(/^(-?\d+)\s+(\d+)$/)
             buffer = ""
             disconnectSource(source)
-            if (!match) return
+            if (!match) {
+                root.openAiActiveKeys = -1
+                root.openAiTotalKeys = -1
+                return
+            }
             root.openAiActiveKeys = parseInt(match[1])
             root.openAiTotalKeys = parseInt(match[2])
         }
@@ -1238,6 +1246,13 @@ PlasmoidItem {
             root.localLlmModelName = payload.local_llm_model || ""
             if (Number(payload.openai_oauth_available) >= 0) root.openAiActiveKeys = Number(payload.openai_oauth_available)
             if (Number(payload.openai_oauth_total) >= 0) root.openAiTotalKeys = Number(payload.openai_oauth_total)
+            // An unavailable aggregator means the dedicated helper never
+            // produced a valid aggregate; keep the OAuth card at unknown
+            // instead of letting a stale successful count persist.
+            if (Number(payload.openai_oauth_available) < 0 || Number(payload.openai_oauth_total) < 0) {
+                root.openAiActiveKeys = -1
+                root.openAiTotalKeys = -1
+            }
         }
     }
 
@@ -1453,6 +1468,16 @@ PlasmoidItem {
     Timer {
         interval: 900000
         running: true
+        repeat: true
+        onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
+    }
+
+    // Short retry cadence while OAuth availability is unknown (startup,
+    // transient subprocess error or format drift); reverts to the normal
+    // 15-minute cadence once a valid aggregate is displayed again.
+    Timer {
+        interval: 20000
+        running: root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0
         repeat: true
         onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
     }

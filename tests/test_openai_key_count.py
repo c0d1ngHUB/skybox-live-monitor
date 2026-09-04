@@ -3,6 +3,7 @@
 
 import importlib.util
 from pathlib import Path
+import subprocess
 
 
 SCRIPT = Path(__file__).parents[1] / "contents/code/hermes_openai_keys.py"
@@ -122,3 +123,40 @@ def test_main_invokes_hermes_auth_list_in_coordinator_profile(monkeypatch, tmp_p
     assert seen["args"] == ["/usr/bin/hermes", "auth", "list"]
     assert seen["env"]["HERMES_HOME"] == str(profile_home)
     assert capsys.readouterr().out.strip() == "2 3"
+
+
+def test_main_prints_drift_signal_when_hermes_executable_is_missing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "coordinator")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: None)
+
+    assert MODULE.main() == 0
+    assert capsys.readouterr().out.strip() == "-1 0"
+
+
+def test_main_prints_drift_signal_on_subprocess_timeout(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "coordinator")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    def failing_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="hermes", timeout=15)
+
+    monkeypatch.setattr(MODULE.subprocess, "run", failing_run)
+
+    assert MODULE.main() == 0
+    assert capsys.readouterr().out.strip() == "-1 0"
+
+
+def test_main_prints_drift_signal_when_auth_list_invocation_fails(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "coordinator")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    def failing_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd="hermes")
+
+    monkeypatch.setattr(MODULE.subprocess, "run", failing_run)
+
+    assert MODULE.main() == 0
+    assert capsys.readouterr().out.strip() == "-1 0"

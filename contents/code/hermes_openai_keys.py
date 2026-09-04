@@ -64,7 +64,8 @@ def hermes_executable() -> str | None:
 def main() -> int:
     executable = hermes_executable()
     if not executable:
-        return 1
+        print("-1 0")
+        return 0
     try:
         result = subprocess.run(
             [executable, "auth", "list"],
@@ -75,7 +76,8 @@ def main() -> int:
             env=hermes_monitor_env(),
         )
     except (OSError, subprocess.SubprocessError):
-        return 1
+        print("-1 0")
+        return 0
 
     active, total = count_openai_credentials(result.stdout)
     if total == 0:

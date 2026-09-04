@@ -485,6 +485,45 @@ def test_removed_ollama_service_has_no_stale_references():
     assert 'ollama' not in AI_HELPER.read_text().lower()
 
 
+def test_openai_keys_source_resets_to_unknown_on_invalid_helper_output():
+    """A helper failure must override a previously valid count, not keep it stale."""
+    text = source()
+    block = text[text.index("id: openAiKeysSource"):text.index("id: aiServicesSource")]
+    assert 'buffer.trim().match(/^(-?' + chr(92) + 'd+)' + chr(92) + 's+(' + chr(92) + 'd+)$/' in block
+    assert 'if (!match) {' in block
+    assert 'root.openAiActiveKeys = -1' in block
+    assert 'root.openAiTotalKeys = -1' in block
+    assert 'root.openAiActiveKeys = parseInt(match[1])' in block
+    assert 'root.openAiTotalKeys = parseInt(match[2])' in block
+
+
+def test_openai_keys_polls_again_while_availability_is_unknown():
+    text = source()
+    assert 'running: root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0' in text
+    assert 'onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)' in text
+    assert text.count('onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)') == 2
+
+
+def test_ai_services_source_never_keeps_stale_oauth_counts():
+    text = source()
+    block = text[text.index("id: aiServicesSource"):text.index("id: gpuTelemetrySource")]
+    assert 'if (Number(payload.openai_oauth_available) >= 0) root.openAiActiveKeys' in block
+    assert 'if (Number(payload.openai_oauth_total) >= 0) root.openAiTotalKeys' in block
+    assert 'if (Number(payload.openai_oauth_available) < 0 || Number(payload.openai_oauth_total) < 0) {' in block
+    assert 'root.openAiActiveKeys = -1' in block
+    assert 'root.openAiTotalKeys = -1' in block
+
+
+def test_oauth_label_and_state_cover_every_helper_failure_mode():
+    text = source()
+    label = text[text.index('function openAiOauthLabel()'):text.index('function openAiOauthTone()')]
+    assert 'return "?/?"' in label
+    logic = (Path(__file__).parents[1] / "contents/code/monitor_logic.js").read_text()
+    logic_block = logic[logic.index('function openAiOauthState('):logic.index('function openAiOauthSymbol(')]
+    assert 'active < 0 || total < 0' in logic_block
+    assert 'return "UNKNOWN"' in logic_block
+
+
 if __name__ == "__main__":
     tests = [value for name, value in globals().items() if name.startswith("test_")]
     failures = []
