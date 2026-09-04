@@ -139,6 +139,16 @@ def test_openai_oauth_availability_passes_through_format_drift_signal():
         ai.run_capture = original
 
 
+def test_openai_oauth_availability_passes_through_missing_executable_drift_signal(tmp_path, monkeypatch):
+    """A real PATH without `hermes` yields the helper's explicit drift signal, not a crash."""
+    empty_bin = tmp_path / "bin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_MONITOR_PROFILE", raising=False)
+    assert ai.openai_oauth_availability() == (-1, 0)
+
+
 def test_hindsight_status_accepts_live_healthy_payload():
     original = ai.fetch_json
     ai.fetch_json = lambda url: {"status": "healthy", "database": "connected"} if url.endswith("/health") else None
