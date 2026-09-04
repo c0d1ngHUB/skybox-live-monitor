@@ -66,6 +66,10 @@ def main() -> int:
     if not executable:
         print("-1 0")
         return 0
+    # The selected profile directory must exist before the call. The read-only
+    # auth list still runs so profile fallback keeps working, but its result
+    # is not trusted for the widget when the selected profile was absent.
+    profile_ready = hermes_home_for_monitor().is_dir()
     try:
         result = subprocess.run(
             [executable, "auth", "list"],
@@ -76,6 +80,9 @@ def main() -> int:
             env=hermes_monitor_env(),
         )
     except (OSError, subprocess.SubprocessError):
+        print("-1 0")
+        return 0
+    if not profile_ready:
         print("-1 0")
         return 0
 

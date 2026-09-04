@@ -1208,16 +1208,17 @@ PlasmoidItem {
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
             if (data["exit code"] === undefined) return
-            // Accepts "<available> <total>" from a valid profile and the
-            // explicit "-1 0" drift signal from every helper failure mode
-            // (missing executable, subprocess/timeout error, format drift).
-            // Unknown output resets to unknown so stale values never persist.
+            // Helper contract: always "<available> <total>"; "-1 0" is the
+            // explicit drift signal (missing executable, subprocess/timeout
+            // error, missing selected profile or format drift).
+            // Nonzero exit or unknown output resets the card to unknown so
+            // stale values never persist.
             var match = buffer.trim().match(/^(-?\d+)\s+(\d+)$/)
             buffer = ""
             disconnectSource(source)
-            if (!match) {
+            if (Number(data["exit code"]) !== 0 || !match) {
                 root.openAiActiveKeys = -1
-                root.openAiTotalKeys = -1
+                root.openAiTotalKeys = 0
                 return
             }
             root.openAiActiveKeys = parseInt(match[1])
@@ -1251,7 +1252,7 @@ PlasmoidItem {
             // instead of letting a stale successful count persist.
             if (Number(payload.openai_oauth_available) < 0 || Number(payload.openai_oauth_total) < 0) {
                 root.openAiActiveKeys = -1
-                root.openAiTotalKeys = -1
+                root.openAiTotalKeys = 0
             }
         }
     }

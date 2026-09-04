@@ -490,9 +490,9 @@ def test_openai_keys_source_resets_to_unknown_on_invalid_helper_output():
     text = source()
     block = text[text.index("id: openAiKeysSource"):text.index("id: aiServicesSource")]
     assert 'buffer.trim().match(/^(-?' + chr(92) + 'd+)' + chr(92) + 's+(' + chr(92) + 'd+)$/' in block
-    assert 'if (!match) {' in block
+    assert 'if (Number(data["exit code"]) !== 0 || !match) {' in block
     assert 'root.openAiActiveKeys = -1' in block
-    assert 'root.openAiTotalKeys = -1' in block
+    assert 'root.openAiTotalKeys = 0' in block
     assert 'root.openAiActiveKeys = parseInt(match[1])' in block
     assert 'root.openAiTotalKeys = parseInt(match[2])' in block
 
@@ -511,7 +511,7 @@ def test_ai_services_source_never_keeps_stale_oauth_counts():
     assert 'if (Number(payload.openai_oauth_total) >= 0) root.openAiTotalKeys' in block
     assert 'if (Number(payload.openai_oauth_available) < 0 || Number(payload.openai_oauth_total) < 0) {' in block
     assert 'root.openAiActiveKeys = -1' in block
-    assert 'root.openAiTotalKeys = -1' in block
+    assert 'root.openAiTotalKeys = 0' in block
 
 
 def test_oauth_label_and_state_cover_every_helper_failure_mode():
