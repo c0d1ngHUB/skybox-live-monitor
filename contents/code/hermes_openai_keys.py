@@ -14,10 +14,24 @@ import sys
 
 
 UNAVAILABLE_MARKERS = ("rate-limited", "cooldown", "exhausted", "dead", "disabled", "invalid")
+DEFAULT_MONITOR_PROFILE = "coordinator"
+
+
+def selected_monitor_profile() -> str:
+    """Profile name with empty/whitespace values normalized to unset.
+
+    ``os.environ.get(name, default)`` returns "" (not the default) when the
+    variable is set but empty. Left as-is, ``profiles/""`` is the existing
+    profile root, so ``profile_ready`` passes and Hermes' internal default
+    fallback gets trusted as a valid count. Normalizing to the default keeps
+    explicit-but-empty equal to unset.
+    """
+    raw = os.environ.get("HERMES_MONITOR_PROFILE", "")
+    return raw.strip() or DEFAULT_MONITOR_PROFILE
 
 
 def hermes_home_for_monitor() -> Path:
-    profile_name = os.environ.get("HERMES_MONITOR_PROFILE", "coordinator")
+    profile_name = selected_monitor_profile()
     return Path.home() / ".hermes" / "profiles" / profile_name
 
 
