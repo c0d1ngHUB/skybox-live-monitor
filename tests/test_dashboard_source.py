@@ -153,7 +153,8 @@ def test_compact_cards_preserve_legible_operational_detail():
     assert 'Layout.preferredHeight: 94' in text
     assert 'font.pixelSize: 13' in text
     assert 'font.pixelSize: 14' in text
-    assert 'Text { width: parent.width - 4; text: modelData.label' in text
+    assert 'mainText: modelData.label' in text
+    assert 'Text { anchors.fill: parent; text: modelData.label' in text
     assert 'elide: Text.ElideMiddle' in text
     assert 'elide: Text.ElideRight' in text
     assert '"SYSTEM DISK /"' in text
@@ -239,8 +240,8 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'columns: 2' in text and 'rows: 2' in text
     assert 'text: "LOAD 1M"' in text
     assert 'text: "PROZESSE"' in text
-    assert 'text: "KI-RUN" + (root.hermesMaxThinkService.length > 0 ? " · " + root.hermesMaxThinkService : "")' in text
-    assert 'return root.openAiActiveKeys + "/" + root.openAiTotalKeys + " BEREIT"' in text
+    assert 'mainText: root.hermesMaxThinkService.length > 0 ? "KI-RUN · " + root.hermesMaxThinkService : "KI-RUN"' in text
+    assert 'root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"' in text
     assert 'OPENAI 0AUTH' not in text
     assert 'id: openAiOauthCard' in text
     assert 'root.openAiOauthLabel()' in text
@@ -391,10 +392,27 @@ def test_oauth_state_affects_global_status_and_header_has_one_status_source():
     assert 'font.pixelSize: 15' in telemetry
 
 
+def test_ai_service_summary_and_oauth_key_status_are_unambiguous():
+    text = source()
+    assert 'function aiServicesSummary()' in text
+    assert 'text: root.aiServicesSummary()' in text
+    assert 'var states = [root.hermesGatewayState, root.hindsightState, root.localLlmState, root.openAiOauthState()]' in text
+    assert 'MonitorLogic.serviceSymbol(state) + " " + state + " · " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"' in text
+    assert 'return root.openAiActiveKeys + "/" + root.openAiTotalKeys + " BEREIT"' not in text
+
+
+def test_status_cards_use_symbols_and_quiet_healthy_borders():
+    text = source()
+    assert 'function serviceBorderColor(rawState)' in text
+    assert text.count('border.color: root.serviceBorderColor(') == 3
+    assert 'border.color: root.openAiOauthBorderColor()' in text
+    assert 'function openAiOauthBorderColor()' in text
+
+
 def test_system_load_graph_plots_both_gpus_without_cpu_or_motion():
     text = source()
-    assert 'text: "━━ GPU 0 · RTX PRO 4000"' in text
-    assert 'text: "━━ GPU 1 · RTX 3060 Ti"' in text
+    assert 'text: "━━ GPU 0 · RTX PRO 4000 · " + Math.round(root.gpu0Usage) + "%"' in text
+    assert 'text: "┄┄ GPU 1 · RTX 3060 Ti · " + Math.round(root.gpu1Usage) + "%"' in text
     assert 'CPU LOAD' not in text
     assert 'plot(root.cpuHistory' not in text
     assert 'plot(root.gpu0History, root.violet' in text
@@ -402,6 +420,34 @@ def test_system_load_graph_plots_both_gpus_without_cpu_or_motion():
     assert 'var plotHeight = Math.max(1, height - 4)' in text
     assert 'height - plotTop - (root.clamp(data[j]) / 100) * plotHeight' in text
     assert 'NumberAnimation' not in text
+
+
+def test_system_load_chart_has_live_values_five_ticks_and_non_color_line_styles():
+    text = source()
+    assert 'Math.round(root.gpu0Usage) + "%"' in text
+    assert 'Math.round(root.gpu1Usage) + "%"' in text
+    assert 'for (var i = 0; i < 5; i++)' in text
+    for label in ('"100%"', '"75%"', '"50%"', '"25%"', '"0%"'):
+        assert f'ctx.fillText({label}' in text
+    assert 'ctx.setLineDash(dashed ? [8, 5] : [])' in text
+    assert 'plot(root.gpu1History, root.cyan, "rgba(150,245,246,0.07)", true)' in text
+
+
+def test_elided_model_process_and_system_texts_expose_full_tooltips():
+    text = source()
+    assert text.count('PlasmaCore.ToolTipArea {') >= 4
+    assert 'mainText: root.localLlmStateLabel()' in text
+    assert 'mainText: parent.process.name' in text
+    assert 'mainText: modelData.label' in text
+    assert 'mainText: root.hermesMaxThinkService.length > 0 ? "KI-RUN · " + root.hermesMaxThinkService : "KI-RUN"' in text
+
+
+def test_normal_frames_are_quiet_while_alert_borders_remain_semantic():
+    text = source()
+    assert 'property color quietBorder:' in text
+    assert 'border.color: root.quietBorder' in text
+    assert 'if (state === "DEGRADED") return root.warning' in text
+    assert 'if (state === "OFFLINE") return root.critical' in text
 
 
 def test_timelines_remain_labeled_while_history_is_filling():
