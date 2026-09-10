@@ -412,7 +412,7 @@ def test_status_cards_use_symbols_and_quiet_healthy_borders():
 def test_system_load_graph_plots_both_gpus_without_cpu_or_motion():
     text = source()
     assert 'text: "━━ GPU 0 · RTX PRO 4000 · " + Math.round(root.gpu0Usage) + "%"' in text
-    assert 'text: "┄┄ GPU 1 · RTX 3060 Ti · " + Math.round(root.gpu1Usage) + "%"' in text
+    assert 'text: "━━ GPU 1 · RTX 3060 Ti · " + Math.round(root.gpu1Usage) + "%"' in text
     assert 'CPU LOAD' not in text
     assert 'plot(root.cpuHistory' not in text
     assert 'plot(root.gpu0History, root.violet' in text
@@ -430,7 +430,7 @@ def test_system_load_chart_has_live_values_five_ticks_and_non_color_line_styles(
     for label in ('"100%"', '"75%"', '"50%"', '"25%"', '"0%"'):
         assert f'ctx.fillText({label}' in text
     assert 'ctx.setLineDash(dashed ? [8, 5] : [])' in text
-    assert 'plot(root.gpu1History, root.cyan, "rgba(150,245,246,0.07)", true)' in text
+    assert 'plot(root.gpu1History, root.cyan, "rgba(150,245,246,0.07)", false)' in text
 
 
 def test_elided_model_process_and_system_texts_expose_full_tooltips():

@@ -688,7 +688,7 @@ PlasmoidItem {
                     id: computeLegend
                     anchors.left: parent.left; anchors.top: headline.bottom; anchors.topMargin: 26; spacing: 18
                     Text { text: "━━ GPU 0 · RTX PRO 4000 · " + Math.round(root.gpu0Usage) + "%"; color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
-                    Text { text: "┄┄ GPU 1 · RTX 3060 Ti · " + Math.round(root.gpu1Usage) + "%"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
+                    Text { text: "━━ GPU 1 · RTX 3060 Ti · " + Math.round(root.gpu1Usage) + "%"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
                 }
 
                 // P0a: Y-axis labels positioned INSIDE the graph area, not with negative margins
@@ -768,7 +768,7 @@ PlasmoidItem {
                             ctx.fill()
                         }
                         plot(root.gpu0History, root.violet, "rgba(219,145,255,0.10)", false)
-                        plot(root.gpu1History, root.cyan, "rgba(150,245,246,0.07)", true)
+                        plot(root.gpu1History, root.cyan, "rgba(150,245,246,0.07)", false)
                     }
                 }
                 Item {
