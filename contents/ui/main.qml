@@ -234,10 +234,15 @@ PlasmoidItem {
         return ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2)
     }
     function currentTimezoneLabel() {
-        // Match the OS timezone abbreviation (CEST in summer, CET in winter) instead of
-        // hardcoding CEST, which goes stale at the October DST switch.
-        var match = new Date().toString().match(/\(([A-Z]+)\)/)
-        return match ? match[1] : ""
+        // Prefer the OS timezone abbreviation (CEST/CET). Some locales spell the
+        // zone out in the local language instead ("Mitteleuropäische Sommerzeit"),
+        // so fall back to the numeric UTC offset — never a stale hardcoded label.
+        var match = new Date().toString().match(/\(([A-Z]{2,5})\)/)
+        if (match) return match[1]
+        var offsetMinutes = -new Date().getTimezoneOffset()
+        var hours = Math.trunc(Math.abs(offsetMinutes) / 60)
+        var minutes = Math.abs(offsetMinutes) % 60
+        return "UTC" + (offsetMinutes >= 0 ? "+" : "-") + hours + (minutes ? ":" + ("0" + minutes).slice(-2) : "")
     }
     function markMetricFresh(metric) {
         var now = Date.now()
