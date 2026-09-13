@@ -159,7 +159,7 @@ def test_compact_cards_preserve_legible_operational_detail():
     assert 'elide: Text.ElideRight' in text
     assert '"SYSTEM DISK /"' in text
     assert 'text: "LOAD 1M"' in text
-    assert 'text: "PROZESSE"' in text
+    assert 'text: "PROCESSES"' in text
 
 
 
@@ -217,7 +217,7 @@ def test_footer_uses_explicit_disk_and_uptime_labels():
     assert 'text: root.fmtUptime(root.uptimeSeconds)' in text
     assert 'text: "LOAD 1M"' in text
     assert 'text: root.loadAverage.toFixed(2)' in text
-    assert 'text: "PROZESSE"' in text
+    assert 'text: "PROCESSES"' in text
     assert 'text: root.processCount' in text
     assert 'font.pixelSize: 12' not in text
 
@@ -239,8 +239,8 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'id: systemMetaGrid' in text
     assert 'columns: 2' in text and 'rows: 2' in text
     assert 'text: "LOAD 1M"' in text
-    assert 'text: "PROZESSE"' in text
-    assert 'mainText: root.hermesMaxThinkService.length > 0 ? "KI-RUN · " + root.hermesMaxThinkService : "KI-RUN"' in text
+    assert 'text: "PROCESSES"' in text
+    assert 'mainText: root.hermesMaxThinkService.length > 0 ? "AI RUN · " + root.hermesMaxThinkService : "AI RUN"' in text
     assert 'root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"' in text
     assert 'OPENAI 0AUTH' not in text
     assert 'id: openAiOauthCard' in text
@@ -439,7 +439,7 @@ def test_elided_model_process_and_system_texts_expose_full_tooltips():
     assert 'mainText: root.localLlmStateLabel()' in text
     assert 'mainText: parent.process.name' in text
     assert 'mainText: modelData.label' in text
-    assert 'mainText: root.hermesMaxThinkService.length > 0 ? "KI-RUN · " + root.hermesMaxThinkService : "KI-RUN"' in text
+    assert 'mainText: root.hermesMaxThinkService.length > 0 ? "AI RUN · " + root.hermesMaxThinkService : "AI RUN"' in text
 
 
 def test_normal_frames_are_quiet_while_alert_borders_remain_semantic():

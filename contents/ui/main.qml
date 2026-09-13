@@ -65,6 +65,7 @@ PlasmoidItem {
     property string hermesMaxThinkService: ""
     property int openAiActiveKeys: -1
     property int openAiTotalKeys: -1
+    property int openAiFetchFailures: 0
     property string hermesGatewayState: "UNKNOWN"
     property string hindsightState: "UNKNOWN"
     property string localLlmState: "UNKNOWN"
@@ -231,6 +232,12 @@ PlasmoidItem {
     function refreshClock() {
         var now = new Date()
         return ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2)
+    }
+    function currentTimezoneLabel() {
+        // Match the OS timezone abbreviation (CEST in summer, CET in winter) instead of
+        // hardcoding CEST, which goes stale at the October DST switch.
+        var match = new Date().toString().match(/\(([A-Z]+)\)/)
+        return match ? match[1] : ""
     }
     function markMetricFresh(metric) {
         var now = Date.now()
@@ -527,7 +534,7 @@ PlasmoidItem {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 0
                     Text { text: "SKYBOX"; color: root.cyan; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 26; font.letterSpacing: 3 }
-                    Text { text: "AIEX · LOCAL · CEST"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                    Text { text: "AIEX · LOCAL · " + root.currentTimezoneLabel(); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                 }
                 Column {
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -779,7 +786,7 @@ PlasmoidItem {
                     height: 20
                     Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−2 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
                     Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "−1 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
-                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.historyFilling() ? root.warning : root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
+                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
                 }
             }
 
@@ -1057,7 +1064,7 @@ PlasmoidItem {
                             height: 20
                             Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−2 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                             Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "−1 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.historyFilling() ? root.warning : root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                         }
                     }
 
@@ -1126,7 +1133,7 @@ PlasmoidItem {
                             height: 20
                             Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−2 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                             Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "−1 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.historyFilling() ? root.warning : root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                         }
                     }
                 }
@@ -1192,7 +1199,7 @@ PlasmoidItem {
                             }
                             Item {
                                 width: (parent.width - 12) / 2; height: 24
-                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "PROZESSE"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "PROCESSES"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                                 Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.processCount; color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                             }
                             Item {
@@ -1202,7 +1209,7 @@ PlasmoidItem {
                                     anchors.right: thinkDuration.left
                                     anchors.rightMargin: 8
                                     height: parent.height
-                                    mainText: root.hermesMaxThinkService.length > 0 ? "KI-RUN · " + root.hermesMaxThinkService : "KI-RUN"
+                                    mainText: root.hermesMaxThinkService.length > 0 ? "AI RUN · " + root.hermesMaxThinkService : "AI RUN"
                                     Text { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: parent.mainText; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
                                 }
                                 Text { id: thinkDuration; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtDuration(root.hermesMaxThinkSeconds); color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
@@ -1286,7 +1293,13 @@ PlasmoidItem {
             var match = buffer.trim().match(/^(-?\d+)\s+(\d+)$/)
             buffer = ""
             disconnectSource(source)
-            if (!match) return
+            if (!match) {
+                // Failed fetch (e.g. plasmashell cold start): back off briefly instead of
+                // staying UNKNOWN for the full 15-minute refresh interval.
+                if (root.openAiFetchFailures < 5) root.openAiFetchFailures += 1
+                return
+            }
+            root.openAiFetchFailures = 0
             root.openAiActiveKeys = parseInt(match[1])
             root.openAiTotalKeys = parseInt(match[2])
         }
@@ -1523,6 +1536,15 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: hermesThinkSource.connectSource(hermesThinkSource.command)
+    }
+
+    // OAuth key counts: retry failed fetches with short backoff (cold-start failures),
+    // then settle on the 15-minute steady-state interval.
+    Timer {
+        interval: Math.min(60000, 5000 * Math.pow(2, Math.min(5, root.openAiFetchFailures)))
+        running: root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0
+        repeat: true
+        onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
     }
 
     Timer {

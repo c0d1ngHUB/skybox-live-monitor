@@ -81,7 +81,9 @@ def local_llm_status() -> tuple[ServiceStatus, str]:
 def openai_oauth_availability() -> tuple[int, int]:
     """Read privacy-safe aggregate availability from the dedicated helper."""
     helper = Path(__file__).with_name("hermes_openai_keys.py")
-    out = run_capture([sys.executable, str(helper)], timeout=5.0)
+    # The helper itself runs ``hermes auth list`` with a 15s timeout; give it room
+    # instead of cutting it off at the generic 2.5s probe budget.
+    out = run_capture([sys.executable, str(helper)], timeout=20.0)
     match = re.fullmatch(r"(-?\d+)\s+(\d+)", out)
     if not match:
         return -1, -1
