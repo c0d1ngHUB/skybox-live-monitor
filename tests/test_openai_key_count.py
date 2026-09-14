@@ -3,6 +3,7 @@
 
 import importlib.util
 from pathlib import Path
+import subprocess
 
 
 SCRIPT = Path(__file__).parents[1] / "contents/code/hermes_openai_keys.py"
@@ -76,6 +77,30 @@ def test_monitor_uses_coordinator_profile_by_default(monkeypatch, tmp_path):
     assert env["HERMES_HOME"] == str(profile_home)
 
 
+def test_main_invokes_hermes_auth_list_even_when_profile_directory_is_missing(monkeypatch, tmp_path, capsys):
+    """Missing selected profile: auth list still runs, but output is not trusted."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "does-not-exist")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    seen = {}
+
+    class Result:
+        stdout = "openai-codex (1 credentials):\n  #1  only oauth device_code\n"
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        seen["env"] = kwargs["env"]
+        return Result()
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    assert MODULE.main() == 0
+    assert seen["args"] == ["/usr/bin/hermes", "auth", "list"]
+    assert seen["env"]["HERMES_HOME"] == str(tmp_path / ".hermes" / "profiles" / "does-not-exist")
+    assert capsys.readouterr().out.strip() == "-1 0"
+
+
 def test_main_invokes_hermes_auth_list_in_coordinator_profile(monkeypatch, tmp_path, capsys):
     profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
     profile_home.mkdir(parents=True)
@@ -99,3 +124,96 @@ def test_main_invokes_hermes_auth_list_in_coordinator_profile(monkeypatch, tmp_p
     assert seen["args"] == ["/usr/bin/hermes", "auth", "list"]
     assert seen["env"]["HERMES_HOME"] == str(profile_home)
     assert capsys.readouterr().out.strip() == "2 3"
+
+
+def test_main_prints_drift_signal_when_hermes_executable_is_missing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "coordinator")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: None)
+
+    assert MODULE.main() == 0
+    assert capsys.readouterr().out.strip() == "-1 0"
+
+
+def test_main_prints_drift_signal_on_subprocess_timeout(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "coordinator")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    def failing_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="hermes", timeout=15)
+
+    monkeypatch.setattr(MODULE.subprocess, "run", failing_run)
+
+    assert MODULE.main() == 0
+    assert capsys.readouterr().out.strip() == "-1 0"
+
+
+def test_main_prints_drift_signal_when_auth_list_invocation_fails(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "coordinator")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    def failing_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd="hermes")
+
+    monkeypatch.setattr(MODULE.subprocess, "run", failing_run)
+
+    assert MODULE.main() == 0
+    assert capsys.readouterr().out.strip() == "-1 0"
+
+
+def test_main_prints_drift_signal_when_selected_profile_directory_is_absent(monkeypatch, tmp_path, capsys):
+    """Missing profile before the call yields -1 0 even if auth list would work."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "absent-profile")
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    class Result:
+        stdout = "openai-codex (2 credentials):\n  #1  first oauth device_code\n  #2  second oauth device_code\n"
+
+    monkeypatch.setattr(MODULE.subprocess, "run", lambda *a, **k: Result())
+
+    assert MODULE.main() == 0
+    assert capsys.readouterr().out.strip() == "-1 0"
+
+
+def test_empty_profile_env_is_normalized_to_coordinator_default(monkeypatch, tmp_path, capsys):
+    """Explicitly empty/whitespace HERMES_MONITOR_PROFILE must not act as a profile.
+
+    os.environ.get(name, default) returns "" (not "coordinator") when the
+    variable is set but empty; Path.home()/".hermes"/"profiles"/"" is the
+    existing profile root, which made profile_ready pass and Hermes' internal
+    default fallback look like a trusted count.
+
+    Semantics: empty or whitespace-only values are normalized to unset, so the
+    monitor uses the coordinator profile — identical to leaving the variable
+    unset. (Chosen over a -1 0 drift signal: unset already means "coordinator",
+    so this keeps one consistent meaning per input state.)
+    """
+    profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
+    profile_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
+
+    for empty_value in ("", "   ", "\t"):
+        monkeypatch.setenv("HERMES_MONITOR_PROFILE", empty_value)
+        assert MODULE.hermes_monitor_env()["HERMES_HOME"] == str(profile_home)
+
+    seen = {}
+
+    class Result:
+        stdout = "openai-codex (2 credentials):\n  #1  first oauth device_code\n  #2  second oauth device_code rate-limited\n"
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        seen["env"] = kwargs["env"]
+        return Result()
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "")
+    assert MODULE.main() == 0
+    assert seen["args"] == ["/usr/bin/hermes", "auth", "list"]
+    assert seen["env"]["HERMES_HOME"] == str(profile_home)
+    assert capsys.readouterr().out.strip() == "1 2"
