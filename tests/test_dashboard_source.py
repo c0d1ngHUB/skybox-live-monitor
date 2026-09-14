@@ -240,7 +240,7 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'columns: 2' in text and 'rows: 2' in text
     assert 'text: "LOAD 1M"' in text
     assert 'text: "PROCESSES"' in text
-    assert 'mainText: root.hermesMaxThinkService.length > 0 ? "AI RUN · " + root.hermesMaxThinkService : "AI RUN"' in text
+    assert 'sessionLabel: "HERMES-SESSION"' in text
     assert 'root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"' in text
     assert 'OPENAI 0AUTH' not in text
     assert 'id: openAiOauthCard' in text
@@ -439,7 +439,8 @@ def test_elided_model_process_and_system_texts_expose_full_tooltips():
     assert 'mainText: root.localLlmStateLabel()' in text
     assert 'mainText: parent.process.name' in text
     assert 'mainText: modelData.label' in text
-    assert 'mainText: root.hermesMaxThinkService.length > 0 ? "AI RUN · " + root.hermesMaxThinkService : "AI RUN"' in text
+    assert 'sessionLabel: "HERMES-SESSION"' in text
+    assert '"Längste abgeschlossene Hermes-Antwort der letzten 24 h" + profileHint' in text
 
 
 def test_normal_frames_are_quiet_while_alert_borders_remain_semantic():

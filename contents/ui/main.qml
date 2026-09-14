@@ -1214,8 +1214,10 @@ PlasmoidItem {
                                     anchors.right: thinkDuration.left
                                     anchors.rightMargin: 8
                                     height: parent.height
-                                    mainText: root.hermesMaxThinkService.length > 0 ? "AI RUN · " + root.hermesMaxThinkService : "AI RUN"
-                                    Text { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: parent.mainText; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
+                                    property string sessionLabel: "HERMES-SESSION"
+                                    property string profileHint: root.hermesMaxThinkService.length > 0 ? " · Profil: " + root.hermesMaxThinkService.toLowerCase() : ""
+                                    mainText: "Längste abgeschlossene Hermes-Antwort der letzten 24 h" + profileHint
+                                    Text { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: parent.sessionLabel; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
                                 }
                                 Text { id: thinkDuration; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtDuration(root.hermesMaxThinkSeconds); color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                             }
