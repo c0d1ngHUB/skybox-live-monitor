@@ -66,46 +66,42 @@ def test_format_drift_is_signaled_as_unparseable(monkeypatch, tmp_path, capsys):
     assert capsys.readouterr().out.strip() == "-1 0"
 
 
-def test_monitor_uses_coordinator_profile_by_default(monkeypatch, tmp_path):
-    profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
-    profile_home.mkdir(parents=True)
+def test_monitor_pins_no_profile_without_an_explicit_override(monkeypatch, tmp_path):
+    """Unset HERMES_MONITOR_PROFILE must not pin a profile name.
+
+    ``hermes auth list`` resolves the credential store the Hermes instance
+    actually uses. A hardcoded default profile showed 0/0 whenever that
+    profile was absent (parked, renamed, or never created on this machine),
+    because ``hermes auth list`` against a missing HERMES_HOME prints nothing.
+    """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("HERMES_MONITOR_PROFILE", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "inherited-home"))
 
     env = MODULE.hermes_monitor_env()
 
-    assert env["HERMES_HOME"] == str(profile_home)
+    assert env["HERMES_HOME"] == str(tmp_path / "inherited-home")
 
 
-def test_main_invokes_hermes_auth_list_even_when_profile_directory_is_missing(monkeypatch, tmp_path, capsys):
-    """Missing selected profile: auth list still runs, but output is not trusted."""
+def test_main_skips_auth_list_when_configured_profile_directory_is_missing(monkeypatch, tmp_path, capsys):
+    """An explicitly configured profile that does not exist is drift, not a count."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("HERMES_MONITOR_PROFILE", "does-not-exist")
     monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
 
-    seen = {}
-
-    class Result:
-        stdout = "openai-codex (1 credentials):\n  #1  only oauth device_code\n"
-
-    def fake_run(args, **kwargs):
-        seen["args"] = args
-        seen["env"] = kwargs["env"]
-        return Result()
-
-    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+    called = []
+    monkeypatch.setattr(MODULE.subprocess, "run", lambda *a, **k: called.append(a))
 
     assert MODULE.main() == 0
-    assert seen["args"] == ["/usr/bin/hermes", "auth", "list"]
-    assert seen["env"]["HERMES_HOME"] == str(tmp_path / ".hermes" / "profiles" / "does-not-exist")
+    assert called == []
     assert capsys.readouterr().out.strip() == "-1 0"
 
 
-def test_main_invokes_hermes_auth_list_in_coordinator_profile(monkeypatch, tmp_path, capsys):
+def test_main_invokes_hermes_auth_list_in_configured_profile(monkeypatch, tmp_path, capsys):
     profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
     profile_home.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("HERMES_MONITOR_PROFILE", raising=False)
+    monkeypatch.setenv("HERMES_MONITOR_PROFILE", "coordinator")
     monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
 
     seen = {}
@@ -178,7 +174,7 @@ def test_main_prints_drift_signal_when_selected_profile_directory_is_absent(monk
     assert capsys.readouterr().out.strip() == "-1 0"
 
 
-def test_empty_profile_env_is_normalized_to_coordinator_default(monkeypatch, tmp_path, capsys):
+def test_empty_profile_env_is_normalized_to_unset(monkeypatch, tmp_path, capsys):
     """Explicitly empty/whitespace HERMES_MONITOR_PROFILE must not act as a profile.
 
     os.environ.get(name, default) returns "" (not "coordinator") when the
@@ -187,18 +183,16 @@ def test_empty_profile_env_is_normalized_to_coordinator_default(monkeypatch, tmp
     default fallback look like a trusted count.
 
     Semantics: empty or whitespace-only values are normalized to unset, so the
-    monitor uses the coordinator profile — identical to leaving the variable
-    unset. (Chosen over a -1 0 drift signal: unset already means "coordinator",
-    so this keeps one consistent meaning per input state.)
+    monitor queries the profile Hermes resolves by itself — identical to leaving
+    the variable unset. (Chosen over a -1 0 drift signal: unset already means
+    "no override", so this keeps one consistent meaning per input state.)
     """
-    profile_home = tmp_path / ".hermes" / "profiles" / "coordinator"
-    profile_home.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
 
     for empty_value in ("", "   ", "\t"):
         monkeypatch.setenv("HERMES_MONITOR_PROFILE", empty_value)
-        assert MODULE.hermes_monitor_env()["HERMES_HOME"] == str(profile_home)
+        assert "HERMES_HOME" not in MODULE.hermes_monitor_env()
 
     seen = {}
 
@@ -215,5 +209,5 @@ def test_empty_profile_env_is_normalized_to_coordinator_default(monkeypatch, tmp
     monkeypatch.setenv("HERMES_MONITOR_PROFILE", "")
     assert MODULE.main() == 0
     assert seen["args"] == ["/usr/bin/hermes", "auth", "list"]
-    assert seen["env"]["HERMES_HOME"] == str(profile_home)
+    assert "HERMES_HOME" not in seen["env"]
     assert capsys.readouterr().out.strip() == "1 2"

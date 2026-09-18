@@ -14,30 +14,34 @@ import sys
 
 
 UNAVAILABLE_MARKERS = ("rate-limited", "cooldown", "exhausted", "dead", "disabled", "invalid")
-DEFAULT_MONITOR_PROFILE = "coordinator"
 
 
-def selected_monitor_profile() -> str:
-    """Profile name with empty/whitespace values normalized to unset.
+def configured_monitor_profile() -> str:
+    """Explicitly requested profile name, with empty/whitespace treated as unset.
 
-    ``os.environ.get(name, default)`` returns "" (not the default) when the
-    variable is set but empty. Left as-is, ``profiles/""`` is the existing
-    profile root, so ``profile_ready`` passes and Hermes' internal default
-    fallback gets trusted as a valid count. Normalizing to the default keeps
-    explicit-but-empty equal to unset.
+    Never default to a profile name: ``hermes auth list`` must resolve the
+    credential store the Hermes instance actually uses. Pinning a profile that
+    does not exist (parked, renamed, or never created on this machine) makes
+    the command print nothing, which used to surface as a silent 0/0.
     """
-    raw = os.environ.get("HERMES_MONITOR_PROFILE", "")
-    return raw.strip() or DEFAULT_MONITOR_PROFILE
+    return os.environ.get("HERMES_MONITOR_PROFILE", "").strip()
 
 
-def hermes_home_for_monitor() -> Path:
-    profile_name = selected_monitor_profile()
+def profile_home_for_monitor(profile_name: str) -> Path:
     return Path.home() / ".hermes" / "profiles" / profile_name
 
 
 def hermes_monitor_env() -> dict[str, str]:
+    """Environment for the auth query; pins a profile only when one was asked for.
+
+    Without an override, ``HERMES_HOME`` is inherited, so an unset variable,
+    an empty value and a whitespace-only value all mean the same thing: use the
+    profile Hermes resolves by itself.
+    """
+    profile_name = configured_monitor_profile()
     env = os.environ.copy()
-    env["HERMES_HOME"] = str(hermes_home_for_monitor())
+    if profile_name:
+        env["HERMES_HOME"] = str(profile_home_for_monitor(profile_name))
     return env
 
 
@@ -80,10 +84,13 @@ def main() -> int:
     if not executable:
         print("-1 0")
         return 0
-    # The selected profile directory must exist before the call. The read-only
-    # auth list still runs so profile fallback keeps working, but its result
-    # is not trusted for the widget when the selected profile was absent.
-    profile_ready = hermes_home_for_monitor().is_dir()
+    # An explicitly configured profile must exist before it is queried. When it
+    # does not, the auth store is unresolved and the count is not trusted;
+    # asking Hermes anyway would query a fallback store and look like real data.
+    profile_name = configured_monitor_profile()
+    if profile_name and not profile_home_for_monitor(profile_name).is_dir():
+        print("-1 0")
+        return 0
     try:
         result = subprocess.run(
             [executable, "auth", "list"],
@@ -96,15 +103,12 @@ def main() -> int:
     except (OSError, subprocess.SubprocessError):
         print("-1 0")
         return 0
-    if not profile_ready:
-        print("-1 0")
-        return 0
 
     active, total = count_openai_credentials(result.stdout)
     if total == 0:
-        # Distinguish "no OpenAI-Codex credentials configured" from "could not
-        # parse the auth list" so format drift surfaces instead of showing 0/0.
-        if "openai-codex" in result.stdout:
+        # Distinguish "no OpenAI-Codex credentials configured" from an empty or
+        # unparseable auth list, so a wrong store surfaces instead of 0/0.
+        if not result.stdout.strip() or "openai-codex" in result.stdout:
             print("-1 0")
             return 0
     print(f"{active} {total}")
