@@ -86,7 +86,7 @@ PlasmoidItem {
         diskPercent: 0, diskUsed: 0, diskTotal: 0,
         uptime: 0, loadAverage: 0
     })
-    // Two largest CPU, RAM, and GPU consumers, sampled every five seconds.
+    // Four largest CPU, RAM, and GPU consumers, sampled every five seconds.
     property var topCpuProcesses: []
     property var previousCpuSamples: ({})
     property double previousCpuSampleMs: 0
@@ -1414,7 +1414,7 @@ PlasmoidItem {
             }
             var now = Date.now()
             var elapsedMs = root.previousCpuSampleMs > 0 ? now - root.previousCpuSampleMs : 0
-            var processes = MonitorLogic.cpuProcessRates(root.previousCpuSamples, samples, elapsedMs, 2)
+            var processes = MonitorLogic.cpuProcessRates(root.previousCpuSamples, samples, elapsedMs, 4)
             root.topCpuProcesses = processes
             root.previousCpuSamples = currentByPid
             root.previousCpuSampleMs = now
@@ -1425,7 +1425,7 @@ PlasmoidItem {
         id: topRamSource
         engine: "executable"
         connectedSources: []
-        property string command: "ps -eo rss=,comm= --sort=-rss | head -2"
+        property string command: "ps -eo rss=,comm= --sort=-rss | head -4"
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1441,7 +1441,7 @@ PlasmoidItem {
             buffer = ""
             disconnectSource(source)
             var processes = []
-            for (var i = 0; i < lines.length && processes.length < 2; i++) {
+            for (var i = 0; i < lines.length && processes.length < 4; i++) {
                 var match = lines[i].trim().match(/^([0-9]+)\s+(.+)$/)
                 if (!match) continue
                 processes.push({ ram: (parseFloat(match[1]) / 1024).toFixed(1) + " MiB", name: match[2].trim() })

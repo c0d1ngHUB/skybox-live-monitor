@@ -139,7 +139,7 @@ def collect(proc_root: Path = Path("/proc")) -> dict[str, Any]:
     for gpu in gpus:
         processes = processes_by_uuid.get(gpu["uuid"], [])
         gpu["process_count"] = len(processes)
-        gpu["processes"] = processes[:2]
+        gpu["processes"] = processes[:4]
     payload: dict[str, Any] = {"gpus": gpus, "processes_available": processes_available}
     if not processes_available:
         payload["process_error"] = PROCESS_ERROR

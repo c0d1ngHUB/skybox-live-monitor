@@ -43,7 +43,7 @@ def test_processes_are_grouped_by_gpu_uuid_and_use_service_names(tmp_path: Path)
     assert grouped["GPU-b"][1]["name"] == "fallback-server"
 
 
-def test_collect_attaches_top_two_processes_and_exact_count(monkeypatch, tmp_path: Path):
+def test_collect_attaches_top_four_processes_and_exact_count(monkeypatch, tmp_path: Path):
     gpu_output = (
         "0, GPU-a, NVIDIA RTX PRO 4000 Blackwell, 90, 80, 20000, 24467, 140, 145\n"
         "1, GPU-b, NVIDIA GeForce RTX 3060 Ti, 0, 40, 7000, 8192, 14, 200"
@@ -51,7 +51,9 @@ def test_collect_attaches_top_two_processes_and_exact_count(monkeypatch, tmp_pat
     process_output = (
         "GPU-b, 1, /bin/one, 100\n"
         "GPU-b, 2, /bin/two, 300\n"
-        "GPU-b, 3, /bin/three, 200"
+        "GPU-b, 3, /bin/three, 200\n"
+        "GPU-b, 4, /bin/four, 250\n"
+        "GPU-b, 5, /bin/five, 50"
     )
 
     def fake_run(command, timeout=GPU.TIMEOUT):
@@ -63,8 +65,8 @@ def test_collect_attaches_top_two_processes_and_exact_count(monkeypatch, tmp_pat
     assert "error" not in payload
     assert len(payload["gpus"]) == 2
     assert payload["gpus"][0]["process_count"] == 0
-    assert payload["gpus"][1]["process_count"] == 3
-    assert [process["used_mib"] for process in payload["gpus"][1]["processes"]] == [300, 200]
+    assert payload["gpus"][1]["process_count"] == 5
+    assert [process["used_mib"] for process in payload["gpus"][1]["processes"]] == [300, 250, 200, 100]
 
 
 def test_collect_reports_full_gpu_failure_with_clear_error_and_exit_one(monkeypatch):

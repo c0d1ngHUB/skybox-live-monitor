@@ -78,13 +78,15 @@ class MonitorBehaviorTests(unittest.TestCase):
     def test_cpu_process_rates_use_per_pid_cpu_time_deltas(self):
         script = (
             f"const m=require({json.dumps(str(LOGIC))});"
-            "const previous={'10':{cpuSeconds:4},'20':{cpuSeconds:8}};"
-            "const current=[{pid:10,cpuSeconds:6,name:'fast'},{pid:20,cpuSeconds:8.5,name:'slow'},{pid:30,cpuSeconds:9,name:'new'}];"
-            "console.log(JSON.stringify(m.cpuProcessRates(previous,current,5000,2)));"
+            "const previous={'10':{cpuSeconds:4},'20':{cpuSeconds:8},'30':{cpuSeconds:9},'40':{cpuSeconds:10},'50':{cpuSeconds:1}};"
+            "const current=[{pid:10,cpuSeconds:6,name:'fast'},{pid:20,cpuSeconds:8.5,name:'slow'},{pid:30,cpuSeconds:10,name:'third'},{pid:40,cpuSeconds:11,name:'fourth'},{pid:50,cpuSeconds:1.2,name:'fifth'},{pid:60,cpuSeconds:9,name:'new'}];"
+            "console.log(JSON.stringify(m.cpuProcessRates(previous,current,5000,4)));"
         )
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout), [
             {"pid": 10, "name": "fast", "cpu": "40.0"},
+            {"pid": 30, "name": "third", "cpu": "20.0"},
+            {"pid": 40, "name": "fourth", "cpu": "20.0"},
             {"pid": 20, "name": "slow", "cpu": "10.0"},
         ])
 

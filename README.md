@@ -8,8 +8,8 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 
 - CPU temperature display (like GPU card — no percentage, no progress bar)
 - Independent telemetry for both NVIDIA GPUs: utilization, temperature, VRAM,
-  power and per-GPU compute processes
-- Compact CPU and RAM process summaries
+  power and per-GPU compute processes (up to four largest consumers)
+- Compact CPU and RAM process summaries (up to four largest consumers)
 - Two-minute dual-GPU and network history charts
 - NVIDIA VRAM telemetry via `nvidia-smi`
 - Local Qwen 3.8 service health via localhost only

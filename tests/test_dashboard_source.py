@@ -83,7 +83,7 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     assert 'gpu0ProcessCount' in text and 'gpu1ProcessCount' in text
 
 
-def test_cpu_card_shows_top_two_processes_in_its_detail_area():
+def test_cpu_card_shows_top_four_processes_in_its_detail_area():
     text = source()
     assert 'property var topCpuProcesses' in text
     assert 'id: topCpuSource' in text
@@ -91,34 +91,44 @@ def test_cpu_card_shows_top_two_processes_in_its_detail_area():
     assert 'MonitorLogic.cpuProcessRates' in text
     assert 'property string heading: metricKind === "cpu" ? "TOP · CPU %" : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")' in text
     assert 'processes:root.topCpuProcesses' in text
-    assert 'MonitorLogic.cpuProcessRates(root.previousCpuSamples, samples, elapsedMs, 2)' in text
+    assert 'MonitorLogic.cpuProcessRates(root.previousCpuSamples, samples, elapsedMs, 4)' in text
     assert 'onTriggered: topCpuSource.connectSource(topCpuSource.command)' in text
 
 
-def test_ram_card_shows_top_two_processes_in_its_detail_area():
+def test_ram_card_shows_top_four_processes_in_its_detail_area():
     text = source()
     assert 'property var topRamProcesses' in text
     assert 'id: topRamSource' in text
-    assert 'ps -eo rss=,comm= --sort=-rss | head -2' in text
+    assert 'ps -eo rss=,comm= --sort=-rss | head -4' in text
     assert 'processes:root.topRamProcesses' in text
     assert 'if (isFinite(mib) && mib >= 1024) return (mib / 1024).toFixed(1) + " GiB"' in text
-    assert 'processes.length < 2' in text
+    assert 'processes.length < 4' in text
     assert 'onTriggered: topRamSource.connectSource(topRamSource.command)' in text
 
 
-def test_gpu_card_shows_top_two_processes_but_counts_all_workloads():
-    """The card is capped at two rows while its workload count remains exact."""
+def test_gpu_card_shows_top_four_processes_but_counts_all_workloads():
+    """The card is capped at four rows while its workload count remains exact."""
     text = source()
     helper = GPU_HELPER.read_text()
     assert 'property var topGpu0Processes: []' in text
     assert 'property var topGpu1Processes: []' in text
     assert 'gpu_uuid,pid,process_name,used_memory' in helper
     assert 'process_count' in helper
-    assert 'processes[:2]' in helper
+    assert 'processes[:4]' in helper
     assert 'service_name_for_pid' in helper
     assert 'processes:root.topGpu0Processes' in text
     assert 'processes:root.topGpu1Processes' in text
     assert 'onTriggered: gpuTelemetrySource.connectSource(gpuTelemetrySource.command)' in text
+
+
+def test_process_cards_keep_their_height_while_showing_four_rows():
+    """Four 19 px rows plus the heading fit the existing card body, so the
+    grid keeps its height and the dashboard does not reflow."""
+    text = source()
+    cards = text[text.index("// --- Dual-GPU row"):text.index("// --- NETWORK section")]
+    assert 'Layout.preferredHeight: 278' in cards
+    assert 'height: 19' in cards
+    assert 19 * 4 + 19 + 3 * 3 <= 278 / 2 - 16 - 4
 
 
 def test_charts_are_two_minute_and_visually_readable():
