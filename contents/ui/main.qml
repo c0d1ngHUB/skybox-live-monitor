@@ -15,7 +15,7 @@ PlasmoidItem {
     property real ramTotalBytes: 0
     property real cpuTemp: 0
     property bool gpu0Available: false
-    property string gpu0Name: "RTX PRO 4000"
+    property string gpu0Name: "GPU 0"
     property real gpu0Usage: 0
     property real gpu0Temp: 0
     property real gpu0VramUsedMiB: 0
@@ -23,7 +23,7 @@ PlasmoidItem {
     property real gpu0PowerDrawWatts: 0
     property real gpu0PowerLimitWatts: 0
     property bool gpu1Available: false
-    property string gpu1Name: "RTX 3060 Ti"
+    property string gpu1Name: "GPU 1"
     property real gpu1Usage: 0
     property real gpu1Temp: 0
     property real gpu1VramUsedMiB: 0
@@ -71,9 +71,15 @@ PlasmoidItem {
     property string localLlmState: "UNKNOWN"
     property string localLlmModelName: ""
 
-    property real diskUsedPercent: 0
-    property real diskUsedBytes: 0
+    // df(1) view, read by contents/code/disk_usage.py. The Plasma sensors cannot
+    // express it: disk/all/used counts the filesystem reserve as used and
+    // disk/all/free is f_bavail, so neither yields df's "used".
     property real diskTotalBytes: 0
+    property real diskUsedBytesDf: 0
+    property real diskAvailBytesDf: 0
+    property real diskPercentDf: 0
+    // Logical processors, for labelling per-process CPU percentages.
+    property int cpuCoreCount: 0
     property string lastRefresh: "--:--"
     property string currentTime: refreshClock()
     property string dataStatus: "WAITING"
@@ -140,21 +146,36 @@ PlasmoidItem {
         if (v >= 1024) return (v / 1024).toFixed(1) + " KB/s"
         return Math.round(v) + " B/s"
     }
-    function networkAxisUnit(maxMbit) {
-        return maxMbit < 1 ? "KBIT/S" : "MBIT/S"
+    function networkPeak(direction) {
+        var history = direction === "upload" ? root.upHistory : root.downHistory
+        var peak = 0
+        for (var i = 0; i < history.length; i++) {
+            var value = Number(history[i]) || 0
+            if (value > peak) peak = value
+        }
+        return peak
+    }
+    function networkLive(direction) {
+        return direction === "upload" ? root.up : root.down
+    }
+    function networkUseMbit(direction) {
+        return MonitorLogic.networkPanelUsesMbit(root.networkPeak(direction), root.networkLive(direction))
+    }
+    function networkAxisUnit(direction) {
+        return MonitorLogic.networkAxisUnit(root.networkPeak(direction), root.networkLive(direction))
+    }
+    // Tick numbers follow the same decision as the axis label: Kbit ceilings are
+    // plotted in Kbit, Mbit ceilings in Mbit.
+    function networkAxisFactor(direction) {
+        return root.networkUseMbit(direction) ? 1 : 1000
+    }
+    function networkLiveLabel(direction) {
+        return MonitorLogic.networkRateLabel(root.networkLive(direction), root.networkUseMbit(direction))
     }
     function fmtNetworkAxisValue(value) {
         if (value >= 100) return Math.round(value).toString()
         if (value >= 10) return value.toFixed(1).replace(".0", "")
         return value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")
-    }
-    function fmtNetworkLive(bytesPerSecond, scaleBytesPerSecond) {
-        var bps = Number(bytesPerSecond) || 0
-        var scale = Number(scaleBytesPerSecond) || 0
-        if (bps <= 0 || scale <= 0) return "0 KBIT/S"
-        var mbit = bps * 8 / 1000000
-        if (mbit < 1) return root.fmtNetworkAxisValue(mbit * 1000) + " KBIT/S"
-        return root.fmtNetworkAxisValue(mbit) + " MBIT/S"
     }
     function fmtGiB(v) {
         if (!v || v < 1) return "--"
@@ -274,7 +295,7 @@ PlasmoidItem {
         if (root.dataStatus === "LIVE") {
             var gpu0Vram = root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB)
             var gpu1Vram = root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB)
-            if (root.cpuTemp >= 85 || root.gpu0Temp >= 90 || root.gpu1Temp >= 90 || root.ram >= 95 || gpu0Vram >= 95 || gpu1Vram >= 95 || root.diskUsedPercent >= 95) return "CRITICAL"
+            if (root.cpuTemp >= 85 || root.gpu0Temp >= 90 || root.gpu1Temp >= 90 || root.ram >= 95 || gpu0Vram >= 95 || gpu1Vram >= 95 || root.diskPercent() >= 95) return "CRITICAL"
             var services = [root.hermesGatewayState, root.hindsightState, root.localLlmState]
             for (var i = 0; i < services.length; i++) {
                 var state = MonitorLogic.normalizeServiceState(services[i])
@@ -283,7 +304,7 @@ PlasmoidItem {
             var oauthState = root.openAiOauthState()
             if (oauthState === "OFFLINE") return "CRITICAL"
 
-            if (root.cpuTemp >= 75 || root.gpu0Temp >= 85 || root.gpu1Temp >= 85 || root.ram >= 85 || gpu0Vram >= 85 || gpu1Vram >= 85 || root.diskUsedPercent >= 85) return "WARNING"
+            if (root.cpuTemp >= 75 || root.gpu0Temp >= 85 || root.gpu1Temp >= 85 || root.ram >= 85 || gpu0Vram >= 85 || gpu1Vram >= 85 || root.diskPercent() >= 85) return "WARNING"
             for (var j = 0; j < services.length; j++) {
                 var warningState = MonitorLogic.normalizeServiceState(services[j])
                 if (warningState === "DEGRADED") return "WARNING"
@@ -326,7 +347,7 @@ PlasmoidItem {
         if (root.gpu1Temp >= gpuTempLimit) return "GPU 1 TEMP " + Math.round(root.gpu1Temp) + "°C"
         if (root.cpuTemp >= cpuTempLimit) return "CPU TEMP " + Math.round(root.cpuTemp) + "°C"
         if (root.ram >= usageLimit) return "RAM " + Math.round(root.ram) + "%"
-        if (root.diskUsedPercent >= usageLimit) return "DISK " + Math.round(root.diskUsedPercent) + "%"
+        if (root.diskPercent() >= usageLimit) return "DISK " + Math.round(root.diskPercent()) + "%"
 
         var serviceNames = ["GATEWAY", "HINDSIGHT", "QWEN 3.8"]
         var services = [root.hermesGatewayState, root.hindsightState, root.localLlmState]
@@ -361,6 +382,16 @@ PlasmoidItem {
         var state = MonitorLogic.normalizeServiceState(rawState)
         return MonitorLogic.serviceSymbol(state) + " " + state
     }
+    // Per-process CPU percentages are shares of one core (top(1) convention), so
+    // the card says how many cores the aggregate "CPU" figure refers to. Without
+    // it, "4%" next to "chromium 52.3%" reads like a contradiction.
+    function cpuProcessHeading() {
+        return root.cpuCoreCount > 0 ? "TOP · CPU % · 1/" + root.cpuCoreCount + " CORE" : "TOP · CPU %"
+    }
+    function cpuDetailLabel() {
+        var temp = Math.round(root.cpuTemp) + "°C"
+        return root.cpuCoreCount > 0 ? temp + " · " + root.cpuCoreCount + " THREADS" : temp
+    }
     function localLlmStateLabel() {
         var state = MonitorLogic.normalizeServiceState(root.localLlmState)
         return MonitorLogic.serviceSymbol(state) + " " + state + (state === "OPERATIONAL" && root.localLlmModelName.length > 0 ? " · " + root.localLlmModelName : "")
@@ -368,6 +399,7 @@ PlasmoidItem {
     function openAiOauthState() { return MonitorLogic.openAiOauthState(root.openAiActiveKeys, root.openAiTotalKeys) }
     function openAiOauthLabel() {
         var state = root.openAiOauthState()
+        if (state === "NOT_CONFIGURED") return MonitorLogic.serviceSymbol(state) + " " + state + " · 0 KEYS"
         if (root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0) return MonitorLogic.serviceSymbol(state) + " " + state + " · ?/? KEYS"
         return MonitorLogic.serviceSymbol(state) + " " + state + " · " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"
     }
@@ -378,32 +410,36 @@ PlasmoidItem {
         var operational = 0
         var degraded = 0
         var offline = 0
+        var notConfigured = 0
         var unknown = 0
         for (var i = 0; i < states.length; i++) {
             var state = MonitorLogic.normalizeServiceState(states[i])
             if (state === "OPERATIONAL") operational++
             else if (state === "DEGRADED") degraded++
             else if (state === "OFFLINE") offline++
+            else if (state === "NOT_CONFIGURED") notConfigured++
             else unknown++
         }
         var summary = operational + "/4 OPERATIONAL"
         if (offline > 0) summary += " · " + offline + " OFFLINE"
         if (degraded > 0) summary += " · " + degraded + " DEGRADED"
+        if (notConfigured > 0) summary += " · " + notConfigured + " NOT CONFIGURED"
         if (unknown > 0) summary += " · " + unknown + " UNKNOWN"
         return summary
     }
     function aiServicesSummaryTone() {
         var states = [root.hermesGatewayState, root.hindsightState, root.localLlmState, root.openAiOauthState()]
-        var hasUnknown = false
+        var hasQuiet = false
         var hasDegraded = false
         for (var i = 0; i < states.length; i++) {
             var state = MonitorLogic.normalizeServiceState(states[i])
             if (state === "OFFLINE") return root.critical
             if (state === "DEGRADED") hasDegraded = true
-            if (state === "UNKNOWN") hasUnknown = true
+            // Unconfigured and unknown are informational, not warning states.
+            if (state === "UNKNOWN" || state === "NOT_CONFIGURED") hasQuiet = true
         }
         if (hasDegraded) return root.warning
-        if (hasUnknown) return root.muted
+        if (hasQuiet) return root.muted
         return root.cyan
     }
     function gpuPowerText(drawValue, limitValue) {
@@ -455,7 +491,17 @@ PlasmoidItem {
         root.topGpu1Processes = root.gpuProcessRows(entry)
         root.markMetricFresh("gpu1Telemetry")
     }
-    function diskFreeBytes() { return Math.max(0, root.diskTotalBytes - root.diskUsedBytes) }
+    function diskUsedBytes() { return root.diskUsedBytesDf }
+    function diskPercent() { return root.diskPercentDf }
+    function diskReservedBytes() { return Math.max(0, root.diskTotalBytes - root.diskUsedBytesDf - root.diskAvailBytesDf) }
+    // df(1) semantics come straight from the helper, so the card can be checked
+    // against df by hand. The filesystem reserve (~185 GiB on this root) is not
+    // used and not available; it is shown so the total still adds up on screen.
+    function fmtDiskSummary() {
+        var reserved = root.diskReservedBytes()
+        var suffix = reserved > 1024 * 1024 * 1024 ? " (+" + root.fmtDisk(reserved) + " RES)" : ""
+        return "USED " + root.fmtDisk(root.diskUsedBytes()) + " · FREE " + root.fmtDisk(root.diskAvailBytesDf) + suffix
+    }
 
     function usageColor(value, normalColor) {
         if (value >= 95) return root.critical
@@ -699,8 +745,8 @@ PlasmoidItem {
                 Row {
                     id: computeLegend
                     anchors.left: parent.left; anchors.top: headline.bottom; anchors.topMargin: 26; spacing: 18
-                    Text { text: "━━ GPU 0 · RTX PRO 4000 · " + Math.round(root.gpu0Usage) + "%"; color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
-                    Text { text: "━━ GPU 1 · RTX 3060 Ti · " + Math.round(root.gpu1Usage) + "%"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
+                    Text { text: "━━ GPU 0 · " + root.gpu0Name + " · " + (root.gpu0Available ? Math.round(root.gpu0Usage) + "%" : "UNAVAILABLE"); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
+                    Text { text: "━━ GPU 1 · " + root.gpu1Name + " · " + (root.gpu1Available ? Math.round(root.gpu1Usage) + "%" : "UNAVAILABLE"); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
                 }
 
                 // P0a: Y-axis labels positioned INSIDE the graph area, not with negative margins
@@ -808,7 +854,7 @@ PlasmoidItem {
                     model: [
                         {kind:"gpu", label:"GPU 0 · " + root.gpu0Name, available:root.gpu0Available, value:root.gpu0Available ? Math.round(root.gpu0Usage) + "%" : "--", detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE", color:root.violet, detailColor:root.gpuTempColor(root.gpu0Temp, root.muted), healthLevel:!root.gpu0Available ? 2 : ((root.gpu0Temp >= 90 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 95) ? 2 : ((root.gpu0Temp >= 85 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB), powerText:root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts), processes:root.topGpu0Processes, processCount:root.gpu0ProcessCount, processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable},
                         {kind:"gpu", label:"GPU 1 · " + root.gpu1Name, available:root.gpu1Available, value:root.gpu1Available ? Math.round(root.gpu1Usage) + "%" : "--", detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE", color:root.cyan, detailColor:root.gpuTempColor(root.gpu1Temp, root.muted), healthLevel:!root.gpu1Available ? 2 : ((root.gpu1Temp >= 90 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 95) ? 2 : ((root.gpu1Temp >= 85 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB), powerText:root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts), processes:root.topGpu1Processes, processCount:root.gpu1ProcessCount, processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable},
-                        {kind:"cpu", label:"CPU", value:Math.round(root.cpu) + "%", detail:Math.round(root.cpuTemp) + "°C", color:root.blue, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel:root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0), processes:root.topCpuProcesses, processCount:root.topCpuProcesses.length, processUnavailable:root.cpuProcessUnavailable},
+                        {kind:"cpu", label:"CPU", value:Math.round(root.cpu) + "%", detail:root.cpuDetailLabel(), color:root.blue, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel:root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0), processes:root.topCpuProcesses, processCount:root.topCpuProcesses.length, processUnavailable:root.cpuProcessUnavailable},
                         {kind:"ram", label:"RAM", value:Math.round(root.ram) + "%", detail:root.fmtMemoryPair(root.ramUsedBytes, root.ramTotalBytes), color:root.orange, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel:root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0), processes:root.topRamProcesses, processCount:root.topRamProcesses.length, processUnavailable:root.ramProcessUnavailable}
                     ]
                     delegate: Rectangle {
@@ -930,8 +976,10 @@ PlasmoidItem {
                                 spacing: 3
                                 property string metricKind: modelData.kind
                                 property var processes: modelData.processes || []
-                                property string heading: metricKind === "cpu" ? "TOP · CPU %" : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")
-                                Text { width: parent.width; text: processDetails.heading; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true; elide: Text.ElideRight }
+                                property string heading: metricKind === "cpu" ? root.cpuProcessHeading() : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")
+                                // A fifth GPU workload is capped, so say how many exist.
+                                property string headingSuffix: metricKind === "gpu" && modelData.processCount > processDetails.processes.length ? " (+" + (modelData.processCount - processDetails.processes.length) + ")" : ""
+                                Text { width: parent.width; text: processDetails.heading + processDetails.headingSuffix; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true; elide: Text.ElideRight }
                                 Repeater {
                                     model: parent.processes
                                     delegate: Item {
@@ -993,8 +1041,8 @@ PlasmoidItem {
                     Row {
                         id: networkLiveValues
                         anchors.right: parent.right; spacing: 16
-                        Text { text: "↓ " + root.fmtNetworkLive(root.down, root.downloadScaleBytesPerSecond); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
-                        Text { text: "↑ " + root.fmtNetworkLive(root.up, root.uploadScaleBytesPerSecond); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
+                        Text { text: "↓ " + root.networkLiveLabel("down"); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
+                        Text { text: "↑ " + root.networkLiveLabel("upload"); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
                     }
                 }
 
@@ -1007,7 +1055,7 @@ PlasmoidItem {
                     // Download sub-chart (P3: filled-area style for better visibility)
                     Item {
                         width: (parent.width - 12) / 2; height: parent.height
-                        Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: -2; text: "DOWNLOAD · " + root.networkAxisUnit(root.downloadScaleBytesPerSecond * 8 / 1000000); color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
+                        Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: -2; text: "DOWNLOAD · " + root.networkAxisUnit("down"); color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                         Canvas {
                             id: downGraph
                             anchors.fill: parent
@@ -1020,7 +1068,7 @@ PlasmoidItem {
                                 var chartWidth = width - plotLeft
                                 var maxMbit = root.downloadScaleBytesPerSecond * 8 / 1000000
                                 var gridStepMbit = root.downloadGridStepMbit
-                                var axisFactor = maxMbit < 1 ? 1000 : 1
+                                var axisFactor = root.networkAxisFactor("down")
                                 var gridDivisions = Math.max(1, Math.round(maxMbit / gridStepMbit))
                                 ctx.strokeStyle = "rgba(160,200,216,0.22)"; ctx.lineWidth = 1
                                 ctx.fillStyle = root.muted.toString()
@@ -1076,7 +1124,7 @@ PlasmoidItem {
                     // Upload sub-chart (P3: filled-area style)
                     Item {
                         width: (parent.width - 12) / 2; height: parent.height
-                        Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: -2; text: "UPLOAD · " + root.networkAxisUnit(root.uploadScaleBytesPerSecond * 8 / 1000000); color: root.violet; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
+                        Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: -2; text: "UPLOAD · " + root.networkAxisUnit("upload"); color: root.violet; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                         Canvas {
                             id: upGraph
                             anchors.fill: parent
@@ -1089,7 +1137,7 @@ PlasmoidItem {
                                 var chartWidth = width - plotLeft
                                 var maxMbit = root.uploadScaleBytesPerSecond * 8 / 1000000
                                 var gridStepMbit = root.uploadGridStepMbit
-                                var axisFactor = maxMbit < 1 ? 1000 : 1
+                                var axisFactor = root.networkAxisFactor("upload")
                                 var gridDivisions = Math.max(1, Math.round(maxMbit / gridStepMbit))
                                 ctx.strokeStyle = "rgba(160,200,216,0.22)"; ctx.lineWidth = 1
                                 ctx.fillStyle = root.muted.toString()
@@ -1166,14 +1214,14 @@ PlasmoidItem {
                             width: parent.width
                             height: 26
                             Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "SYSTEM DISK /"; color: root.blue; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: Math.round(root.diskUsedPercent) + "%"; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
+                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: Math.round(root.diskPercent()) + "%"; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
-                        // P0c: elide to prevent truncation; P1: 12px minimum
-                        Text { width: parent.width; elide: Text.ElideRight; text: "FREE " + root.fmtDisk(root.diskFreeBytes()) + " · USED " + root.fmtDisk(root.diskUsedBytes); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                        // df semantics plus the ext4 reserve, elided if the card is narrow.
+                        Text { width: parent.width; elide: Text.ElideRight; text: root.fmtDiskSummary(); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
                         Rectangle {
                             width: parent.width; height: 6; radius: 3; color: Qt.rgba(0.5, 0.5, 0.5, 0.3)
                             Rectangle {
-                                width: parent.width * Math.min(1, root.diskUsedPercent / 100); height: parent.height; radius: 3; color: root.blue
+                                width: parent.width * Math.min(1, root.diskPercent() / 100); height: parent.height; radius: 3; color: root.blue
                             }
                         }
                     }
@@ -1244,6 +1292,40 @@ PlasmoidItem {
                 downGraph.requestPaint()
                 upGraph.requestPaint()
             }
+        }
+    }
+
+    // df(1) view of the local root. The Plasma sensors cannot express it (see the
+    // property block above), and a statvfs read is cheap and side-effect free.
+    PlasmaSupport.DataSource {
+        id: diskUsageSource
+        engine: "executable"
+        connectedSources: []
+        property string scriptPath: Qt.resolvedUrl("../code/disk_usage.py").toString().replace("file://", "")
+        property string command: "python3 " + scriptPath + " /"
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            var output = buffer.trim()
+            var exitCode = data["exit code"]
+            buffer = ""
+            disconnectSource(source)
+            if (exitCode !== 0) return
+            var fields = output.split(/\s+/)
+            if (fields.length !== 4) return
+            var used = parseFloat(fields[0])
+            var avail = parseFloat(fields[1])
+            var total = parseFloat(fields[2])
+            var percent = parseFloat(fields[3])
+            if (isNaN(used) || isNaN(avail) || isNaN(total) || isNaN(percent)) return
+            root.diskUsedBytesDf = used
+            root.diskAvailBytesDf = avail
+            root.diskTotalBytes = total
+            root.diskPercentDf = percent
+            root.markMetricFresh("diskUsed")
+            root.markMetricFresh("diskTotal")
+            root.markMetricFresh("diskPercent")
         }
     }
 
@@ -1520,6 +1602,7 @@ PlasmoidItem {
         openAiKeysSource.connectSource(openAiKeysSource.command)
         aiServicesSource.connectSource(aiServicesSource.command)
         netDetectSource.connectSource(netDetectSource.command)
+        diskUsageSource.connectSource(diskUsageSource.command)
         root.currentTime = root.refreshClock()
         root.lastRefresh = root.refreshClock()
     }
@@ -1543,6 +1626,13 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: topRamSource.connectSource(topRamSource.command)
+    }
+
+    Timer {
+        interval: 30000
+        running: true
+        repeat: true
+        onTriggered: diskUsageSource.connectSource(diskUsageSource.command)
     }
 
     Timer {
@@ -1609,7 +1699,6 @@ PlasmoidItem {
     Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; onValueChanged: { root.ramTotalBytes = parseFloat(value) || 0; root.markMetricFresh("memoryTotal") } }
     Sensors.Sensor { sensorId: "os/system/uptime"; enabled: true; onValueChanged: { root.uptimeSeconds = parseFloat(value) || 0; root.markMetricFresh("uptime") } }
     Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage1"; enabled: true; onValueChanged: { root.loadAverage = parseFloat(value) || 0; root.markMetricFresh("loadAverage") } }
-    Sensors.Sensor { sensorId: "disk/all/usedPercent"; enabled: true; onValueChanged: { root.diskUsedPercent = parseFloat(value) || 0; root.markMetricFresh("diskPercent") } }
-    Sensors.Sensor { sensorId: "disk/all/used"; enabled: true; onValueChanged: { root.diskUsedBytes = parseFloat(value) || 0; root.markMetricFresh("diskUsed") } }
     Sensors.Sensor { sensorId: "disk/all/total"; enabled: true; onValueChanged: { root.diskTotalBytes = parseFloat(value) || 0; root.markMetricFresh("diskTotal") } }
+    Sensors.Sensor { sensorId: "cpu/all/coreCount"; enabled: true; onValueChanged: { root.cpuCoreCount = Math.round(parseFloat(value)) || 0 } }
 }

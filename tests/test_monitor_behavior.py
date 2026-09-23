@@ -67,6 +67,109 @@ class MonitorBehaviorTests(unittest.TestCase):
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout), ["OPERATIONAL", "OPERATIONAL", "OPERATIONAL", "OFFLINE", "●", "▲", "✕", "OPERATIONAL", "OFFLINE", "DEGRADED"])
 
+    def test_unconfigured_openai_store_is_not_reported_as_an_outage(self):
+        """0/0 keys means "never set up", not "down".
+
+        A missing credential store used to surface as OFFLINE, which colours the
+        header banner critical and claims an outage that does not exist.
+        """
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            "console.log(JSON.stringify(["
+            "m.openAiOauthState(0, 0),"
+            "m.openAiOauthState(-1, 0),"
+            "m.serviceSymbol(m.openAiOauthState(0, 0)),"
+            "m.serviceTone(m.openAiOauthState(0, 0)),"
+            "m.normalizeServiceState('NOT_CONFIGURED'),"
+            "m.serviceSymbol('NOT_CONFIGURED'),"
+            "m.normalizeServiceState('offline'),"
+            "m.serviceTone('OFFLINE')"
+            "]));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(
+            json.loads(result.stdout),
+            ["NOT_CONFIGURED", "UNKNOWN", "○", "muted", "NOT_CONFIGURED", "○", "OFFLINE", "critical"],
+        )
+
+    def test_network_rate_and_axis_agree_on_one_unit_threshold(self):
+        """The panel picks one unit for axis and rate from peak + live value.
+
+        Two disagreements used to exist: the axis label followed the chart ceiling
+        (peak + 15% headroom) while the rate followed the raw value, and the ceiling
+        itself is retained with hysteresis, so after a short burst the axis stayed in
+        MBIT/S while the live line read KBIT/S (observed live: axis "UPLOAD · MBIT/S"
+        over "↑ 12.9 KBIT/S" at a 0.035 Mbit peak).
+        """
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            "console.log(JSON.stringify(["
+            "m.networkRateLabel(100000),"
+            "m.networkRateLabel(125000),"
+            "m.networkRateLabel(150000),"
+            "m.networkAxisUnit(150000, 150000),"
+            "m.networkAxisUnit(100000, 100000),"
+            "m.networkRateLabel(4346, m.networkPanelUsesMbit(4346, 4346)),"
+            "m.networkAxisUnit(4346, 4346),"
+            "m.networkAxisUnit(0, 0),"
+            # A retained Mbit ceiling must not force the panel into MBIT/S.
+            "m.networkAxisUnit(4346, 4346),"
+            "m.networkRateLabel(4346, m.networkPanelUsesMbit(4346, 4346)),"
+            # Live spike above the window peak still lifts the panel to Mbit.
+            "m.networkAxisUnit(0, 150000),"
+            "m.networkRateLabel(150000, m.networkPanelUsesMbit(0, 150000))"
+            "]));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(
+            json.loads(result.stdout),
+            [
+                "800 KBIT/S",
+                "1 MBIT/S",
+                "1.2 MBIT/S",
+                "MBIT/S",
+                "KBIT/S",
+                "34.8 KBIT/S",
+                "KBIT/S",
+                "KBIT/S",
+                "KBIT/S",
+                "34.8 KBIT/S",
+                "MBIT/S",
+                "1.2 MBIT/S",
+            ],
+        )
+
+
+    def test_slow_disk_poll_gets_its_own_stale_budget(self):
+        """A 30 s disk poll must not be flagged stale by the 15 s default window."""
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            "console.log(JSON.stringify(["
+            "m.staleAfterMsFor('diskUsed', 15000),"
+            "m.staleAfterMsFor('diskPercent', 15000),"
+            "m.staleAfterMsFor('diskTotal', 15000),"
+            "m.staleAfterMsFor('cpuUsage', 15000),"
+            # 25 s after the last disk read: healthy, not stale.
+            "m.staleDomains(25000,{cpuUsage:25000,cpuTemperature:25000,gpu0Telemetry:25000,gpu1Telemetry:25000,memoryPercent:25000,memoryUsed:25000,memoryTotal:25000,network:25000,diskPercent:25000,diskUsed:25000,diskTotal:25000,uptime:25000,loadAverage:25000},15000),"
+            # 100 s after the last disk read: stale again.
+            "m.staleDomains(100000,{cpuUsage:100000,cpuTemperature:100000,gpu0Telemetry:100000,gpu1Telemetry:100000,memoryPercent:100000,memoryUsed:100000,memoryTotal:100000,network:100000,diskPercent:0,diskUsed:0,diskTotal:0,uptime:100000,loadAverage:100000},15000)"
+            "]));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), [90000, 90000, 90000, 15000, [], ["DISK"]])
+
+    def test_disk_card_no_longer_depends_on_the_sensor_accounting(self):
+        """The df view moved to contents/code/disk_usage.py, covered by
+        tests/test_disk_usage.py; the old JS helpers and the sensors that carried
+        the f_bavail accounting must be gone from both files."""
+        logic = LOGIC.read_text()
+        qml = QML.read_text()
+        for gone in ("diskUsedBytes", "diskReservedBytes", "diskUsedPercent"):
+            self.assertNotIn(gone, logic)
+        self.assertNotIn('sensorId: "disk/all/used"', qml)
+        self.assertNotIn('sensorId: "disk/all/free"', qml)
+        self.assertIn("disk_usage.py", qml)
+
     def test_freshness_reports_each_stale_domain(self):
         script = (
             f"const m=require({json.dumps(str(LOGIC))});"

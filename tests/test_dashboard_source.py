@@ -93,7 +93,10 @@ def test_cpu_card_shows_top_four_processes_in_its_detail_area():
     assert 'id: topCpuSource' in text
     assert 'cpu_process_snapshot.py' in text
     assert 'MonitorLogic.cpuProcessRates' in text
-    assert 'property string heading: metricKind === "cpu" ? "TOP · CPU %" : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")' in text
+    assert 'property string heading: metricKind === "cpu" ? root.cpuProcessHeading() : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")' in text
+    assert 'function cpuProcessHeading()' in text
+    assert 'function cpuDetailLabel()' in text
+    assert 'cpu/all/coreCount' in text
     assert 'processes:root.topCpuProcesses' in text
     assert 'MonitorLogic.cpuProcessRates(root.previousCpuSamples, samples, elapsedMs, 4)' in text
     assert 'onTriggered: topCpuSource.connectSource(topCpuSource.command)' in text
@@ -290,8 +293,14 @@ def test_network_uses_dynamic_scale_ceilings_without_metadata_labels():
 
 def test_network_axes_follow_adaptive_kbit_and_mbit_steps():
     text = source()
-    assert 'function networkAxisUnit(maxMbit)' in text
-    assert 'return maxMbit < 1 ? "KBIT/S" : "MBIT/S"' in text
+    # The axis unit, the tick factor and the live rate all come from one decision
+    # in MonitorLogic (peak in the window + current rate), never from the retained
+    # hysteresis ceiling.
+    assert 'function networkAxisUnit(direction)' in text
+    assert 'MonitorLogic.networkAxisUnit(root.networkPeak(direction), root.networkLive(direction))' in text
+    assert 'function networkAxisFactor(direction)' in text
+    assert 'return root.networkUseMbit(direction) ? 1 : 1000' in text
+    assert text.count('var axisFactor = root.networkAxisFactor(') == 2
     assert 'var gridStepMbit = root.downloadGridStepMbit' in text
     assert 'var gridStepMbit = root.uploadGridStepMbit' in text
     assert 'Math.round(maxMbit / gridStepMbit)' in text
@@ -303,14 +312,18 @@ def test_network_axes_follow_adaptive_kbit_and_mbit_steps():
 
 
 def test_network_live_values_scale_to_kbit_and_are_labeled_with_direction():
-    """1250 B/s must render as 10 KBIT/S (×1000), not 0.01 KBIT/S."""
+    """1250 B/s must render as 10 KBIT/S (×1000), not 0.01 KBIT/S.
+
+    The unit decision lives in MonitorLogic.networkRateLabel so the summary line
+    and the axis can no longer disagree; test_monitor_behavior pins the numbers.
+    """
     text = source()
-    assert 'if (mbit < 1) return root.fmtNetworkAxisValue(mbit * 1000) + " KBIT/S"' in text
-    assert 'return root.fmtNetworkAxisValue(mbit) + " MBIT/S"' in text
-    assert 'root.fmtNetworkAxisValue(mbit) + " " + root.networkAxisUnit(mbit)' not in text
+    assert 'function networkLiveLabel(direction)' in text
+    assert 'MonitorLogic.networkRateLabel(root.networkLive(direction), root.networkUseMbit(direction))' in text
+    assert 'fmtNetworkLive' not in text
     # Live values are unambiguously labeled with ↓ (download) / ↑ (upload).
-    assert 'text: "↓ " + root.fmtNetworkLive(root.down, root.downloadScaleBytesPerSecond)' in text
-    assert 'text: "↑ " + root.fmtNetworkLive(root.up, root.uploadScaleBytesPerSecond)' in text
+    assert 'text: "↓ " + root.networkLiveLabel("down")' in text
+    assert 'text: "↑ " + root.networkLiveLabel("upload")' in text
 
 
 def test_footer_uses_explicit_disk_and_uptime_labels():
@@ -322,7 +335,27 @@ def test_footer_uses_explicit_disk_and_uptime_labels():
     assert 'text: root.loadAverage.toFixed(2)' in text
     assert 'text: "PROCESSES"' in text
     assert 'text: root.processCount' in text
-    assert 'font.pixelSize: 12' not in text
+    # The disk summary line carries df semantics plus the ext4 reserve; it stays
+    # in the 12px tier because the label is longer than the old FREE/USED pair.
+    assert 'text: root.fmtDiskSummary()' in text
+    assert 'font.pixelSize: 12' in text
+
+
+def test_disk_card_uses_the_df_helper_instead_of_the_plasma_sensors():
+    """The sensors cannot express df's "used": disk/all/used counts the ext4 root
+    reserve as used and disk/all/free is f_bavail, so the card read
+    "USED 858.0 GiB / 24%" where df reports "674G / 20%"."""
+    text = source()
+    assert 'id: diskUsageSource' in text
+    assert 'disk_usage.py' in text
+    assert 'onTriggered: diskUsageSource.connectSource(diskUsageSource.command)' in text
+    assert 'root.diskUsedBytesDf = used' in text
+    assert 'root.diskPercentDf = percent' in text
+    assert 'function diskPercent() { return root.diskPercentDf }' in text
+    assert 'function diskUsedBytes() { return root.diskUsedBytesDf }' in text
+    # A df view needs f_bfree, which no Plasma disk sensor exposes.
+    assert 'root.diskFreeBytesRaw' not in text
+    assert 'root.diskUsedPercent(' not in text
 
 
 def test_system_and_ai_service_rows_place_related_status_together():
@@ -514,8 +547,12 @@ def test_status_cards_use_symbols_and_quiet_healthy_borders():
 
 def test_system_load_graph_plots_both_gpus_without_cpu_or_motion():
     text = source()
-    assert 'text: "━━ GPU 0 · RTX PRO 4000 · " + Math.round(root.gpu0Usage) + "%"' in text
-    assert 'text: "━━ GPU 1 · RTX 3060 Ti · " + Math.round(root.gpu1Usage) + "%"' in text
+    # Legend names come from the live telemetry, never from literals: a hardcoded
+    # "RTX PRO 4000" kept claiming that GPU after nvidia-smi went away.
+    assert 'root.gpu0Name' in text and 'root.gpu1Name' in text
+    assert 'RTX PRO 4000' not in text
+    assert 'RTX 3060 Ti' not in text
+    assert 'UNAVAILABLE")' in text
     assert 'CPU LOAD' not in text
     assert 'plot(root.cpuHistory' not in text
     assert 'plot(root.gpu0History, root.violet' in text

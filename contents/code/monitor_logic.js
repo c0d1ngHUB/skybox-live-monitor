@@ -7,6 +7,14 @@ function historyX(index, length, width, maxSamples) {
     return (start + index) * width / (maxSamples - 1)
 }
 
+// Domains that refresh on a slow cadence carry their own staleness budget.
+// The disk footer is polled every 30 s (space barely moves), so the generic
+// 15 s window would flag DISK as stale between two perfectly healthy reads.
+function staleAfterMsFor(metric, defaultMs) {
+    if (metric === "diskPercent" || metric === "diskUsed" || metric === "diskTotal") return 90000
+    return defaultMs
+}
+
 function staleDomains(nowMs, updates, staleAfterMs) {
     var domains = [
         ["cpu", "CPU", ["cpuUsage", "cpuTemperature"]],
@@ -24,7 +32,8 @@ function staleDomains(nowMs, updates, staleAfterMs) {
         for (var j = 0; j < metrics.length; j++) {
             var metric = metrics[j]
             var stamp = Number(updates[metric] || 0)
-            if (stamp <= 0 || nowMs - stamp > staleAfterMs) {
+            var budget = staleAfterMsFor(metric, staleAfterMs)
+            if (stamp <= 0 || nowMs - stamp > budget) {
                 domainStale = true
                 break
             }
@@ -39,6 +48,9 @@ function normalizeServiceState(raw) {
     if (value === "RUNNING" || value === "HEALTHY" || value === "OK" || value === "IDLE") return "OPERATIONAL"
     if (value === "DEGRADED" || value === "WARN" || value === "WARNING") return "DEGRADED"
     if (value === "DOWN" || value === "ERROR" || value === "OFFLINE" || value === "DISCONNECTED") return "OFFLINE"
+    // "Nothing set up yet" is not a fault: an empty credential store must not
+    // raise the same alarm as a store that exists but cannot authenticate.
+    if (value === "NOT_CONFIGURED") return "NOT_CONFIGURED"
     return "UNKNOWN"
 }
 
@@ -46,6 +58,7 @@ function serviceSymbol(state) {
     if (state === "OPERATIONAL") return "●"
     if (state === "DEGRADED") return "▲"
     if (state === "OFFLINE") return "✕"
+    if (state === "NOT_CONFIGURED") return "○"
     return "?"
 }
 
@@ -60,9 +73,10 @@ function openAiOauthState(active, total) {
     active = Number(active)
     total = Number(total)
     if (!isFinite(active) || !isFinite(total) || active < 0 || total < 0) return "UNKNOWN"
-    if (total === 0) return "OFFLINE"
-    if (active <= 0) return "OFFLINE"
+    // No credentials configured at all is a configuration state, not an outage.
+    if (total === 0) return "NOT_CONFIGURED"
     if (active >= total) return "OPERATIONAL"
+    if (active <= 0) return "OFFLINE"
     return "DEGRADED"
 }
 
@@ -122,6 +136,55 @@ function networkScaleMbit(samples, stepMbit, capMbit) {
     return Math.min(steps * stepMbit, capMbit)
 }
 
+// One threshold decides the unit for everything the network panel prints.
+// The axis label used to be derived from the chart ceiling (~15% above the
+// peak) while the live value was scaled by the raw rate, so a transfer just
+// above 1 Mbit printed "MBIT/S" over a rate line reading "2000 KBIT/S".
+//
+// The panel chooses its unit from the data in the window (peak) plus the current
+// rate, never from the retained chart ceiling: the ceiling keeps its hysteresis
+// for the plot height, but a ceiling that outlives a burst must not leave the
+// axis in MBIT/S while the live value reads KBIT/S.
+var NETWORK_MBIT_THRESHOLD = 1
+
+function networkUsesMbit(valueMbit) {
+    return Number(valueMbit) >= NETWORK_MBIT_THRESHOLD
+}
+
+function networkPanelUsesMbit(peakBytesPerSecond, liveBytesPerSecond) {
+    var peak = Number(peakBytesPerSecond) || 0
+    var live = Number(liveBytesPerSecond) || 0
+    return networkUsesMbit(Math.max(peak, live) * 8 / 1000000)
+}
+
+// Axis label for the unit the whole panel prints.
+function networkAxisUnit(peakBytesPerSecond, liveBytesPerSecond) {
+    return networkPanelUsesMbit(peakBytesPerSecond, liveBytesPerSecond) ? "MBIT/S" : "KBIT/S"
+}
+
+function trimNetworkNumber(value) {
+    if (value >= 100) return String(Math.round(value))
+    if (value >= 10) return value.toFixed(1).replace(".0", "")
+    return value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")
+}
+
+function formatNetworkRate(valueMbit) {
+    var mbit = Number(valueMbit)
+    if (!isFinite(mbit) || mbit <= 0) return "0 KBIT/S"
+    if (!networkUsesMbit(mbit)) return trimNetworkNumber(mbit * 1000) + " KBIT/S"
+    return trimNetworkNumber(mbit) + " MBIT/S"
+}
+
+// Bytes/s -> rate label in the unit the panel decided on, so the summary block
+// and the axis never disagree about the magnitude of one transfer.
+function networkRateLabel(bytesPerSecond, useMbit) {
+    var bps = Number(bytesPerSecond) || 0
+    if (bps <= 0) return useMbit ? "0 MBIT/S" : "0 KBIT/S"
+    var mbit = bps * 8 / 1000000
+    if (useMbit === undefined) return formatNetworkRate(mbit)
+    return trimNetworkNumber(useMbit ? mbit : mbit * 1000) + (useMbit ? " MBIT/S" : " KBIT/S")
+}
+
 // Adaptive network axis profile. Very low traffic uses Kbit-scale ceilings so
 // idle/background transfers remain visible; larger peaks progressively switch
 // to wider Mbit steps without producing an unreadable number of grid lines.
@@ -155,6 +218,7 @@ if (typeof module !== "undefined") {
     module.exports = {
         historyX: historyX,
         staleDomains: staleDomains,
+        staleAfterMsFor: staleAfterMsFor,
         parseNvidiaMemory: parseNvidiaMemory,
         normalizeServiceState: normalizeServiceState,
         serviceSymbol: serviceSymbol,
@@ -164,6 +228,11 @@ if (typeof module !== "undefined") {
         openAiOauthTone: openAiOauthTone,
         cpuProcessRates: cpuProcessRates,
         networkScaleMbit: networkScaleMbit,
-        adaptiveNetworkScale: adaptiveNetworkScale
+        adaptiveNetworkScale: adaptiveNetworkScale,
+        networkUsesMbit: networkUsesMbit,
+        networkPanelUsesMbit: networkPanelUsesMbit,
+        formatNetworkRate: formatNetworkRate,
+        networkRateLabel: networkRateLabel,
+        networkAxisUnit: networkAxisUnit
     }
 }
