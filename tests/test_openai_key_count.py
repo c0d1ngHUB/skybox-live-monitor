@@ -186,8 +186,14 @@ def test_empty_profile_env_is_normalized_to_unset(monkeypatch, tmp_path, capsys)
     monitor queries the profile Hermes resolves by itself — identical to leaving
     the variable unset. (Chosen over a -1 0 drift signal: unset already means
     "no override", so this keeps one consistent meaning per input state.)
+
+    The assertion can only mean "no HERMES_HOME was injected" when the ambient
+    variable is absent: hermes_monitor_env() inherits os.environ by design, so
+    an exported HERMES_HOME (any Hermes session) is passed through and is not
+    evidence of a profile override.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.setattr(MODULE, "hermes_executable", lambda: "/usr/bin/hermes")
 
     for empty_value in ("", "   ", "\t"):

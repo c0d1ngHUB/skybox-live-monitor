@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Static regression checks for the Skybox Plasma live monitor."""
+import re
+import struct
 from pathlib import Path
+
+import pytest
 
 SOURCE = Path(__file__).parents[1] / "contents/ui/main.qml"
 AI_HELPER = Path(__file__).parents[1] / "contents/code/ai_services_status.py"
@@ -121,14 +125,103 @@ def test_gpu_card_shows_top_four_processes_but_counts_all_workloads():
     assert 'onTriggered: gpuTelemetrySource.connectSource(gpuTelemetrySource.command)' in text
 
 
+def _match_int(pattern, text):
+    match = re.search(pattern, text)
+    assert match, f"pattern not found in the QML source: {pattern}"
+    return int(match.group(1))
+
+
+def _grid_geometry(cards):
+    """Grid metrics of the four process cards, read from the QML source."""
+    grid = cards[cards.index("Grid {"):cards.index("Repeater {")]
+    return {
+        "height": _match_int(r"Layout\.preferredHeight:\s*(\d+)", grid),
+        "columns": _match_int(r"\bcolumns:\s*(\d+)", grid),
+        "rows": _match_int(r"\brows:\s*(\d+)", grid),
+        "columnSpacing": _match_int(r"columnSpacing:\s*(\d+)", grid),
+        "rowSpacing": _match_int(r"rowSpacing:\s*(\d+)", grid),
+    }
+
+
+def _delegate_geometry(cards):
+    delegate = cards[cards.index("delegate: Rectangle {"):cards.index("id: metricKpi")]
+    return {
+        "columnGap": _match_int(r"width:\s*\(parent\.width\s*-\s*(\d+)\)", delegate),
+        "columns": _match_int(r"width:\s*\(parent\.width\s*-\s*\d+\)\s*/\s*(\d+)", delegate),
+        "rowGap": _match_int(r"height:\s*\(parent\.height\s*-\s*(\d+)\)", delegate),
+        "rows": _match_int(r"height:\s*\(parent\.height\s*-\s*\d+\)\s*/\s*(\d+)", delegate),
+        "margins": _match_int(r"anchors\.margins:\s*(\d+)", delegate),
+    }
+
+
+def _coupled_process_row_count(text):
+    """The per-card row cap is duplicated in four places; they must agree.
+
+    A silent mismatch (e.g. a raised ``head`` without the matching QML cap)
+    renders fewer rows than the layout reserves.
+    """
+    limits = {
+        "cpuProcessRates": re.search(
+            r"cpuProcessRates\(root\.previousCpuSamples, samples, elapsedMs, (\d+)\)", text
+        ),
+        "ps head": re.search(r"--sort=-rss \| head -(\d+)", text),
+        "ps loop cap": re.search(r"processes\.length < (\d+)", text),
+        "gpu helper slice": re.search(r"processes\[:(\d+)\]", GPU_HELPER.read_text()),
+    }
+    assert all(limits.values()), f"row cap not found in: {[k for k, v in limits.items() if not v]}"
+    values = {int(match.group(1)) for match in limits.values()}
+    assert len(values) == 1, f"row caps disagree: { {k: m.group(1) for k, m in limits.items()} }"
+    return values.pop()
+
+
+def _dejavu_mono_metrics():
+    """Ascender/descender of the real font, parsed from the TTF (stdlib only)."""
+    candidates = sorted(Path("/usr/share/fonts").glob("**/DejaVuSansMono.ttf"))
+    if not candidates:
+        pytest.skip("DejaVu Sans Mono is not installed")
+    data = candidates[0].read_bytes()
+    tables = {}
+    for index in range(struct.unpack(">H", data[4:6])[0]):
+        entry = 12 + index * 16
+        tables[data[entry:entry + 4]] = struct.unpack(">I", data[entry + 8:entry + 12])[0]
+    upm = struct.unpack(">H", data[tables[b"head"] + 18:tables[b"head"] + 20])[0]
+    ascender = struct.unpack(">h", data[tables[b"hhea"] + 4:tables[b"hhea"] + 6])[0]
+    descender = struct.unpack(">h", data[tables[b"hhea"] + 6:tables[b"hhea"] + 8])[0]
+    return (ascender - descender) / upm
+
+
 def test_process_cards_keep_their_height_while_showing_four_rows():
-    """Four 19 px rows plus the heading fit the existing card body, so the
-    grid keeps its height and the dashboard does not reflow."""
+    """Four process rows plus the heading must fit the body the grid reserves.
+
+    Every constant is read from the QML source and from the real font metrics.
+    Restating the literals here would make the check a tautology that cannot
+    notice a card resize, a taller row or a fifth row.
+    """
     text = source()
     cards = text[text.index("// --- Dual-GPU row"):text.index("// --- NETWORK section")]
-    assert 'Layout.preferredHeight: 278' in cards
-    assert 'height: 19' in cards
-    assert 19 * 4 + 19 + 3 * 3 <= 278 / 2 - 16 - 4
+    grid = _grid_geometry(cards)
+    delegate = _delegate_geometry(cards)
+
+    assert delegate["columns"] == grid["columns"], "card delegate and Grid columns disagree"
+    assert delegate["rows"] == grid["rows"], "card delegate and Grid rows disagree"
+    assert grid["columns"] * grid["rows"] == len(re.findall(r'\{kind:"', cards)), (
+        "the grid does not have one cell per card"
+    )
+
+    card_height = (grid["height"] - delegate["rowGap"]) / grid["rows"]
+    inner_height = card_height - 2 * delegate["margins"]
+
+    process_details = cards[cards.index("id: processDetails"):]
+    row_height = _match_int(r"height:\s*(\d+)", process_details)
+    spacing = _match_int(r"spacing:\s*(\d+)", process_details)
+    font_size = _match_int(r"font\.pixelSize:\s*(\d+)", process_details)
+    row_count = _coupled_process_row_count(text)
+
+    assert row_count == 4
+    needed = _dejavu_mono_metrics() * font_size + row_count * row_height + row_count * spacing
+    assert needed <= inner_height, (
+        f"{row_count} rows need {needed:.1f} px but the card body offers {inner_height:.0f} px"
+    )
 
 
 def test_charts_are_two_minute_and_visually_readable():
