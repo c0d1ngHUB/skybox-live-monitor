@@ -386,7 +386,7 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'payload.openai_oauth_available' in text
     assert 'payload.openai_oauth_total' in text
     assert 'font.pixelSize: 14' in text
-    assert 'Layout.preferredHeight: 148' in text
+    assert 'Layout.preferredHeight: 178' in text
 
 
 
@@ -638,9 +638,12 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text
     assert 'elide: Text.ElideRight' in text
     assert 'height: 44' in text
-    assert 'Layout.preferredHeight: 148' in text
-    assert 'Layout.minimumHeight: 144' in text
+    assert 'Layout.preferredHeight: 178' in text
+    assert 'Layout.minimumHeight: 174' in text
     assert 'id: openAiOauthCard' in text
+    assert 'id: obsHealthCard' in text
+    assert 'root.obsHealthLabel()' in text
+    assert 'root.obsHealthTone()' in text
 
 
 def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():

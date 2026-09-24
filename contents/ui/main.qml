@@ -70,6 +70,16 @@ PlasmoidItem {
     property string hindsightState: "UNKNOWN"
     property string localLlmState: "UNKNOWN"
     property string localLlmModelName: ""
+    // Observation health of the Hindsight bank, read by
+    // contents/code/hindsight_observation_health.py. Guards the
+    // observation_scopes="shared" switch: TAGS 0 shows the share of observations
+    // that reached the untagged scope (baseline 1.7%), PROOF 1 the share backed
+    // by a single source fact and therefore never merged (baseline 62.4%).
+    property real obsTaglessPct: -1
+    property real obsSingleProofPct: -1
+    property int obsCount: 0
+    property int obsSinceSwitch: 0
+    property bool obsHealthUnavailable: true
 
     // df(1) view, read by contents/code/disk_usage.py. The Plasma sensors cannot
     // express it: disk/all/used counts the filesystem reserve as used and
@@ -405,6 +415,40 @@ PlasmoidItem {
     }
     function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }
     function openAiOauthBorderColor() { return root.serviceBorderColor(root.openAiOauthState()) }
+
+    // --- Hindsight observation health -------------------------------------
+    // "TAGS 0" = share of observations with no tags (the untagged scope that
+    // observation_scopes="shared" writes into). It only rises as NEW observations
+    // consolidate, because old rows keep their tags for good.
+    function fmtPct1(value) {
+        if (value === null || value === undefined || value < 0 || !isFinite(value)) return "--"
+        return (Math.round(value * 10) / 10).toFixed(1) + "%"
+    }
+
+    function obsHealthLabel() {
+        if (root.obsHealthUnavailable) return "? OBS"
+        return "TAGS 0 " + root.fmtPct1(root.obsTaglessPct) + " · PROOF 1 " + root.fmtPct1(root.obsSingleProofPct)
+    }
+
+    // Baseline-relative signal: tagless above baseline and single-proof below it
+    // is the direction the switch is supposed to move both numbers.
+    function obsHealthTone() {
+        if (root.obsHealthUnavailable) return root.muted
+        if (root.obsTaglessPct > 1.7 && root.obsSingleProofPct < 62.4) return root.cyan
+        return root.warning
+    }
+
+    function obsHealthBorderColor() {
+        if (root.obsHealthUnavailable) return root.muted
+        if (root.obsTaglessPct > 1.7 && root.obsSingleProofPct < 62.4) return root.cyan
+        return root.warning
+    }
+
+    function obsHealthDetail() {
+        var base = root.obsCount + " OBS · " + root.obsSinceSwitch + " SEIT SWITCH"
+        if (root.obsHealthUnavailable) return base + " · API NICHT ERREICHBAR"
+        return base + " · BASIS " + root.fmtPct1(1.7) + " / " + root.fmtPct1(62.4)
+    }
     function aiServicesSummary() {
         var states = [root.hermesGatewayState, root.hindsightState, root.localLlmState, root.openAiOauthState()]
         var operational = 0
@@ -623,8 +667,8 @@ PlasmoidItem {
             // --- AI SERVICES section ---
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 148
-                Layout.minimumHeight: 144
+                Layout.preferredHeight: 178
+                Layout.minimumHeight: 174
                 clip: true
                 Column {
                     anchors.fill: parent
@@ -724,6 +768,40 @@ PlasmoidItem {
                             color: root.openAiOauthTone()
                             font.family: "DejaVu Sans Mono"
                             font.pixelSize: 14
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+                    }
+                    Rectangle {
+                        id: obsHealthCard
+                        width: parent.width
+                        height: 28
+                        radius: 9
+                        color: Qt.rgba(0, 0, 0, 0.22)
+                        border.width: 1
+                        border.color: root.obsHealthBorderColor()
+                        PlasmaCore.ToolTipArea {
+                            anchors.fill: parent
+                            mainText: root.obsHealthDetail()
+                        }
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "HINDSIGHT OBS"
+                            color: root.muted
+                            font.family: "DejaVu Sans Mono"
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.obsHealthLabel()
+                            color: root.obsHealthTone()
+                            font.family: "DejaVu Sans Mono"
+                            font.pixelSize: 13
                             font.bold: true
                             elide: Text.ElideRight
                         }
@@ -1367,6 +1445,47 @@ PlasmoidItem {
         }
     }
 
+    // Hindsight observation health: guards the observation_scopes="shared"
+    // switch by reporting the tagless share (baseline 1.7%) and the
+    // single-proof share (baseline 62.4%) of the bank's observations.
+    PlasmaSupport.DataSource {
+        id: obsHealthSource
+        engine: "executable"
+        connectedSources: []
+        property string scriptPath: Qt.resolvedUrl("../code/hindsight_observation_health.py").toString().replace("file://", "")
+        property string command: "python3 " + scriptPath
+        property string buffer: ""
+        onNewData: function(source, data) {
+            buffer += data["stdout"] || ""
+            if (data["exit code"] === undefined) return
+            var payload = null
+            try { payload = JSON.parse(buffer.trim()) } catch (error) { payload = null }
+            buffer = ""
+            disconnectSource(source)
+            // Explicit drift signal: an unreachable API or malformed payload
+            // resets the card instead of leaving stale numbers on screen.
+            if (!payload || payload.error) {
+                root.obsHealthUnavailable = true
+                root.obsTaglessPct = -1
+                root.obsSingleProofPct = -1
+                return
+            }
+            var tagless = Number(payload.tagless_pct)
+            var single = Number(payload.single_proof_pct)
+            if (isNaN(tagless) || isNaN(single)) {
+                root.obsHealthUnavailable = true
+                root.obsTaglessPct = -1
+                root.obsSingleProofPct = -1
+                return
+            }
+            root.obsHealthUnavailable = false
+            root.obsTaglessPct = tagless
+            root.obsSingleProofPct = single
+            root.obsCount = Number(payload.observations) || 0
+            root.obsSinceSwitch = Number(payload.since_switch) || 0
+        }
+    }
+
     // Exposes aggregate OpenAI OAuth availability only; no credential details
     // are passed to the UI.
     PlasmaSupport.DataSource {
@@ -1601,6 +1720,7 @@ PlasmoidItem {
         hermesThinkSource.connectSource(hermesThinkSource.command)
         openAiKeysSource.connectSource(openAiKeysSource.command)
         aiServicesSource.connectSource(aiServicesSource.command)
+        obsHealthSource.connectSource(obsHealthSource.command)
         netDetectSource.connectSource(netDetectSource.command)
         diskUsageSource.connectSource(diskUsageSource.command)
         root.currentTime = root.refreshClock()
@@ -1670,6 +1790,15 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: aiServicesSource.connectSource(aiServicesSource.command)
+    }
+
+    // Observation health moves only when a consolidation run writes rows, so a
+    // 5-minute cadence is far below the signal's rate of change.
+    Timer {
+        interval: 300000
+        running: true
+        repeat: true
+        onTriggered: obsHealthSource.connectSource(obsHealthSource.command)
     }
 
 
