@@ -20,6 +20,7 @@ function staleDomains(nowMs, updates, staleAfterMs) {
         ["cpu", "CPU", ["cpuUsage", "cpuTemperature"]],
         ["gpu0", "GPU 0", ["gpu0Telemetry"]],
         ["gpu1", "GPU 1", ["gpu1Telemetry"]],
+        ["gpu2", "GPU 2", ["gpu2Telemetry"]],
         ["memory", "MEMORY", ["memoryPercent", "memoryUsed", "memoryTotal"]],
         ["network", "NETWORK", ["network"]],
         ["disk", "DISK", ["diskPercent", "diskUsed", "diskTotal"]],

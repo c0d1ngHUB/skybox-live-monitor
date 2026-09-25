@@ -30,6 +30,16 @@ PlasmoidItem {
     property real gpu1VramTotalMiB: 0
     property real gpu1PowerDrawWatts: 0
     property real gpu1PowerLimitWatts: 0
+    // GPU 2 is the third card; each GPU keeps its own scalar properties because
+    // QML does not notify bindings on mutations inside a var array.
+    property bool gpu2Available: false
+    property string gpu2Name: "GPU 2"
+    property real gpu2Usage: 0
+    property real gpu2Temp: 0
+    property real gpu2VramUsedMiB: 0
+    property real gpu2VramTotalMiB: 0
+    property real gpu2PowerDrawWatts: 0
+    property real gpu2PowerLimitWatts: 0
     property real down: 0
     property real up: 0
     // Dynamic network scales with hysteresis: grow immediately when the peak
@@ -107,11 +117,14 @@ PlasmoidItem {
     property int gpu0ProcessCount: 0
     property var topGpu1Processes: []
     property int gpu1ProcessCount: 0
+    property var topGpu2Processes: []
+    property int gpu2ProcessCount: 0
     property bool gpuProcessUnavailable: false
     property int historySeconds: 120
     property var cpuHistory: []
     property var gpu0History: []
     property var gpu1History: []
+    property var gpu2History: []
     property var ramHistory: []
     property var downHistory: []
     property var upHistory: []
@@ -125,6 +138,10 @@ PlasmoidItem {
     property color violet: "#DB91FF"
     property color blue: "#4FC3F7"
     property color orange: "#FF9F43"
+    // Third GPU series colour. Violet (GPU 0) and cyan (GPU 1) are taken, so the
+    // third line needs a hue that stays distinguishable from both — and from the
+    // orange RAM and blue CPU accents.
+    property color lime: "#8CE99A"
     property color warning: "#FFD166"
     property color critical: "#FF6B6B"
     // Healthy structure stays quiet; warning and critical states retain full semantic color.
@@ -186,6 +203,13 @@ PlasmoidItem {
         return (v / 1024 / 1024 / 1024).toFixed(1) + " GiB"
     }
     function fmtMemoryPair(usedBytes, totalBytes) {
+        if (!usedBytes || !totalBytes) return "-- / -- GiB"
+        var divisor = 1024 * 1024 * 1024
+        // Whole GiB in the card: two decimals of "11.5 / 30.7 GiB" overflow the
+        // narrow KPI column. The exact pair stays in the tooltip.
+        return Math.round(usedBytes / divisor) + " / " + Math.round(totalBytes / divisor) + " GiB"
+    }
+    function fmtMemoryPairExact(usedBytes, totalBytes) {
         if (!usedBytes || !totalBytes) return "-- / -- GiB"
         var divisor = 1024 * 1024 * 1024
         return (usedBytes / divisor).toFixed(1) + " / " + (totalBytes / divisor).toFixed(1) + " GiB"
@@ -290,11 +314,16 @@ PlasmoidItem {
     // the card says how many cores the aggregate "CPU" figure refers to. Without
     // it, "4%" next to "chromium 52.3%" reads like a contradiction.
     function cpuProcessHeading() {
-        return root.cpuCoreCount > 0 ? "TOP · CPU % · 1/" + root.cpuCoreCount + " CORE" : "TOP · CPU %"
+        // Three cards per row leave ~136 px for the process column, so the
+        // per-core denominator moved to the KPI detail line ("39°C · 20T"), which
+        // has room for it and sits directly under the aggregate percentage.
+        return "TOP · CPU %"
     }
     function cpuDetailLabel() {
         var temp = Math.round(root.cpuTemp) + "°C"
-        return root.cpuCoreCount > 0 ? temp + " · " + root.cpuCoreCount + " THREADS" : temp
+        // "20 THREADS" does not fit the narrow KPI column; "20T" does and keeps
+        // the thread count that disambiguates the per-process percentages.
+        return root.cpuCoreCount > 0 ? temp + " · " + root.cpuCoreCount + "T" : temp
     }
     function openAiOauthState() { return MonitorLogic.openAiOauthState(root.openAiActiveKeys, root.openAiTotalKeys) }
     function openAiOauthLabel() {
@@ -376,6 +405,27 @@ PlasmoidItem {
         }
         return rows
     }
+    // The card title column is ~150 px wide, which fits "GPU 0 · RTX 3050" (15
+    // characters at 13 px monospace) but not the 20-character form of a longer
+    // nvidia-smi name. The model name therefore rides along only when it fits;
+    // the full nvidia-smi name stays reachable in the card tooltip either way.
+    // Never hardcode a model name here: it would keep claiming that card after
+    // the hardware changed.
+    function cardGpuLabel(index, name) {
+        // The card title column is ~105 px, which fits "GPU 0" but not
+        // "GPU 0 · RTX 3050": mid-eliding a model name produced output like
+        // "GPU 0 ⋯X 3050". The index plus the series colour identifies the card;
+        // the full nvidia-smi name is in the card tooltip and in the legend.
+        return "GPU " + index
+    }
+    function cardGpuTooltip(index, name) {
+        var text = String(name || "").trim()
+        return text ? "GPU " + index + " · " + text : "GPU " + index
+    }
+    // One scalar property per GPU index, one branch per index. A var array would
+    // be shorter, but QML only notifies bindings when the property itself is
+    // reassigned, and a computed name like root["gpu" + i + "Usage"] would
+    // silently create a shadowing JS property on a typo instead of failing.
     function applyGpuTelemetry(entry, index) {
         var available = !!entry
         if (index === 0) {
@@ -392,17 +442,31 @@ PlasmoidItem {
             root.topGpu0Processes = root.gpuProcessRows(entry)
             return
         }
-        root.gpu1Available = available
-        if (!available) { root.topGpu1Processes = []; root.gpu1ProcessCount = 0; return }
-        root.gpu1Name = entry.short_name || entry.name || "GPU 1"
-        root.gpu1Usage = root.clamp(Number(entry.utilization_percent) || 0)
-        root.gpu1Temp = Number(entry.temperature_c) || 0
-        root.gpu1VramUsedMiB = Number(entry.memory_used_mib) || 0
-        root.gpu1VramTotalMiB = Number(entry.memory_total_mib) || 0
-        root.gpu1PowerDrawWatts = Number(entry.power_draw_w) || 0
-        root.gpu1PowerLimitWatts = Number(entry.power_limit_w) || 0
-        root.gpu1ProcessCount = Number(entry.process_count) || 0
-        root.topGpu1Processes = root.gpuProcessRows(entry)
+        if (index === 1) {
+            root.gpu1Available = available
+            if (!available) { root.topGpu1Processes = []; root.gpu1ProcessCount = 0; return }
+            root.gpu1Name = entry.short_name || entry.name || "GPU 1"
+            root.gpu1Usage = root.clamp(Number(entry.utilization_percent) || 0)
+            root.gpu1Temp = Number(entry.temperature_c) || 0
+            root.gpu1VramUsedMiB = Number(entry.memory_used_mib) || 0
+            root.gpu1VramTotalMiB = Number(entry.memory_total_mib) || 0
+            root.gpu1PowerDrawWatts = Number(entry.power_draw_w) || 0
+            root.gpu1PowerLimitWatts = Number(entry.power_limit_w) || 0
+            root.gpu1ProcessCount = Number(entry.process_count) || 0
+            root.topGpu1Processes = root.gpuProcessRows(entry)
+            return
+        }
+        root.gpu2Available = available
+        if (!available) { root.topGpu2Processes = []; root.gpu2ProcessCount = 0; return }
+        root.gpu2Name = entry.short_name || entry.name || "GPU 2"
+        root.gpu2Usage = root.clamp(Number(entry.utilization_percent) || 0)
+        root.gpu2Temp = Number(entry.temperature_c) || 0
+        root.gpu2VramUsedMiB = Number(entry.memory_used_mib) || 0
+        root.gpu2VramTotalMiB = Number(entry.memory_total_mib) || 0
+        root.gpu2PowerDrawWatts = Number(entry.power_draw_w) || 0
+        root.gpu2PowerLimitWatts = Number(entry.power_limit_w) || 0
+        root.gpu2ProcessCount = Number(entry.process_count) || 0
+        root.topGpu2Processes = root.gpuProcessRows(entry)
     }
     function diskUsedBytes() { return root.diskUsedBytesDf }
     function diskPercent() { return root.diskPercentDf }
@@ -640,8 +704,9 @@ PlasmoidItem {
                 Row {
                     id: computeLegend
                     anchors.left: parent.left; anchors.top: headline.bottom; anchors.topMargin: 26; spacing: 18
-                    Text { text: "━━ GPU 0 · " + root.gpu0Name + " · " + (root.gpu0Available ? Math.round(root.gpu0Usage) + "%" : "UNAVAILABLE"); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
-                    Text { text: "━━ GPU 1 · " + root.gpu1Name + " · " + (root.gpu1Available ? Math.round(root.gpu1Usage) + "%" : "UNAVAILABLE"); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 14 }
+                    Text { text: "━━ GPU 0 · " + root.gpu0Name + " · " + (root.gpu0Available ? Math.round(root.gpu0Usage) + "%" : "UNAVAILABLE"); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
+                    Text { text: "━━ GPU 1 · " + root.gpu1Name + " · " + (root.gpu1Available ? Math.round(root.gpu1Usage) + "%" : "UNAVAILABLE"); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
+                    Text { text: "━━ GPU 2 · " + root.gpu2Name + " · " + (root.gpu2Available ? Math.round(root.gpu2Usage) + "%" : "UNAVAILABLE"); color: root.lime; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
                 }
 
                 // P0a: Y-axis labels positioned INSIDE the graph area, not with negative margins
@@ -722,6 +787,7 @@ PlasmoidItem {
                         }
                         plot(root.gpu0History, root.violet, "rgba(219,145,255,0.10)", false)
                         plot(root.gpu1History, root.cyan, "rgba(150,245,246,0.07)", false)
+                        plot(root.gpu2History, root.lime, "rgba(140,233,154,0.07)", false)
                     }
                 }
                 Item {
@@ -736,24 +802,25 @@ PlasmoidItem {
                 }
             }
 
-            // --- Dual-GPU row followed by compact CPU/RAM row ---
+            // --- Three-GPU row followed by compact CPU/RAM row ---
             Grid {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 278
-                columns: 2
+                columns: 3
                 rows: 2
                 columnSpacing: 16
                 rowSpacing: 16
 
                 Repeater {
                     model: [
-                        {kind:"gpu", label:"GPU 0 · " + root.gpu0Name, available:root.gpu0Available, value:root.gpu0Available ? Math.round(root.gpu0Usage) + "%" : "--", detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE", color:root.violet, detailColor:root.gpuTempColor(root.gpu0Temp, root.muted), healthLevel:!root.gpu0Available ? 2 : ((root.gpu0Temp >= 90 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 95) ? 2 : ((root.gpu0Temp >= 85 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB), powerText:root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts), processes:root.topGpu0Processes, processCount:root.gpu0ProcessCount, processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable},
-                        {kind:"gpu", label:"GPU 1 · " + root.gpu1Name, available:root.gpu1Available, value:root.gpu1Available ? Math.round(root.gpu1Usage) + "%" : "--", detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE", color:root.cyan, detailColor:root.gpuTempColor(root.gpu1Temp, root.muted), healthLevel:!root.gpu1Available ? 2 : ((root.gpu1Temp >= 90 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 95) ? 2 : ((root.gpu1Temp >= 85 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB), powerText:root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts), processes:root.topGpu1Processes, processCount:root.gpu1ProcessCount, processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable},
+                        {kind:"gpu", label:"GPU 0 · " + root.gpu0Name, labelText: root.cardGpuLabel(0, root.gpu0Name), labelTooltip: root.cardGpuTooltip(0, root.gpu0Name), available:root.gpu0Available, value:root.gpu0Available ? Math.round(root.gpu0Usage) + "%" : "--", detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE", color:root.violet, detailColor:root.gpuTempColor(root.gpu0Temp, root.muted), healthLevel:!root.gpu0Available ? 2 : ((root.gpu0Temp >= 90 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 95) ? 2 : ((root.gpu0Temp >= 85 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB), powerText:root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts), processes:root.topGpu0Processes, processCount:root.gpu0ProcessCount, processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable},
+                        {kind:"gpu", label:"GPU 1 · " + root.gpu1Name, labelText: root.cardGpuLabel(1, root.gpu1Name), labelTooltip: root.cardGpuTooltip(1, root.gpu1Name), available:root.gpu1Available, value:root.gpu1Available ? Math.round(root.gpu1Usage) + "%" : "--", detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE", color:root.cyan, detailColor:root.gpuTempColor(root.gpu1Temp, root.muted), healthLevel:!root.gpu1Available ? 2 : ((root.gpu1Temp >= 90 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 95) ? 2 : ((root.gpu1Temp >= 85 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB), powerText:root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts), processes:root.topGpu1Processes, processCount:root.gpu1ProcessCount, processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable},
+                        {kind:"gpu", label:"GPU 2 · " + root.gpu2Name, labelText: root.cardGpuLabel(2, root.gpu2Name), labelTooltip: root.cardGpuTooltip(2, root.gpu2Name), available:root.gpu2Available, value:root.gpu2Available ? Math.round(root.gpu2Usage) + "%" : "--", detail:root.gpu2Available ? Math.round(root.gpu2Temp) + "°C" : "UNAVAILABLE", color:root.lime, detailColor:root.gpuTempColor(root.gpu2Temp, root.muted), healthLevel:!root.gpu2Available ? 2 : ((root.gpu2Temp >= 90 || root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) >= 95) ? 2 : ((root.gpu2Temp >= 85 || root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB), powerText:root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts), processes:root.topGpu2Processes, processCount:root.gpu2ProcessCount, processUnavailable:!root.gpu2Available || root.gpuProcessUnavailable},
                         {kind:"cpu", label:"CPU", value:Math.round(root.cpu) + "%", detail:root.cpuDetailLabel(), color:root.blue, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel:root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0), processes:root.topCpuProcesses, processCount:root.topCpuProcesses.length, processUnavailable:root.cpuProcessUnavailable},
                         {kind:"ram", label:"RAM", value:Math.round(root.ram) + "%", detail:root.fmtMemoryPair(root.ramUsedBytes, root.ramTotalBytes), color:root.orange, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel:root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0), processes:root.topRamProcesses, processCount:root.topRamProcesses.length, processUnavailable:root.ramProcessUnavailable}
                     ]
                     delegate: Rectangle {
-                        width: (parent.width - 16) / 2; height: (parent.height - 16) / 2; radius: 16
+                        width: (parent.width - 32) / 3; height: (parent.height - 16) / 2; radius: 16
                         clip: true
                         color: Qt.rgba(0.035, 0.22, 0.34, 0.82); border.width: modelData.healthLevel > 0 ? 2 : 1; border.color: root.metricBorderColor(modelData); opacity: 0.95
 
@@ -761,15 +828,21 @@ PlasmoidItem {
                         // with process names at narrow dashboard widths.
                         Item {
                             anchors.fill: parent; anchors.margins: 12
+                            // Three cards per row cut the card width from ~420 to
+                            // ~274 px, so the KPI column and its gap shrink with
+                            // the card; the two-column literals clipped the
+                            // process value column away and let POWER elide.
+                            readonly property int kpiColumn: Math.max(60, Math.round(parent.width * 0.42))
+                            readonly property int kpiGap: Math.max(8, Math.round(parent.width * 0.045))
                             Column {
                                 id: metricKpi
                                 anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
-                                width: Math.max(116, parent.width * 0.34); spacing: 4
+                                width: parent.kpiColumn; spacing: 4
                                 PlasmaCore.ToolTipArea {
                                     width: parent.width - 4
                                     height: 18
-                                    mainText: modelData.label
-                                    Text { anchors.fill: parent; text: modelData.label; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true; elide: Text.ElideMiddle }
+                                    mainText: modelData.labelTooltip || modelData.label
+                                    Text { anchors.fill: parent; text: modelData.labelText || modelData.label; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true; elide: Text.ElideMiddle }
                                 }
 
                                 // --- GPU card: utilization as the large metric + temperature secondary ---
@@ -778,7 +851,7 @@ PlasmoidItem {
                                     text: modelData.value
                                     color: root.ink
                                     font.family: "DejaVu Sans"
-                                    font.pixelSize: 28
+                                    font.pixelSize: Math.max(18, Math.min(26, Math.round(metricKpi.width * 0.42)))
                                     font.bold: true
                                 }
                                 Text {
@@ -794,6 +867,10 @@ PlasmoidItem {
                                     width: parent.width - 4
                                     height: 22
                                     visible: modelData.kind === "gpu"
+                                    PlasmaCore.ToolTipArea {
+                                        anchors.fill: parent
+                                        mainText: "VRAM " + root.fmtVram(modelData.vramUsedMiB || 0) + " / " + root.fmtVram(modelData.vramTotalMiB || 0)
+                                    }
                                     Rectangle {
                                         anchors.fill: parent
                                         radius: 11
@@ -845,6 +922,11 @@ PlasmoidItem {
                                 // --- RAM card: original layout ---
                                 Text { visible: modelData.kind === "ram"; text: modelData.value; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 28; font.bold: true }
                                 Text { visible: modelData.kind === "ram"; width: parent.width - 4; text: modelData.detail; color: modelData.detailColor; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
+                                PlasmaCore.ToolTipArea {
+                                    width: parent.width - 4
+                                    height: 1
+                                    mainText: root.fmtMemoryPairExact(root.ramUsedBytes, root.ramTotalBytes)
+                                }
                                 // VRAM fill bar — only on GPU card (original position, kept for non-GPU safety)
                                 Item {
                                     width: parent.width - 4
@@ -866,7 +948,7 @@ PlasmoidItem {
                             Rectangle { id: metricDivider; anchors.left: metricKpi.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: modelData.color; opacity: 0.24 }
                             Column {
                                 id: processDetails
-                                anchors.left: metricDivider.right; anchors.leftMargin: 10
+                                anchors.left: metricDivider.right; anchors.leftMargin: parent.kpiGap
                                 anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
                                 spacing: 3
                                 property string metricKind: modelData.kind
@@ -874,25 +956,25 @@ PlasmoidItem {
                                 property string heading: metricKind === "cpu" ? root.cpuProcessHeading() : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")
                                 // A fifth GPU workload is capped, so say how many exist.
                                 property string headingSuffix: metricKind === "gpu" && modelData.processCount > processDetails.processes.length ? " (+" + (modelData.processCount - processDetails.processes.length) + ")" : ""
-                                Text { width: parent.width; text: processDetails.heading + processDetails.headingSuffix; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true; elide: Text.ElideRight }
+                                Text { width: parent.width; text: processDetails.heading + processDetails.headingSuffix; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true; elide: Text.ElideRight }
                                 Repeater {
                                     model: parent.processes
                                     delegate: Item {
                                         width: parent.width
-                                        height: 19
+                                        height: 18
                                         property var process: modelData
                                         property string displayValue: root.compactProcessValue(processDetails.metricKind.toUpperCase(), processDetails.metricKind === "cpu" ? process.cpu + "%" : (processDetails.metricKind === "ram" ? process.ram : process.gpu))
                                         PlasmaCore.ToolTipArea {
                                             anchors.left: parent.left
                                             anchors.right: processValue.left
-                                            anchors.rightMargin: 8
+                                            anchors.rightMargin: 6
                                             height: parent.height
                                             mainText: parent.process.name
                                             Text {
                                                 anchors.fill: parent
                                                 text: root.shortProcessName(parent.mainText)
                                                 color: index === 0 ? root.ink : root.muted
-                                                font.family: "DejaVu Sans Mono"; font.pixelSize: 14
+                                                font.family: "DejaVu Sans Mono"; font.pixelSize: 13
                                                 elide: Text.ElideRight
                                             }
                                         }
@@ -901,7 +983,7 @@ PlasmoidItem {
                                             anchors.right: parent.right
                                             text: parent.displayValue
                                             color: index === 0 ? root.ink : root.muted
-                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 14
+                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 13
                                             font.bold: true
                                             horizontalAlignment: Text.AlignRight
                                         }
@@ -909,10 +991,12 @@ PlasmoidItem {
                                 }
                                 Text {
                                     visible: parent.processes.length === 0
+                                    width: parent.width
                                     text: modelData.processUnavailable ? "UNAVAILABLE" : (modelData.processCount === 0 ? (processDetails.metricKind === "gpu" ? "NO ACTIVE WORKLOAD" : "SAMPLING…") : "SAMPLING…")
                                     color: root.muted
                                     font.family: "DejaVu Sans Mono"
-                                    font.pixelSize: 14
+                                    font.pixelSize: 13
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
@@ -1179,6 +1263,7 @@ PlasmoidItem {
                 root.cpuHistory = root.push(root.cpuHistory, root.cpu)
                 root.gpu0History = root.push(root.gpu0History, root.gpu0Usage)
                 root.gpu1History = root.push(root.gpu1History, root.gpu1Usage)
+                root.gpu2History = root.push(root.gpu2History, root.gpu2Usage)
                 root.ramHistory = root.push(root.ramHistory, root.ram)
                 root.downHistory = root.push(root.downHistory, root.down)
                 root.upHistory = root.push(root.upHistory, root.up)
@@ -1400,16 +1485,19 @@ PlasmoidItem {
             if (fullUnavailable) {
                 root.applyGpuTelemetry(null, 0)
                 root.applyGpuTelemetry(null, 1)
+                root.applyGpuTelemetry(null, 2)
                 return
             }
-            var gpu0 = null
-            var gpu1 = null
+            // Index by the GPU's own index field, never by array position:
+            // nvidia-smi numbers the GPUs itself and a missing card must leave
+            // exactly its own card empty instead of shifting the others.
+            var byIndex = ({})
             for (var i = 0; i < payload.gpus.length; i++) {
-                if (Number(payload.gpus[i].index) === 0) gpu0 = payload.gpus[i]
-                if (Number(payload.gpus[i].index) === 1) gpu1 = payload.gpus[i]
+                byIndex[String(Number(payload.gpus[i].index))] = payload.gpus[i]
             }
-            root.applyGpuTelemetry(gpu0, 0)
-            root.applyGpuTelemetry(gpu1, 1)
+            root.applyGpuTelemetry(byIndex["0"] || null, 0)
+            root.applyGpuTelemetry(byIndex["1"] || null, 1)
+            root.applyGpuTelemetry(byIndex["2"] || null, 2)
         }
     }
 

@@ -4,3 +4,4 @@ __pycache__/
 *.before-*
 .worktrees/
 .pytest_cache/
+qmllint.log
