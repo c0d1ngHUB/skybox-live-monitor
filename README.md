@@ -16,7 +16,6 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   network panel so axis and live value always agree
 - Disk usage in `df` semantics, including the filesystem reserve
 - NVIDIA VRAM telemetry via `nvidia-smi`
-- Local Qwen 3.8 service health via localhost only
 - Longest Hermes run across the default and named profiles
 - No telemetry, no external network requests, and no credentials
 

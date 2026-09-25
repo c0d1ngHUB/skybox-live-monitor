@@ -17,25 +17,43 @@ def source():
 
 
 
-def test_freshness_is_tracked_per_metric_and_compact_status_is_visible():
+def test_global_status_banner_and_service_summary_are_removed():
     text = source()
-    assert 'property string lastRefresh' in text
-    assert 'property var metricUpdateMs' in text
-    assert 'id: telemetryStatus' in text
-    assert 'text: root.statusLabel() + root.dataStatusAgeText()' in text
-    assert 'visible: true' in text
-    assert 'function dataStatusAgeText()' in text
-    assert 'root.dataStatus = "LIVE"' in text
-    assert '"DEBIAN 13 · PLASMA 6 · REFRESH " + root.lastRefresh' not in text
     assert 'function refreshClock()' in text
+    for removed in (
+        'id: telemetryStatus',
+        'aiServicesSummary',
+        'statusSeverity',
+        'statusTone',
+        'statusBackground',
+        'statusReason',
+        'statusLabel',
+        'dataStatusAgeText',
+        'dataStatus',
+        'lastRefresh',
+        'metricUpdateMs',
+        'markMetricFresh',
+        'updateDataStatus',
+    ):
+        assert removed not in text, f"removed status machinery still present: {removed}"
 
 
-def test_telemetry_status_text_is_width_bounded_for_elision():
+def test_qwen_service_is_removed_from_the_dashboard_and_the_helper():
     text = source()
-    block = text[text.index("id: telemetryStatus"):text.index("// --- SYSTEM LOAD section")]
-    assert "width: parent.width - 28" in block
-    assert "horizontalAlignment: Text.AlignHCenter" in block
-    assert "elide: Text.ElideRight" in block
+    assert 'QWEN' not in text
+    assert 'localLlm' not in text
+    helper = AI_HELPER.read_text()
+    assert '11435' not in helper
+    assert 'local_llm' not in helper
+
+
+def test_gateway_and_hindsight_cards_fill_the_service_row():
+    """Two cards replace three, so each must span half the row minus the gap."""
+    text = source()
+    section = text[text.index('// --- AI SERVICES section ---'):text.index('// --- SYSTEM LOAD section ---')]
+    assert section.count('width: (parent.width - 10) / 2') == 2
+    assert 'width: (parent.width - 20) / 3' not in section
+    assert 'GATEWAY' in section and 'HINDSIGHT' in section
 
 
 def test_process_sources_distinguish_empty_results_from_command_failures():
@@ -241,13 +259,9 @@ def test_charts_are_two_minute_and_visually_readable():
     assert 'networkTimeline' not in text
 
 
-def test_warning_banner_names_the_primary_cause_and_gpu_chart_marks_now():
+def test_gpu_chart_marks_the_now_point_without_the_removed_banner():
     text = source()
-    assert 'function statusReason()' in text
-    assert 'return "GPU 0 VRAM " + Math.round(gpu0Vram) + "%"' in text
-    assert 'return "GPU 1 TEMP " + Math.round(root.gpu1Temp) + "°C"' in text
-    assert 'return serviceNames[i] + " " + state' in text
-    assert 'return (severity === "WARNING" ? "▲ " : "✕ ") + root.statusReason()' in text
+    assert 'function statusReason()' not in text
     assert 'var currentIndex = data.length - 1' in text
     assert 'ctx.arc(currentX, currentY, 5, 0, Math.PI * 2)' in text
 
@@ -420,14 +434,14 @@ def test_dashboard_uses_the_full_available_height_without_clipping_content():
     assert 'Layout.minimumHeight: 230' in text
 
 
-def test_header_shows_a_live_clock_centered_at_skybox_font_size():
+def test_header_shows_a_live_clock_centered_at_two_and_a_half_times_size():
+    """18 px * 2.5 = 45 px for the header clock."""
     text = source()
     assert 'property string currentTime: refreshClock()' in text
     assert 'id: headerClock' in text
     assert 'text: root.currentTime' in text
-    assert 'font.pixelSize: 18' in text
+    assert 'font.pixelSize: 45' in text
     assert 'font.pixelSize: 22' not in text
-    assert 'statusLabel()' in text
     assert 'anchors.horizontalCenter: parent.horizontalCenter' in text
     assert 'font.pixelSize: 28' in text
     assert 'root.currentTime = root.refreshClock()' in text
@@ -435,8 +449,7 @@ def test_header_shows_a_live_clock_centered_at_skybox_font_size():
 
 def test_header_clock_uses_hours_and_minutes_without_seconds():
     text = source()
-    clock = text[text.index('function refreshClock()'):text.index('function markMetricFresh', text.index('function refreshClock()'))]
-    assert 'property string lastRefresh: "--:--"' in text
+    clock = text[text.index('function refreshClock()'):text.index('    function currentTimezoneLabel')]
     assert 'now.getHours()' in clock
     assert 'now.getMinutes()' in clock
     assert 'now.getSeconds()' not in clock
@@ -450,22 +463,16 @@ def test_removed_unload_control_has_no_visual_or_accessible_action():
 
 
 
-def test_freshness_tracks_each_data_domain_not_the_chart_timer():
+def test_freshness_timer_only_advances_the_clock_and_charts():
     text = source()
-    timer_block = text[text.index('interval: 1000', text.index('root.currentTime = root.refreshClock()')):text.index('    // Re-detect network interface every 30s in case of hotplug', text.index('interval: 1000', text.index('root.currentTime = root.refreshClock()')))]
-    assert 'root.lastRefresh = root.refreshClock()' not in timer_block
-    assert 'function markMetricFresh(metric)' in text
-    for metric in ('cpuUsage', 'cpuTemperature', 'gpu0Telemetry', 'gpu1Telemetry',
-                   'memoryPercent', 'memoryUsed', 'memoryTotal',
-                   'network', 'diskPercent', 'diskUsed', 'diskTotal',
-                   'uptime', 'loadAverage'):
-        assert f'root.markMetricFresh("{metric}")' in text
-    fn_start = text.index('function markMetricFresh(metric)')
-    fn_end = text.index('function updateDataStatus', fn_start)
-    fn_body = text[fn_start:fn_end]
-    assert fn_body.count('root.lastRefresh = root.refreshClock()') == 1
-    # The refresh must be conditional — preceded by an if-guard, not bare.
-    assert 'if (stale.length === 0) root.lastRefresh = root.refreshClock()' in fn_body
+    # The 1 s chart timer keeps only the clock and the history buffers: the
+    # removed freshness bookkeeping must not come back through the timer path.
+    timer_block = text[text.index('\n                root.currentTime = root.refreshClock()'):text.index('// df(1) view of the local root')]
+    assert 'root.currentTime = root.refreshClock()' in timer_block
+    assert 'computeGraph.requestPaint()' in timer_block
+    assert 'root.lastRefresh' not in timer_block
+    assert 'markMetricFresh' not in text
+    assert 'updateDataStatus' not in text
 
 
 def test_charts_show_filling_indicator_until_history_is_full():
@@ -482,17 +489,15 @@ def test_charts_show_filling_indicator_until_history_is_full():
 
 
 
-def test_each_sensor_marks_its_own_metric_fresh():
+def test_each_sensor_and_source_matches_the_removed_freshness_tracking():
     text = source()
-    expected = {
-        "cpuUsage", "cpuTemperature", "gpu0Telemetry", "gpu1Telemetry",
-        "memoryPercent", "memoryUsed", "memoryTotal", "network", "diskPercent",
-        "diskUsed", "diskTotal", "uptime", "loadAverage",
-    }
-    assert "property var metricUpdateMs" in text
-    for metric in expected:
-        assert f'root.markMetricFresh("{metric}")' in text
-    assert "property var domainUpdateMs" not in text
+    assert "metricUpdateMs" not in text
+    assert "root.markMetricFresh" not in text
+    assert "domainUpdateMs" not in text
+    # The telemetry sources still deliver their values, just without the
+    # freshness bookkeeping that only fed the removed status banner.
+    assert 'root.cpu = root.clamp(parseFloat(value))' in text
+    assert 'root.ram = root.clamp(parseFloat(value))' in text
 
 
 def test_cpu_processes_are_computed_from_interval_samples():
@@ -517,30 +522,17 @@ def test_ai_services_precede_system_load_and_use_normalized_accessible_states():
     assert 'font.pixelSize: 11' not in text
 
 
-def test_oauth_state_affects_global_status_and_header_has_one_status_source():
+def test_oauth_state_still_labels_the_card_without_the_global_banner():
     text = source()
-    severity = text[text.index('function statusSeverity()'):text.index('function statusTone()')]
-    assert 'var oauthState = root.openAiOauthState()' in severity
-    assert 'if (oauthState === "OFFLINE") return "CRITICAL"' in severity
-    assert 'if (oauthState === "DEGRADED") return "WARNING"' in severity
-    assert text.count('root.statusLabel()') == 1
-    telemetry = text[text.index('id: telemetryStatus'):text.index('// --- AI SERVICES section ---')]
-    assert 'font.pixelSize: 15' in telemetry
-
-
-def test_ai_service_summary_and_oauth_key_status_are_unambiguous():
-    text = source()
-    assert 'function aiServicesSummary()' in text
-    assert 'text: root.aiServicesSummary()' in text
-    assert 'var states = [root.hermesGatewayState, root.hindsightState, root.localLlmState, root.openAiOauthState()]' in text
-    assert 'MonitorLogic.serviceSymbol(state) + " " + state + " · " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"' in text
-    assert 'return root.openAiActiveKeys + "/" + root.openAiTotalKeys + " BEREIT"' not in text
+    assert 'root.openAiOauthLabel()' in text
+    assert text.count('root.statusLabel()') == 0
+    assert 'id: telemetryStatus' not in text
 
 
 def test_status_cards_use_symbols_and_quiet_healthy_borders():
     text = source()
     assert 'function serviceBorderColor(rawState)' in text
-    assert text.count('border.color: root.serviceBorderColor(') == 3
+    assert text.count('border.color: root.serviceBorderColor(') == 2
     assert 'border.color: root.openAiOauthBorderColor()' in text
     assert 'function openAiOauthBorderColor()' in text
 
@@ -576,7 +568,6 @@ def test_system_load_chart_has_live_values_five_ticks_and_non_color_line_styles(
 def test_elided_model_process_and_system_texts_expose_full_tooltips():
     text = source()
     assert text.count('PlasmaCore.ToolTipArea {') >= 4
-    assert 'mainText: root.localLlmStateLabel()' in text
     assert 'mainText: parent.process.name' in text
     assert 'mainText: modelData.label' in text
     assert 'sessionLabel: "HERMES-SESSION"' in text
@@ -618,8 +609,7 @@ def test_ai_services_helper_is_local_only_and_null_safe_for_weekly_usage():
     text = AI_HELPER.read_text()
     assert 'hermes-gateway.service' in text
     assert '127.0.0.1:9177/health' in text
-    assert '127.0.0.1:11435/health' in text
-    assert '127.0.0.1:11435/v1/models' in text
+    assert '11435' not in text
     assert 'nvidia-smi' not in text
     assert 'http://' in text and '127.0.0.1' in text
     assert 'requests' not in text
@@ -630,9 +620,8 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'AI SERVICES' in text
     assert 'root.hermesGatewayState' in text
     assert 'root.hindsightState' in text
-    assert 'root.localLlmState' in text
-    assert 'root.localLlmModelName' in text
-    assert 'QWEN 3.8' in text
+    assert 'QWEN' not in text
+    assert 'localLlm' not in text
     assert 'POWER ' in text
     assert 'root.gpu0PowerDrawWatts' in text and 'root.gpu1PowerDrawWatts' in text
     assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text
@@ -648,12 +637,6 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
 
 def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():
     text = source()
-    severity = text[text.index('function statusSeverity()'):text.index('function statusTone()')]
-    assert 'root.gpu0Temp >= 90' in severity and 'root.gpu1Temp >= 90' in severity
-    assert 'root.gpu0Temp >= 85' in severity and 'root.gpu1Temp >= 85' in severity
-    assert 'root.gpu0Temp >= 75' not in severity and 'root.gpu1Temp >= 75' not in severity
-    assert severity.index('if (state === "OFFLINE") return "CRITICAL"') < severity.index('root.cpuTemp >= 75')
-    assert severity.index('if (oauthState === "OFFLINE") return "CRITICAL"') < severity.index('root.cpuTemp >= 75')
     assert 'function gpuTempColor(value, normalColor)' in text
     gpu_cards = text[text.index('{kind:"gpu", label:"GPU 0'):text.index('{kind:"cpu"')]
     assert 'root.gpu0Temp >= 90' in gpu_cards and 'root.gpu1Temp >= 90' in gpu_cards

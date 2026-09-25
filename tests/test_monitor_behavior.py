@@ -319,7 +319,6 @@ class MonitorBehaviorTests(unittest.TestCase):
         text = QML.read_text()
         self.assertIn("id: networkCountersSource", text)
         self.assertIn("network_counters.sh", text)
-        self.assertIn('root.markMetricFresh("network")', text)
         self.assertNotIn('sensorId: "network/" + root.netIf', text)
 
 

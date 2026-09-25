@@ -68,8 +68,6 @@ PlasmoidItem {
     property int openAiFetchFailures: 0
     property string hermesGatewayState: "UNKNOWN"
     property string hindsightState: "UNKNOWN"
-    property string localLlmState: "UNKNOWN"
-    property string localLlmModelName: ""
     // Observation health of the Hindsight bank, read by
     // contents/code/hindsight_observation_health.py. Guards the
     // observation_scopes="shared" switch: TAGS 0 shows the share of observations
@@ -90,18 +88,7 @@ PlasmoidItem {
     property real diskPercentDf: 0
     // Logical processors, for labelling per-process CPU percentages.
     property int cpuCoreCount: 0
-    property string lastRefresh: "--:--"
     property string currentTime: refreshClock()
-    property string dataStatus: "WAITING"
-    property int staleAfterMs: 15000
-    property var metricUpdateMs: ({
-        cpuUsage: 0, cpuTemperature: 0,
-        gpu0Telemetry: 0, gpu1Telemetry: 0,
-        memoryPercent: 0, memoryUsed: 0, memoryTotal: 0,
-        network: 0,
-        diskPercent: 0, diskUsed: 0, diskTotal: 0,
-        uptime: 0, loadAverage: 0
-    })
     // Four largest CPU, RAM, and GPU consumers, sampled every five seconds.
     property var topCpuProcesses: []
     property var previousCpuSamples: ({})
@@ -275,106 +262,6 @@ PlasmoidItem {
         var minutes = Math.abs(offsetMinutes) % 60
         return "UTC" + (offsetMinutes >= 0 ? "+" : "-") + hours + (minutes ? ":" + ("0" + minutes).slice(-2) : "")
     }
-    function markMetricFresh(metric) {
-        var now = Date.now()
-        var updates = Object.assign({}, root.metricUpdateMs)
-        updates[metric] = now
-        root.metricUpdateMs = updates
-        // Only advance the header clock when every domain is fresh —
-        // a stale domain must not masquerade as a recent refresh.
-        var stale = MonitorLogic.staleDomains(now, updates, root.staleAfterMs)
-        if (stale.length === 0) root.lastRefresh = root.refreshClock()
-        root.updateDataStatus(now)
-    }
-    function updateDataStatus(nowMs) {
-        var stale = MonitorLogic.staleDomains(nowMs, root.metricUpdateMs, root.staleAfterMs)
-        if (stale.length === 7) root.dataStatus = "WAITING"
-        else if (stale.length > 0) root.dataStatus = "STALE · " + stale.join(" · ")
-        else root.dataStatus = "LIVE"
-    }
-    function dataStatusAgeText() {
-        if (root.dataStatus !== "LIVE") return ""
-        var newest = 0
-        for (var key in root.metricUpdateMs) newest = Math.max(newest, Number(root.metricUpdateMs[key] || 0))
-        if (newest <= 0) return ""
-        return " · " + root.fmtAge((Date.now() - newest) / 1000) + " AGO"
-    }
-    function statusSeverity() {
-        if (root.dataStatus.indexOf("STALE") >= 0) return "CRITICAL"
-        if (root.dataStatus === "WAITING") return "WARNING"
-        if (root.dataStatus === "LIVE") {
-            var gpu0Vram = root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB)
-            var gpu1Vram = root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB)
-            if (root.cpuTemp >= 85 || root.gpu0Temp >= 90 || root.gpu1Temp >= 90 || root.ram >= 95 || gpu0Vram >= 95 || gpu1Vram >= 95 || root.diskPercent() >= 95) return "CRITICAL"
-            var services = [root.hermesGatewayState, root.hindsightState, root.localLlmState]
-            for (var i = 0; i < services.length; i++) {
-                var state = MonitorLogic.normalizeServiceState(services[i])
-                if (state === "OFFLINE") return "CRITICAL"
-            }
-            var oauthState = root.openAiOauthState()
-            if (oauthState === "OFFLINE") return "CRITICAL"
-
-            if (root.cpuTemp >= 75 || root.gpu0Temp >= 85 || root.gpu1Temp >= 85 || root.ram >= 85 || gpu0Vram >= 85 || gpu1Vram >= 85 || root.diskPercent() >= 85) return "WARNING"
-            for (var j = 0; j < services.length; j++) {
-                var warningState = MonitorLogic.normalizeServiceState(services[j])
-                if (warningState === "DEGRADED") return "WARNING"
-            }
-            if (oauthState === "DEGRADED") return "WARNING"
-            return "OPERATIONAL"
-        }
-        return "CRITICAL"
-    }
-    function statusTone() {
-        var severity = root.statusSeverity()
-        if (severity === "OPERATIONAL") return root.cyan
-        if (severity === "WARNING") return root.warning
-        return root.critical
-    }
-    function statusBackground() {
-        var severity = root.statusSeverity()
-        if (severity === "OPERATIONAL") return Qt.rgba(0.15, 0.75, 0.80, 0.14)
-        if (severity === "WARNING") return Qt.rgba(0.96, 0.74, 0.20, 0.18)
-        return Qt.rgba(1.0, 0.38, 0.38, 0.18)
-    }
-    function statusReason() {
-        var severity = root.statusSeverity()
-        if (severity === "OPERATIONAL") return "ALL SYSTEMS OPERATIONAL"
-        if (root.dataStatus.indexOf("STALE") >= 0) {
-            var staleParts = root.dataStatus.split(" · ")
-            return "STALE · " + (staleParts.length > 1 ? staleParts[1] : "TELEMETRY")
-        }
-        if (root.dataStatus === "WAITING") return "TELEMETRY STARTING"
-
-        var gpu0Vram = root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB)
-        var gpu1Vram = root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB)
-        var critical = severity === "CRITICAL"
-        var gpuTempLimit = critical ? 90 : 85
-        var cpuTempLimit = critical ? 85 : 75
-        var usageLimit = critical ? 95 : 85
-        if (gpu0Vram >= usageLimit) return "GPU 0 VRAM " + Math.round(gpu0Vram) + "%"
-        if (gpu1Vram >= usageLimit) return "GPU 1 VRAM " + Math.round(gpu1Vram) + "%"
-        if (root.gpu0Temp >= gpuTempLimit) return "GPU 0 TEMP " + Math.round(root.gpu0Temp) + "°C"
-        if (root.gpu1Temp >= gpuTempLimit) return "GPU 1 TEMP " + Math.round(root.gpu1Temp) + "°C"
-        if (root.cpuTemp >= cpuTempLimit) return "CPU TEMP " + Math.round(root.cpuTemp) + "°C"
-        if (root.ram >= usageLimit) return "RAM " + Math.round(root.ram) + "%"
-        if (root.diskPercent() >= usageLimit) return "DISK " + Math.round(root.diskPercent()) + "%"
-
-        var serviceNames = ["GATEWAY", "HINDSIGHT", "QWEN 3.8"]
-        var services = [root.hermesGatewayState, root.hindsightState, root.localLlmState]
-        for (var i = 0; i < services.length; i++) {
-            var state = MonitorLogic.normalizeServiceState(services[i])
-            if ((critical && state === "OFFLINE") || (!critical && state === "DEGRADED")) return serviceNames[i] + " " + state
-        }
-        var oauthState = root.openAiOauthState()
-        if ((critical && oauthState === "OFFLINE") || (!critical && oauthState === "DEGRADED")) return "OPENAI OAUTH " + oauthState
-        return severity
-    }
-    function statusLabel() {
-        var severity = root.statusSeverity()
-        if (severity === "OPERATIONAL") return "● " + root.statusReason()
-        return (severity === "WARNING" ? "▲ " : "✕ ") + root.statusReason()
-    }
-
     function serviceToneColor(rawState) {
         var tone = MonitorLogic.serviceTone(MonitorLogic.normalizeServiceState(rawState))
         if (tone === "cyan") return root.cyan
@@ -401,10 +288,6 @@ PlasmoidItem {
     function cpuDetailLabel() {
         var temp = Math.round(root.cpuTemp) + "°C"
         return root.cpuCoreCount > 0 ? temp + " · " + root.cpuCoreCount + " THREADS" : temp
-    }
-    function localLlmStateLabel() {
-        var state = MonitorLogic.normalizeServiceState(root.localLlmState)
-        return MonitorLogic.serviceSymbol(state) + " " + state + (state === "OPERATIONAL" && root.localLlmModelName.length > 0 ? " · " + root.localLlmModelName : "")
     }
     function openAiOauthState() { return MonitorLogic.openAiOauthState(root.openAiActiveKeys, root.openAiTotalKeys) }
     function openAiOauthLabel() {
@@ -449,43 +332,6 @@ PlasmoidItem {
         if (root.obsHealthUnavailable) return base + " · API NICHT ERREICHBAR"
         return base + " · BASIS " + root.fmtPct1(1.7) + " / " + root.fmtPct1(62.4)
     }
-    function aiServicesSummary() {
-        var states = [root.hermesGatewayState, root.hindsightState, root.localLlmState, root.openAiOauthState()]
-        var operational = 0
-        var degraded = 0
-        var offline = 0
-        var notConfigured = 0
-        var unknown = 0
-        for (var i = 0; i < states.length; i++) {
-            var state = MonitorLogic.normalizeServiceState(states[i])
-            if (state === "OPERATIONAL") operational++
-            else if (state === "DEGRADED") degraded++
-            else if (state === "OFFLINE") offline++
-            else if (state === "NOT_CONFIGURED") notConfigured++
-            else unknown++
-        }
-        var summary = operational + "/4 OPERATIONAL"
-        if (offline > 0) summary += " · " + offline + " OFFLINE"
-        if (degraded > 0) summary += " · " + degraded + " DEGRADED"
-        if (notConfigured > 0) summary += " · " + notConfigured + " NOT CONFIGURED"
-        if (unknown > 0) summary += " · " + unknown + " UNKNOWN"
-        return summary
-    }
-    function aiServicesSummaryTone() {
-        var states = [root.hermesGatewayState, root.hindsightState, root.localLlmState, root.openAiOauthState()]
-        var hasQuiet = false
-        var hasDegraded = false
-        for (var i = 0; i < states.length; i++) {
-            var state = MonitorLogic.normalizeServiceState(states[i])
-            if (state === "OFFLINE") return root.critical
-            if (state === "DEGRADED") hasDegraded = true
-            // Unconfigured and unknown are informational, not warning states.
-            if (state === "UNKNOWN" || state === "NOT_CONFIGURED") hasQuiet = true
-        }
-        if (hasDegraded) return root.warning
-        if (hasQuiet) return root.muted
-        return root.cyan
-    }
     function gpuPowerText(drawValue, limitValue) {
         var draw = Number(drawValue)
         var limit = Number(limitValue)
@@ -519,7 +365,6 @@ PlasmoidItem {
             root.gpu0PowerLimitWatts = Number(entry.power_limit_w) || 0
             root.gpu0ProcessCount = Number(entry.process_count) || 0
             root.topGpu0Processes = root.gpuProcessRows(entry)
-            root.markMetricFresh("gpu0Telemetry")
             return
         }
         root.gpu1Available = available
@@ -533,7 +378,6 @@ PlasmoidItem {
         root.gpu1PowerLimitWatts = Number(entry.power_limit_w) || 0
         root.gpu1ProcessCount = Number(entry.process_count) || 0
         root.topGpu1Processes = root.gpuProcessRows(entry)
-        root.markMetricFresh("gpu1Telemetry")
     }
     function diskUsedBytes() { return root.diskUsedBytesDf }
     function diskPercent() { return root.diskPercentDf }
@@ -635,30 +479,7 @@ PlasmoidItem {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 0
-                    Text { id: headerClock; text: root.currentTime; color: root.ink; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 18; font.letterSpacing: 1 }
-                }
-                Rectangle {
-                    id: telemetryStatus
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: true
-                    radius: 9
-                    border.width: 1
-                    border.color: root.statusTone()
-                    color: root.statusBackground()
-                    implicitHeight: 24
-                    implicitWidth: Math.min(280, parent.width * 0.42)
-                    Text {
-                        anchors.centerIn: parent
-                        width: parent.width - 28
-                        horizontalAlignment: Text.AlignHCenter
-                        text: root.statusLabel() + root.dataStatusAgeText()
-                        color: root.statusTone()
-                        font.family: "DejaVu Sans Mono"
-                        font.bold: true
-                        font.pixelSize: 15
-                        elide: Text.ElideRight
-                    }
+                    Text { id: headerClock; text: root.currentTime; color: root.ink; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 45; font.letterSpacing: 2 }
                 }
             }
 
@@ -678,13 +499,12 @@ PlasmoidItem {
                         width: parent.width
                         height: 38
                         Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "AI SERVICES"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
-                        Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.aiServicesSummary(); color: root.aiServicesSummaryTone(); font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                     }
                     Row {
                         width: parent.width
                         spacing: 10
                         Rectangle {
-                            width: (parent.width - 20) / 3
+                            width: (parent.width - 10) / 2
                             height: 44
                             radius: 12
                             color: Qt.rgba(0, 0, 0, 0.22)
@@ -699,7 +519,7 @@ PlasmoidItem {
                             }
                         }
                         Rectangle {
-                            width: (parent.width - 20) / 3
+                            width: (parent.width - 10) / 2
                             height: 44
                             radius: 12
                             color: Qt.rgba(0, 0, 0, 0.22)
@@ -711,34 +531,6 @@ PlasmoidItem {
                                 spacing: 2
                                 Text { text: "HINDSIGHT"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                                 Text { text: root.serviceStateLabel(root.hindsightState); color: root.serviceToneColor(root.hindsightState); font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
-                            }
-                        }
-                        Rectangle {
-                            width: (parent.width - 20) / 3
-                            height: 44
-                            radius: 12
-                            color: Qt.rgba(0, 0, 0, 0.22)
-                            border.width: 1
-                            border.color: root.serviceBorderColor(root.localLlmState)
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 2
-                                Text { text: "QWEN 3.8"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                                PlasmaCore.ToolTipArea {
-                                    width: parent.width
-                                    height: 18
-                                    mainText: root.localLlmStateLabel()
-                                    Text {
-                                        anchors.fill: parent
-                                        text: root.localLlmStateLabel()
-                                        color: root.serviceToneColor(root.localLlmState)
-                                        font.family: "DejaVu Sans Mono"
-                                        font.pixelSize: 15
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                    }
-                                }
                             }
                         }
                     }
@@ -1365,7 +1157,6 @@ PlasmoidItem {
                 root.ramHistory = root.push(root.ramHistory, root.ram)
                 root.downHistory = root.push(root.downHistory, root.down)
                 root.upHistory = root.push(root.upHistory, root.up)
-                root.updateDataStatus(Date.now())
                 computeGraph.requestPaint()
                 downGraph.requestPaint()
                 upGraph.requestPaint()
@@ -1401,9 +1192,6 @@ PlasmoidItem {
             root.diskAvailBytesDf = avail
             root.diskTotalBytes = total
             root.diskPercentDf = percent
-            root.markMetricFresh("diskUsed")
-            root.markMetricFresh("diskTotal")
-            root.markMetricFresh("diskPercent")
         }
     }
 
@@ -1537,8 +1325,6 @@ PlasmoidItem {
             if (!payload) return
             root.hermesGatewayState = (payload.gateway || "UNKNOWN").toUpperCase()
             root.hindsightState = (payload.hindsight || "UNKNOWN").toUpperCase()
-            root.localLlmState = (payload.local_llm || "UNKNOWN").toUpperCase()
-            root.localLlmModelName = payload.local_llm_model || ""
             if (Number(payload.openai_oauth_available) >= 0) root.openAiActiveKeys = Number(payload.openai_oauth_available)
             if (Number(payload.openai_oauth_total) >= 0) root.openAiTotalKeys = Number(payload.openai_oauth_total)
             // An unavailable aggregator means the dedicated helper never
@@ -1708,7 +1494,6 @@ PlasmoidItem {
             root.previousRxBytes = rxBytes
             root.previousTxBytes = txBytes
             root.previousNetworkSampleMs = now
-            root.markMetricFresh("network")
         }
     }
 
@@ -1724,7 +1509,6 @@ PlasmoidItem {
         netDetectSource.connectSource(netDetectSource.command)
         diskUsageSource.connectSource(diskUsageSource.command)
         root.currentTime = root.refreshClock()
-        root.lastRefresh = root.refreshClock()
     }
 
     Timer {
@@ -1820,14 +1604,14 @@ PlasmoidItem {
     }
 
     // Static ksystemstats bindings for CPU, memory, disk and uptime.
-    Sensors.Sensor { sensorId: "cpu/all/usage"; enabled: true; onValueChanged: { root.cpu = root.clamp(parseFloat(value)); root.markMetricFresh("cpuUsage") } }
-    Sensors.Sensor { sensorId: "cpu/all/averageTemperature"; enabled: true; onValueChanged: { root.cpuTemp = parseFloat(value) || root.cpuTemp; root.markMetricFresh("cpuTemperature") } }
+    Sensors.Sensor { sensorId: "cpu/all/usage"; enabled: true; onValueChanged: root.cpu = root.clamp(parseFloat(value)) }
+    Sensors.Sensor { sensorId: "cpu/all/averageTemperature"; enabled: true; onValueChanged: root.cpuTemp = parseFloat(value) || root.cpuTemp }
 
-    Sensors.Sensor { sensorId: "memory/physical/usedPercent"; enabled: true; onValueChanged: { root.ram = root.clamp(parseFloat(value)); root.markMetricFresh("memoryPercent") } }
-    Sensors.Sensor { sensorId: "memory/physical/used"; enabled: true; onValueChanged: { root.ramUsedBytes = parseFloat(value) || 0; root.markMetricFresh("memoryUsed") } }
-    Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; onValueChanged: { root.ramTotalBytes = parseFloat(value) || 0; root.markMetricFresh("memoryTotal") } }
-    Sensors.Sensor { sensorId: "os/system/uptime"; enabled: true; onValueChanged: { root.uptimeSeconds = parseFloat(value) || 0; root.markMetricFresh("uptime") } }
-    Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage1"; enabled: true; onValueChanged: { root.loadAverage = parseFloat(value) || 0; root.markMetricFresh("loadAverage") } }
-    Sensors.Sensor { sensorId: "disk/all/total"; enabled: true; onValueChanged: { root.diskTotalBytes = parseFloat(value) || 0; root.markMetricFresh("diskTotal") } }
+    Sensors.Sensor { sensorId: "memory/physical/usedPercent"; enabled: true; onValueChanged: root.ram = root.clamp(parseFloat(value)) }
+    Sensors.Sensor { sensorId: "memory/physical/used"; enabled: true; onValueChanged: root.ramUsedBytes = parseFloat(value) || 0 }
+    Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; onValueChanged: root.ramTotalBytes = parseFloat(value) || 0 }
+    Sensors.Sensor { sensorId: "os/system/uptime"; enabled: true; onValueChanged: root.uptimeSeconds = parseFloat(value) || 0 }
+    Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage1"; enabled: true; onValueChanged: root.loadAverage = parseFloat(value) || 0 }
+    Sensors.Sensor { sensorId: "disk/all/total"; enabled: true; onValueChanged: root.diskTotalBytes = parseFloat(value) || 0 }
     Sensors.Sensor { sensorId: "cpu/all/coreCount"; enabled: true; onValueChanged: { root.cpuCoreCount = Math.round(parseFloat(value)) || 0 } }
 }

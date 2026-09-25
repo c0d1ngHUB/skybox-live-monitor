@@ -63,21 +63,6 @@ def hindsight_status() -> ServiceStatus:
     return ServiceStatus("error")
 
 
-def local_llm_status() -> tuple[ServiceStatus, str]:
-    health = fetch_json("http://127.0.0.1:11435/health")
-    if not isinstance(health, dict) or str(health.get("status", "")).lower() not in {"ok", "healthy"}:
-        return ServiceStatus("error"), ""
-
-    catalog = fetch_json("http://127.0.0.1:11435/v1/models")
-    model_name = ""
-    if isinstance(catalog, dict):
-        models = catalog.get("models") or catalog.get("data") or []
-        first = models[0] if isinstance(models, list) and models else None
-        if isinstance(first, dict):
-            model_name = str(first.get("name") or first.get("model") or first.get("id") or "").strip()
-    return ServiceStatus("healthy"), model_name
-
-
 def openai_oauth_availability() -> tuple[int, int]:
     """Read privacy-safe aggregate availability from the dedicated helper."""
     helper = Path(__file__).with_name("hermes_openai_keys.py")
@@ -93,13 +78,10 @@ def openai_oauth_availability() -> tuple[int, int]:
 def main() -> int:
     gateway = hermes_gateway_status()
     hindsight = hindsight_status()
-    local_llm, model_name = local_llm_status()
     openai_available, openai_total = openai_oauth_availability()
     payload = {
         "gateway": gateway.state,
         "hindsight": hindsight.state,
-        "local_llm": local_llm.state,
-        "local_llm_model": model_name,
         "openai_oauth_available": openai_available,
         "openai_oauth_total": openai_total,
     }
