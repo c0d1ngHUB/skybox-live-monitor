@@ -16,53 +16,6 @@ sys.modules[spec.name] = ai
 spec.loader.exec_module(ai)
 
 
-def test_local_llm_status_requires_healthy_endpoint_and_reads_model_name():
-    original = ai.fetch_json
-    ai.fetch_json = lambda url: (
-        {"status": "ok"} if url.endswith("/health")
-        else {"models": [{"name": "qwen3.8-27b-local"}]}
-    )
-    try:
-        status, model = ai.local_llm_status()
-    finally:
-        ai.fetch_json = original
-    assert status.state == "healthy"
-    assert model == "qwen3.8-27b-local"
-
-
-def test_local_llm_status_accepts_openai_data_catalog_shape():
-    original = ai.fetch_json
-    ai.fetch_json = lambda url: {"status": "healthy"} if url.endswith("/health") else {"data": [{"id": "qwen-local"}]}
-    try:
-        status, model = ai.local_llm_status()
-    finally:
-        ai.fetch_json = original
-    assert status.state == "healthy"
-    assert model == "qwen-local"
-
-
-def test_local_llm_status_is_error_when_health_is_unreachable():
-    original = ai.fetch_json
-    ai.fetch_json = lambda url: None
-    try:
-        status, model = ai.local_llm_status()
-    finally:
-        ai.fetch_json = original
-    assert status.state == "error"
-    assert model == ""
-
-
-def test_local_llm_status_stays_healthy_when_model_catalog_is_unavailable():
-    original = ai.fetch_json
-    ai.fetch_json = lambda url: {"status": "ok"} if url.endswith("/health") else None
-    try:
-        status, model = ai.local_llm_status()
-    finally:
-        ai.fetch_json = original
-    assert status.state == "healthy"
-    assert model == ""
-
-
 def test_fetch_json_bypasses_proxy_environment(monkeypatch):
     target_requests: list[str] = []
     proxy_requests: list[str] = []

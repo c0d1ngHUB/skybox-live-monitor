@@ -150,9 +150,9 @@ class MonitorBehaviorTests(unittest.TestCase):
             "m.staleAfterMsFor('diskTotal', 15000),"
             "m.staleAfterMsFor('cpuUsage', 15000),"
             # 25 s after the last disk read: healthy, not stale.
-            "m.staleDomains(25000,{cpuUsage:25000,cpuTemperature:25000,gpu0Telemetry:25000,gpu1Telemetry:25000,memoryPercent:25000,memoryUsed:25000,memoryTotal:25000,network:25000,diskPercent:25000,diskUsed:25000,diskTotal:25000,uptime:25000,loadAverage:25000},15000),"
+            "m.staleDomains(25000,{cpuUsage:25000,cpuTemperature:25000,gpu0Telemetry:25000,gpu1Telemetry:25000,gpu2Telemetry:25000,memoryPercent:25000,memoryUsed:25000,memoryTotal:25000,network:25000,diskPercent:25000,diskUsed:25000,diskTotal:25000,uptime:25000,loadAverage:25000},15000),"
             # 100 s after the last disk read: stale again.
-            "m.staleDomains(100000,{cpuUsage:100000,cpuTemperature:100000,gpu0Telemetry:100000,gpu1Telemetry:100000,memoryPercent:100000,memoryUsed:100000,memoryTotal:100000,network:100000,diskPercent:0,diskUsed:0,diskTotal:0,uptime:100000,loadAverage:100000},15000)"
+            "m.staleDomains(100000,{cpuUsage:100000,cpuTemperature:100000,gpu0Telemetry:100000,gpu1Telemetry:100000,gpu2Telemetry:100000,memoryPercent:100000,memoryUsed:100000,memoryTotal:100000,network:100000,diskPercent:0,diskUsed:0,diskTotal:0,uptime:100000,loadAverage:100000},15000)"
             "]));"
         )
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
@@ -173,10 +173,23 @@ class MonitorBehaviorTests(unittest.TestCase):
     def test_freshness_reports_each_stale_domain(self):
         script = (
             f"const m=require({json.dumps(str(LOGIC))});"
-            "console.log(JSON.stringify(m.staleDomains(20000,{cpuUsage:19000,cpuTemperature:19000,gpu0Telemetry:19000,gpu1Telemetry:0,memoryPercent:18000,memoryUsed:18000,memoryTotal:18000,network:10000,diskPercent:19500,diskUsed:19500,diskTotal:19500,uptime:19000,loadAverage:19000},6000)));"
+            "console.log(JSON.stringify(m.staleDomains(20000,{cpuUsage:19000,cpuTemperature:19000,gpu0Telemetry:19000,gpu1Telemetry:0,gpu2Telemetry:19000,memoryPercent:18000,memoryUsed:18000,memoryTotal:18000,network:10000,diskPercent:19500,diskUsed:19500,diskTotal:19500,uptime:19000,loadAverage:19000},6000)));"
         )
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout), ["GPU 1", "NETWORK"])
+
+    def test_third_gpu_is_a_staleness_domain_of_its_own(self):
+        """GPU 2 must be tracked separately, not folded into GPU 1.
+
+        A missing stamp on GPU 2 has to be reported as GPU 2 so a dead third
+        card cannot hide behind a healthy second one.
+        """
+        script = (
+            f"const m=require({json.dumps(str(LOGIC))});"
+            "console.log(JSON.stringify(m.staleDomains(20000,{cpuUsage:19000,cpuTemperature:19000,gpu0Telemetry:19000,gpu1Telemetry:19000,gpu2Telemetry:0,memoryPercent:18000,memoryUsed:18000,memoryTotal:18000,network:19000,diskPercent:19500,diskUsed:19500,diskTotal:19500,uptime:19000,loadAverage:19000},6000)));"
+        )
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), ["GPU 2"])
 
     def test_cpu_process_rates_use_per_pid_cpu_time_deltas(self):
         script = (
@@ -319,7 +332,6 @@ class MonitorBehaviorTests(unittest.TestCase):
         text = QML.read_text()
         self.assertIn("id: networkCountersSource", text)
         self.assertIn("network_counters.sh", text)
-        self.assertIn('root.markMetricFresh("network")', text)
         self.assertNotIn('sensorId: "network/" + root.netIf', text)
 
 
