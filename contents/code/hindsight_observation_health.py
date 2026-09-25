@@ -36,11 +36,19 @@ API = os.environ.get("HINDSIGHT_API_URL", "http://127.0.0.1:9177").rstrip("/")
 BANK = os.environ.get("HINDSIGHT_HEALTH_BANK", "hermes")
 TIMEOUT = 10.0
 PAGE = 5000
+SCOPES_PAGE = 1000
 
 # Frozen reference values, measured 2026-09-24 23:1x on bank "hermes" (2981 nodes,
 # 1009 observations) immediately before the observation_scopes switch.
 BASELINE_TAGLESS_PCT = 1.7
 BASELINE_SINGLE_PROOF_PCT = 62.4
+
+# Share of untagged rows among the observations created after the switch, measured
+# 2026-09-25 07:45 -- i.e. while ONLY the plugin path carried observation_scopes.
+# The sweep path wrote "combined" until 2026-09-25 08:06, so this is the plateau a
+# working switch has to climb above. It is the sensitive signal: the all-time
+# percentages move ~1.3 points per 20 new untagged rows and cannot show the fix.
+BASELINE_COHORT_TAGLESS_PCT = 0.6
 
 # The retain switch: ~/.hermes/hindsight/config.json gained "observation_scopes":
 # "shared" and the gateway restarted at 2026-09-24 23:19:49 CEST.
@@ -89,6 +97,49 @@ def collect(api: str, bank: str) -> list[dict] | None:
     return items
 
 
+def collect_scope_stats(api: str, bank: str) -> dict | None:
+    """Count observation-scope tag sets: how many exist and how many are untagged.
+
+    This is the signal that actually moves when ``observation_scopes="shared"``
+    starts working. The all-time percentages are diluted by every row ever
+    written, so they hide the effect; the scope count responds immediately.
+
+    Returns ``None`` when the API is unreachable, and ``{"scopes": None}`` when
+    the endpoint exists but does not report a total -- the caller must then show
+    ``total`` but no untagged share rather than inventing one.
+    """
+    scopes: list[dict] = []
+    offset = 0
+    while True:
+        page = fetch_json(f"{api}/v1/default/banks/{bank}/observations/scopes?limit={SCOPES_PAGE}&offset={offset}")
+        if not isinstance(page, dict):
+            return None
+        batch = page.get("scopes")
+        if not isinstance(batch, list):
+            return {"scopes": None}
+        scopes.extend(entry for entry in batch if isinstance(entry, dict))
+        if len(batch) < SCOPES_PAGE:
+            break
+        offset += SCOPES_PAGE
+        if offset > 100000:  # runaway guard
+            break
+
+    total = None
+    reported = page.get("total")
+    if isinstance(reported, int):
+        total = reported
+    elif scopes:
+        total = len(scopes)
+
+    untagged = [entry for entry in scopes if not (entry.get("tags") or [])]
+    untagged_count = sum(int(entry.get("count") or 0) for entry in untagged)
+    return {
+        "scope_total": total,
+        "untagged_scopes": len(untagged),
+        "untagged_observations": untagged_count,
+    }
+
+
 def summarize(items: list[dict]) -> dict:
     observations = [entry for entry in items if str(entry.get("fact_type") or "") == "observation"]
     total = len(observations)
@@ -107,6 +158,11 @@ def summarize(items: list[dict]) -> dict:
     def pct(part: int, whole: int) -> float | None:
         return round(100.0 * part / whole, 1) if whole else None
 
+    # The cohort share is the sensitive signal: it is measured only over rows
+    # created after the switch, so a fix in a retain path shows up here within
+    # one consolidation cycle instead of being diluted by 1500 legacy rows.
+    cohort_tagless_pct = pct(fresh_tagless, len(fresh))
+
     payload = {
         "observations": total,
         "tagless": tagless,
@@ -115,9 +171,10 @@ def summarize(items: list[dict]) -> dict:
         "single_proof_pct": pct(single, total),
         "since_switch": len(fresh),
         "since_switch_tagless": fresh_tagless,
-        "since_switch_tagless_pct": pct(fresh_tagless, len(fresh)),
+        "since_switch_tagless_pct": cohort_tagless_pct,
         "baseline_tagless_pct": BASELINE_TAGLESS_PCT,
         "baseline_single_proof_pct": BASELINE_SINGLE_PROOF_PCT,
+        "baseline_cohort_tagless_pct": BASELINE_COHORT_TAGLESS_PCT,
         "migration_at": MIGRATION_AT,
     }
     return payload
@@ -132,6 +189,15 @@ def main() -> int:
         return 1
     payload = summarize(items)
     payload["bank"] = BANK
+
+    # Scope stats are the sensitive signal; they are optional so a broken scope
+    # endpoint degrades the card detail instead of blanking it entirely.
+    scope_stats = collect_scope_stats(API, BANK)
+    if scope_stats is not None:
+        payload.update(scope_stats)
+    elif scope_stats is None:
+        payload["scope_total"] = None
+
     print(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
     return 0
 

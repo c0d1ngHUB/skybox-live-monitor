@@ -70,13 +70,20 @@ PlasmoidItem {
     property string hindsightState: "UNKNOWN"
     // Observation health of the Hindsight bank, read by
     // contents/code/hindsight_observation_health.py. Guards the
-    // observation_scopes="shared" switch: TAGS 0 shows the share of observations
-    // that reached the untagged scope (baseline 1.7%), PROOF 1 the share backed
-    // by a single source fact and therefore never merged (baseline 62.4%).
+    // observation_scopes="shared" switch. The card leads with the SCOPE
+    // distribution: how many observation scopes exist and how many
+    // observations made it into the shared, untagged one. "NEU" is the share of
+    // rows created AFTER the switch that are untagged -- that is the signal that
+    // actually reacts to a fix in a retain path, because the all-time TAGS-0 and
+    // PROOF-1 percentages are diluted by every legacy row.
     property real obsTaglessPct: -1
     property real obsSingleProofPct: -1
     property int obsCount: 0
     property int obsSinceSwitch: 0
+    property int obsScopeTotal: -1
+    property int obsUntaggedObservations: -1
+    property real obsCohortTaglessPct: -1
+    property real obsBaselineCohortTaglessPct: 0.6
     property bool obsHealthUnavailable: true
 
     // df(1) view, read by contents/code/disk_usage.py. The Plasma sensors cannot
@@ -300,9 +307,14 @@ PlasmoidItem {
     function openAiOauthBorderColor() { return root.serviceBorderColor(root.openAiOauthState()) }
 
     // --- Hindsight observation health -------------------------------------
-    // "TAGS 0" = share of observations with no tags (the untagged scope that
-    // observation_scopes="shared" writes into). It only rises as NEW observations
-    // consolidate, because old rows keep their tags for good.
+    // "SCOPE n" = how many observation scopes the bank holds (frozen plateau
+    // 147/148 while the switch was blind on the sweep path). "SHARED x" = how
+    // many observations actually reached the shared untagged scope; it grows only
+    // as NEW observations consolidate, because old rows keep their tags for good.
+    // "NEU y%" is the sensitive signal: the untagged share among rows created
+    // after the switch. The old "TAGS 0"/"PROOF 1" all-time percentages moved
+    // ~1.3 points per 20 new untagged rows, so they could not show the fix --
+    // they stay in the tooltip as context.
     function fmtPct1(value) {
         if (value === null || value === undefined || value < 0 || !isFinite(value)) return "--"
         return (Math.round(value * 10) / 10).toFixed(1) + "%"
@@ -310,27 +322,40 @@ PlasmoidItem {
 
     function obsHealthLabel() {
         if (root.obsHealthUnavailable) return "? OBS"
-        return "TAGS 0 " + root.fmtPct1(root.obsTaglessPct) + " · PROOF 1 " + root.fmtPct1(root.obsSingleProofPct)
+        if (root.obsScopeTotal < 0) return "SCOPE ? · SHARED " + root.obsUntaggedObservations
+        return "SCOPE " + root.obsScopeTotal + " · SHARED " + root.obsUntaggedObservations
+            + " · NEU " + root.fmtPct1(root.obsCohortTaglessPct)
     }
 
-    // Baseline-relative signal: tagless above baseline and single-proof below it
-    // is the direction the switch is supposed to move both numbers.
+    // Colour rule: the scope count must no longer climb while the untagged share
+    // among NEW rows is above the pre-fix plateau. Before the sweep fix the
+    // plateau sat at 0.6%, so anything above it means the switch now reaches a
+    // path it previously missed.
+    function obsHealthOk() {
+        if (root.obsHealthUnavailable) return false
+        if (root.obsCohortTaglessPct < 0) return false
+        return root.obsCohortTaglessPct > root.obsBaselineCohortTaglessPct
+    }
+
     function obsHealthTone() {
         if (root.obsHealthUnavailable) return root.muted
-        if (root.obsTaglessPct > 1.7 && root.obsSingleProofPct < 62.4) return root.cyan
-        return root.warning
+        return root.obsHealthOk() ? root.cyan : root.warning
     }
 
     function obsHealthBorderColor() {
         if (root.obsHealthUnavailable) return root.muted
-        if (root.obsTaglessPct > 1.7 && root.obsSingleProofPct < 62.4) return root.cyan
-        return root.warning
+        return root.obsHealthOk() ? root.cyan : root.warning
     }
 
     function obsHealthDetail() {
-        var base = root.obsCount + " OBS · " + root.obsSinceSwitch + " SEIT SWITCH"
-        if (root.obsHealthUnavailable) return base + " · API NICHT ERREICHBAR"
-        return base + " · BASIS " + root.fmtPct1(1.7) + " / " + root.fmtPct1(62.4)
+        if (root.obsHealthUnavailable) return "API NICHT ERREICHBAR"
+        var parts = []
+        parts.push(root.obsScopeTotal + " SCOPES (" + root.obsUntaggedObservations + " OBS IM SHARED SCOPE)")
+        parts.push("NEU SEIT SWITCH " + root.obsSinceSwitch + " / DAVON OHNE TAGS "
+            + root.obsCohortTaglessPct + "% (PLATEAU " + root.obsBaselineCohortTaglessPct + "%)")
+        parts.push("GESAMT " + root.obsCount + " OBS · TAGS 0 " + root.obsTaglessPct
+            + "% (BASIS 1.7) · PROOF 1 " + root.obsSingleProofPct + "% (BASIS 62.4)")
+        return parts.join("\n")
     }
     function gpuPowerText(drawValue, limitValue) {
         var draw = Number(drawValue)
@@ -1234,8 +1259,10 @@ PlasmoidItem {
     }
 
     // Hindsight observation health: guards the observation_scopes="shared"
-    // switch by reporting the tagless share (baseline 1.7%) and the
-    // single-proof share (baseline 62.4%) of the bank's observations.
+    // switch by reporting the SCOPE distribution (how many observation scopes
+    // exist, how many observations reached the shared untagged one) plus the
+    // untagged share among rows created after the switch. The all-time
+    // TAGS-0/PROOF-1 percentages stay in the tooltip as context only.
     PlasmaSupport.DataSource {
         id: obsHealthSource
         engine: "executable"
@@ -1256,6 +1283,9 @@ PlasmoidItem {
                 root.obsHealthUnavailable = true
                 root.obsTaglessPct = -1
                 root.obsSingleProofPct = -1
+                root.obsScopeTotal = -1
+                root.obsUntaggedObservations = -1
+                root.obsCohortTaglessPct = -1
                 return
             }
             var tagless = Number(payload.tagless_pct)
@@ -1264,6 +1294,9 @@ PlasmoidItem {
                 root.obsHealthUnavailable = true
                 root.obsTaglessPct = -1
                 root.obsSingleProofPct = -1
+                root.obsScopeTotal = -1
+                root.obsUntaggedObservations = -1
+                root.obsCohortTaglessPct = -1
                 return
             }
             root.obsHealthUnavailable = false
@@ -1271,6 +1304,16 @@ PlasmoidItem {
             root.obsSingleProofPct = single
             root.obsCount = Number(payload.observations) || 0
             root.obsSinceSwitch = Number(payload.since_switch) || 0
+            // Null means "field absent", which must not read as 0 on the card.
+            function numOr(value, fallback) {
+                if (value === null || value === undefined) return fallback
+                var parsed = Number(value)
+                return isNaN(parsed) ? fallback : parsed
+            }
+            root.obsScopeTotal = numOr(payload.scope_total, -1)
+            root.obsUntaggedObservations = numOr(payload.untagged_observations, -1)
+            root.obsCohortTaglessPct = numOr(payload.since_switch_tagless_pct, -1)
+            root.obsBaselineCohortTaglessPct = numOr(payload.baseline_cohort_tagless_pct, 0.6)
         }
     }
 

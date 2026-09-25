@@ -635,6 +635,33 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'root.obsHealthTone()' in text
 
 
+def test_obs_card_leads_with_the_scope_distribution():
+    text = source()
+    # The all-time percentages cannot show the sweep fix, so the card must lead
+    # with the scope count, the shared-scope rows and the post-switch cohort.
+    assert 'SCOPE " + root.obsScopeTotal' in text
+    assert '" · SHARED " + root.obsUntaggedObservations' in text
+    assert '" · NEU " + root.fmtPct1(root.obsCohortTaglessPct)' in text
+    # The cohort is compared against the pre-fix plateau, not the 2026-09-24 baseline.
+    assert 'root.obsCohortTaglessPct > root.obsBaselineCohortTaglessPct' in text
+    # Absent fields must not read as zero.
+    assert 'payload.scope_total, -1' in text
+    assert 'payload.since_switch_tagless_pct, -1' in text
+    # No stale values on screen when the API is unreachable.
+    assert text.count('root.obsScopeTotal = -1') >= 2
+    assert text.count('root.obsCohortTaglessPct = -1') >= 2
+
+
+def test_obs_card_keeps_the_all_time_figures_in_the_tooltip_only():
+    text = source()
+    detail = text[text.index('function obsHealthDetail()'):text.index('function gpuPowerText')]
+    assert 'TAGS 0 ' in detail and 'PROOF 1 ' in detail
+    # They were the headline before; they must not be in the card label any more.
+    label = text[text.index('function obsHealthLabel()'):text.index('function obsHealthOk()')]
+    assert 'TAGS 0' not in label and 'PROOF 1' not in label
+    assert 'SCOPE ' in label
+
+
 def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():
     text = source()
     assert 'function gpuTempColor(value, normalColor)' in text

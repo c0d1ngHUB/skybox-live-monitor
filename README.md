@@ -17,6 +17,12 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 - Disk usage in `df` semantics, including the filesystem reserve
 - NVIDIA VRAM telemetry via `nvidia-smi`
 - Longest Hermes run across the default and named profiles
+- Hindsight observation health: the card leads with the **scope distribution**
+  (how many observation scopes exist, how many observations reached the shared
+  untagged one) and the untagged share among rows created after the
+  `observation_scopes="shared"` switch. The all-time tagless/single-proof
+  percentages stay in the tooltip: they are diluted by every legacy row and
+  moved only ~1.3 points per 20 new untagged rows, so they cannot show a fix.
 - No telemetry, no external network requests, and no credentials
 
 ## Requirements
