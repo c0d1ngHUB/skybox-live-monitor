@@ -106,6 +106,20 @@ PlasmoidItem {
     // Logical processors, for labelling per-process CPU percentages.
     property int cpuCoreCount: 0
     property string currentTime: refreshClock()
+    // Fast sensors only. Service health and disk are on slower, separate cadences.
+    property double telemetryNowMs: Date.now()
+    property double lastCpuTelemetryMs: 0
+    property double lastGpuTelemetryMs: 0
+    property double lastNetworkTelemetryMs: 0
+    function telemetryAge() {
+        return MonitorLogic.telemetryAgeSeconds(root.telemetryNowMs, root.lastCpuTelemetryMs,
+                                                root.lastGpuTelemetryMs, root.lastNetworkTelemetryMs)
+    }
+    function telemetryAgeLabel() {
+        var age = root.telemetryAge()
+        if (age === null) return "ABFRAGEN: WARTEN"
+        return age > 15 ? "ABFRAGEN: ALT " + age + "S" : "ABFRAGEN: VOR " + age + "S"
+    }
     // Four largest CPU, RAM, and GPU consumers, sampled every five seconds.
     property var topCpuProcesses: []
     property var previousCpuSamples: ({})
@@ -351,9 +365,9 @@ PlasmoidItem {
 
     function obsHealthLabel() {
         if (root.obsHealthUnavailable) return "? OBS"
-        if (root.obsScopeTotal < 0) return "SCOPE ? · SHARED " + root.obsUntaggedObservations
-        return "SCOPE " + root.obsScopeTotal + " · SHARED " + root.obsUntaggedObservations
-            + " · NEU " + root.fmtPct1(root.obsCohortTaglessPct)
+        if (root.obsScopeTotal < 0) return "BEREICHE ? · GETEILT " + root.obsUntaggedObservations
+        return "BEREICHE " + root.obsScopeTotal + " · GETEILT " + root.obsUntaggedObservations
+            + " · NEU OHNE TAGS " + root.fmtPct1(root.obsCohortTaglessPct)
     }
 
     // Colour rule: the scope count must no longer climb while the untagged share
@@ -479,6 +493,10 @@ PlasmoidItem {
         var suffix = reserved > 1024 * 1024 * 1024 ? " (+" + root.fmtDisk(reserved) + " RES)" : ""
         return "USED " + root.fmtDisk(root.diskUsedBytes()) + " · FREE " + root.fmtDisk(root.diskAvailBytesDf) + suffix
     }
+    function diskReserveDetail() {
+        return "Belegt: " + root.fmtDisk(root.diskUsedBytes()) + "\nVerfügbar: " + root.fmtDisk(root.diskAvailBytesDf)
+            + "\nVom Dateisystem reserviert (nicht frei verfügbar): " + root.fmtDisk(root.diskReservedBytes())
+    }
 
     function usageColor(value, normalColor) {
         if (value >= 95) return root.critical
@@ -489,13 +507,17 @@ PlasmoidItem {
         return (name || "PROCESS").split("/").pop()
     }
     function compactProcessValue(metricLabel, value) {
-        // Explicit units are worth the few pixels they use in process rows.
         var text = String(value || "")
-        // Large RAM values are shorter and easier to compare in GiB, while
-        // smaller values retain MiB precision.
-        if (metricLabel === "RAM" && text.indexOf(" MiB") > 0) {
-            var mib = parseFloat(text)
-            if (isFinite(mib) && mib >= 1024) return (mib / 1024).toFixed(1) + " GiB"
+        // Narrow cards reserve the process column for names. Hover retains the
+        // exact binary unit and precision; G/M are display-only abbreviations.
+        if (metricLabel === "RAM" || metricLabel === "VRAM") {
+            var number = parseFloat(text)
+            if (!isFinite(number)) return text
+            if (text.endsWith(" GiB")) return number.toFixed(1) + "G"
+            if (text.endsWith(" MiB")) {
+                if (metricLabel === "RAM" && number >= 1024) return (number / 1024).toFixed(1) + "G"
+                return Math.round(number) + "M"
+            }
         }
         return text
     }
@@ -569,6 +591,18 @@ PlasmoidItem {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 0
                     Text { id: headerClock; text: root.currentTime; color: root.ink; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 45; font.letterSpacing: 2 }
+                }
+                PlasmaCore.ToolTipArea {
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                    width: telemetryLabel.implicitWidth; height: 24
+                    mainText: "Älteste erfolgreiche Abfrage von CPU-Prozessen, GPU und Netzwerk. Dienste, übrige Sensoren und Datenträger sind nicht enthalten."
+                    Text {
+                        id: telemetryLabel
+                        anchors.centerIn: parent
+                        text: root.telemetryAgeLabel()
+                        color: root.telemetryAge() === null || root.telemetryAge() > 15 ? root.warning : root.cyan
+                        font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true
+                    }
                 }
             }
 
@@ -832,7 +866,7 @@ PlasmoidItem {
                             // ~274 px, so the KPI column and its gap shrink with
                             // the card; the two-column literals clipped the
                             // process value column away and let POWER elide.
-                            readonly property int kpiColumn: Math.max(60, Math.round(parent.width * 0.42))
+                            readonly property int kpiColumn: Math.max(60, Math.round(parent.width * 0.35))
                             readonly property int kpiGap: Math.max(8, Math.round(parent.width * 0.045))
                             Column {
                                 id: metricKpi
@@ -891,15 +925,20 @@ PlasmoidItem {
                                         font.bold: true
                                     }
                                 }
-                                Text {
+                                PlasmaCore.ToolTipArea {
                                     visible: modelData.kind === "gpu" && !!modelData.powerText
                                     width: parent.width - 4
-                                    text: modelData.powerText || ""
-                                    color: root.muted
-                                    font.family: "DejaVu Sans Mono"
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    elide: Text.ElideRight
+                                    height: 17
+                                    mainText: modelData.powerText || ""
+                                    Text {
+                                        anchors.fill: parent
+                                        text: (modelData.powerText || "").replace("POWER ", "")
+                                        color: root.muted
+                                        font.family: "DejaVu Sans Mono"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
                                 }
 
                                 // --- CPU card: utilization as the large metric + temperature secondary ---
@@ -956,14 +995,21 @@ PlasmoidItem {
                                 property string heading: metricKind === "cpu" ? root.cpuProcessHeading() : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")
                                 // A fifth GPU workload is capped, so say how many exist.
                                 property string headingSuffix: metricKind === "gpu" && modelData.processCount > processDetails.processes.length ? " (+" + (modelData.processCount - processDetails.processes.length) + ")" : ""
-                                Text { width: parent.width; text: processDetails.heading + processDetails.headingSuffix; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true; elide: Text.ElideRight }
+                                PlasmaCore.ToolTipArea {
+                                    width: parent.width; height: 18
+                                    mainText: processDetails.metricKind === "cpu"
+                                        ? "Pro Prozess: Anteil eines CPU-Threads. CPU-Gesamtwert: Durchschnitt über " + root.cpuCoreCount + " Threads."
+                                        : processDetails.metricKind === "gpu" ? "Videospeicher pro Prozess (M = MiB, G = GiB)" : "Arbeitsspeicher pro Prozess (M = MiB, G = GiB)"
+                                    Text { anchors.fill: parent; text: processDetails.heading + processDetails.headingSuffix; color: modelData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true; elide: Text.ElideRight }
+                                }
                                 Repeater {
                                     model: parent.processes
                                     delegate: Item {
                                         width: parent.width
                                         height: 18
                                         property var process: modelData
-                                        property string displayValue: root.compactProcessValue(processDetails.metricKind.toUpperCase(), processDetails.metricKind === "cpu" ? process.cpu + "%" : (processDetails.metricKind === "ram" ? process.ram : process.gpu))
+                                        property string fullValue: processDetails.metricKind === "cpu" ? process.cpu + "%" : (processDetails.metricKind === "ram" ? process.ram : process.gpu)
+                                        property string displayValue: root.compactProcessValue(processDetails.metricKind === "gpu" ? "VRAM" : processDetails.metricKind.toUpperCase(), fullValue)
                                         PlasmaCore.ToolTipArea {
                                             anchors.left: parent.left
                                             anchors.right: processValue.left
@@ -978,14 +1024,21 @@ PlasmoidItem {
                                                 elide: Text.ElideRight
                                             }
                                         }
-                                        Text {
+                                        PlasmaCore.ToolTipArea {
                                             id: processValue
                                             anchors.right: parent.right
-                                            text: parent.displayValue
-                                            color: index === 0 ? root.ink : root.muted
-                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 13
-                                            font.bold: true
-                                            horizontalAlignment: Text.AlignRight
+                                            width: valueText.implicitWidth
+                                            height: parent.height
+                                            mainText: parent.fullValue
+                                            Text {
+                                                id: valueText
+                                                anchors.right: parent.right
+                                                text: processValue.parent.displayValue
+                                                color: index === 0 ? root.ink : root.muted
+                                                font.family: "DejaVu Sans Mono"; font.pixelSize: 13
+                                                font.bold: true
+                                                horizontalAlignment: Text.AlignRight
+                                            }
                                         }
                                     }
                                 }
@@ -1014,6 +1067,7 @@ PlasmoidItem {
                 clip: true
 
                 Text { id: networkTitle; anchors.left: parent.left; anchors.top: parent.top; text: "NETWORK"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
+                Text { anchors.right: parent.right; anchors.verticalCenter: networkTitle.verticalCenter; text: "SKALEN UNABHÄNGIG"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
                 Column {
                     id: networkDataBlock
                     anchors.right: parent.right; anchors.top: networkTitle.bottom; anchors.topMargin: 22; spacing: 4
@@ -1196,7 +1250,11 @@ PlasmoidItem {
                             Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: Math.round(root.diskPercent()) + "%"; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
                         // df semantics plus the ext4 reserve, elided if the card is narrow.
-                        Text { width: parent.width; elide: Text.ElideRight; text: root.fmtDiskSummary(); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
+                        PlasmaCore.ToolTipArea {
+                            width: parent.width; height: 16
+                            mainText: root.diskReserveDetail()
+                            Text { anchors.fill: parent; elide: Text.ElideRight; text: root.fmtDiskSummary(); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
+                        }
                         Rectangle {
                             width: parent.width; height: 6; radius: 3; color: Qt.rgba(0.5, 0.5, 0.5, 0.3)
                             Rectangle {
@@ -1260,6 +1318,7 @@ PlasmoidItem {
             repeat: true
             onTriggered: {
                 root.currentTime = root.refreshClock()
+                root.telemetryNowMs = Date.now()
                 root.cpuHistory = root.push(root.cpuHistory, root.cpu)
                 root.gpu0History = root.push(root.gpu0History, root.gpu0Usage)
                 root.gpu1History = root.push(root.gpu1History, root.gpu1Usage)
@@ -1488,6 +1547,7 @@ PlasmoidItem {
                 root.applyGpuTelemetry(null, 2)
                 return
             }
+            root.lastGpuTelemetryMs = Date.now()
             // Index by the GPU's own index field, never by array position:
             // nvidia-smi numbers the GPUs itself and a missing card must leave
             // exactly its own card empty instead of shifting the others.
@@ -1533,6 +1593,7 @@ PlasmoidItem {
             var now = Date.now()
             var elapsedMs = root.previousCpuSampleMs > 0 ? now - root.previousCpuSampleMs : 0
             var processes = MonitorLogic.cpuProcessRates(root.previousCpuSamples, samples, elapsedMs, 4)
+            if (samples.length > 0) root.lastCpuTelemetryMs = now
             root.topCpuProcesses = processes
             root.previousCpuSamples = currentByPid
             root.previousCpuSampleMs = now
@@ -1625,6 +1686,7 @@ PlasmoidItem {
             root.previousRxBytes = rxBytes
             root.previousTxBytes = txBytes
             root.previousNetworkSampleMs = now
+            root.lastNetworkTelemetryMs = now
         }
     }
 

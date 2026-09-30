@@ -13,8 +13,13 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   VRAM, power and per-GPU compute processes (up to four largest consumers). The
   three GPU cards sit side by side in one row; CPU and RAM share the row below
 - Compact CPU and RAM process summaries (up to four largest consumers)
+- Narrow cards show compact M/G memory figures so process names remain readable;
+  hover a row for the full process name or the exact MiB/GiB value
 - Two-minute multi-GPU and network history charts, with one shared unit per
-  network panel so axis and live value always agree
+  network panel so axis and live value always agree; the panels use independent
+  auto-scales, called out above the charts
+- Header shows the age of the oldest successful CPU-process, GPU, or network
+  poll (not the separately polled services, disk, or other system sensors)
 - Disk usage in `df` semantics, including the filesystem reserve
 - NVIDIA VRAM telemetry via `nvidia-smi`
 - Longest Hermes run across the default and named profiles

@@ -98,7 +98,8 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     assert 'powerText:root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts)' in text
     assert 'powerText:root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts)' in text
     assert 'powerText:root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts)' in text
-    assert 'text: modelData.powerText || ""' in text
+    assert 'mainText: modelData.powerText || ""' in text
+    assert 'text: (modelData.powerText || "").replace("POWER ", "")' in text
     assert 'vramFill:root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB)' in text
     assert 'vramFill:root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB)' in text
     assert 'vramFill:root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB)' in text
@@ -130,7 +131,7 @@ def test_ram_card_shows_top_four_processes_in_its_detail_area():
     assert 'id: topRamSource' in text
     assert 'ps -eo rss=,comm= --sort=-rss | head -4' in text
     assert 'processes:root.topRamProcesses' in text
-    assert 'if (isFinite(mib) && mib >= 1024) return (mib / 1024).toFixed(1) + " GiB"' in text
+    assert 'if (metricLabel === "RAM" && number >= 1024) return (number / 1024).toFixed(1) + "G"' in text
     assert 'processes.length < 4' in text
     assert 'onTriggered: topRamSource.connectSource(topRamSource.command)' in text
 
@@ -728,9 +729,9 @@ def test_obs_card_leads_with_the_scope_distribution():
     text = source()
     # The all-time percentages cannot show the sweep fix, so the card must lead
     # with the scope count, the shared-scope rows and the post-switch cohort.
-    assert 'SCOPE " + root.obsScopeTotal' in text
-    assert '" · SHARED " + root.obsUntaggedObservations' in text
-    assert '" · NEU " + root.fmtPct1(root.obsCohortTaglessPct)' in text
+    assert 'BEREICHE " + root.obsScopeTotal' in text
+    assert '" · GETEILT " + root.obsUntaggedObservations' in text
+    assert '" · NEU OHNE TAGS " + root.fmtPct1(root.obsCohortTaglessPct)' in text
     # The cohort is compared against the pre-fix plateau, not the 2026-09-24 baseline.
     assert 'root.obsCohortTaglessPct > root.obsBaselineCohortTaglessPct' in text
     # Absent fields must not read as zero.
@@ -748,7 +749,7 @@ def test_obs_card_keeps_the_all_time_figures_in_the_tooltip_only():
     # They were the headline before; they must not be in the card label any more.
     label = text[text.index('function obsHealthLabel()'):text.index('function obsHealthOk()')]
     assert 'TAGS 0' not in label and 'PROOF 1' not in label
-    assert 'SCOPE ' in label
+    assert 'BEREICHE ' in label
 
 
 def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():

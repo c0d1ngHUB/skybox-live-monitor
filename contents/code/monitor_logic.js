@@ -7,6 +7,14 @@ function historyX(index, length, width, maxSamples) {
     return (start + index) * width / (maxSamples - 1)
 }
 
+// Age of the oldest fast telemetry source. Missing readings never count as fresh.
+// Disk and service health have separate, slower polling cadences.
+function telemetryAgeSeconds(nowMs, cpuMs, gpuMs, networkMs) {
+    var oldest = Math.min(cpuMs, gpuMs, networkMs)
+    if (!isFinite(oldest) || oldest <= 0) return null
+    return Math.max(0, Math.floor((nowMs - oldest) / 1000))
+}
+
 // Domains that refresh on a slow cadence carry their own staleness budget.
 // The disk footer is polled every 30 s (space barely moves), so the generic
 // 15 s window would flag DISK as stale between two perfectly healthy reads.
