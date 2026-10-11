@@ -24,7 +24,10 @@ def command_for(source_id: str) -> str:
     match = re.search(r'property string command:\s*("(?:[^"\\]|\\.)*")', text[start:])
     if not match:
         raise AssertionError(f"No command found for {source_id}")
-    return json.loads(match.group(1))
+    command = json.loads(match.group(1))
+    if source_id == "netDetectSource":
+        command += str(ROOT / "contents/code/network_interface.py")
+    return command
 
 
 def executable(path: Path, body: str) -> None:
@@ -294,7 +297,11 @@ class MonitorBehaviorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bindir = Path(tmp)
             executable(bindir / "ip", "printf '%s\\n' 'default via 192.0.2.1 dev enp7s0 proto dhcp'\n")
-            executable(bindir / "ls", "printf '%s\\n' eno1 enp7s0 lo\n")
+            interfaces = bindir / "net"
+            interfaces.mkdir()
+            for name in ("eno1", "enp7s0", "lo"):
+                (interfaces / name).mkdir()
+            command += " --sys-net " + str(interfaces)
             env = os.environ.copy()
             env["PATH"] = f"{bindir}:/usr/bin:/bin"
             result = subprocess.run(command, shell=True, text=True, capture_output=True, env=env, check=True)
@@ -305,7 +312,11 @@ class MonitorBehaviorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bindir = Path(tmp)
             executable(bindir / "ip", "exit 0\n")
-            executable(bindir / "ls", "printf '%s\\n' lo wlo1 tailscale0\n")
+            interfaces = bindir / "net"
+            interfaces.mkdir()
+            for name in ("lo", "wlo1", "tailscale0"):
+                (interfaces / name).mkdir()
+            command += " --sys-net " + str(interfaces)
             env = os.environ.copy()
             env["PATH"] = f"{bindir}:/usr/bin:/bin"
             result = subprocess.run(command, shell=True, text=True, capture_output=True, env=env, check=True)

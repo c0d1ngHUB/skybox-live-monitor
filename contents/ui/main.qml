@@ -161,6 +161,23 @@ PlasmoidItem {
     property var upHistory: []
     // Prefer the default-route interface; fall back to the first physical interface.
     property string netIf: ""
+    property bool networkAvailable: false
+    property double lastServiceTelemetryMs: 0
+
+    function resetServices() {
+        root.hermesGatewayState = "UNKNOWN"
+        root.hindsightState = "UNKNOWN"
+        root.openAiActiveKeys = -1
+        root.openAiTotalKeys = 0
+    }
+    function resetNetwork() {
+        root.networkAvailable = false
+        root.down = 0
+        root.up = 0
+        root.previousRxBytes = -1
+        root.previousTxBytes = -1
+        root.previousNetworkSampleMs = 0
+    }
 
     // P2b: Darker muted for better contrast hierarchy
     property color ink: "#E8F7FF"
@@ -222,6 +239,7 @@ PlasmoidItem {
         return root.networkUseMbit(direction) ? 1 : 1000
     }
     function networkLiveLabel(direction) {
+        if (!root.networkAvailable || root.telemetryNowMs - root.lastNetworkTelemetryMs > 5000) return "UNAVAILABLE"
         return MonitorLogic.networkRateLabel(root.networkLive(direction), root.networkUseMbit(direction))
     }
     function fmtNetworkAxisValue(value) {
@@ -301,7 +319,7 @@ PlasmoidItem {
         return Math.round(seconds / 60) + "m"
     }
     function networkIdle() {
-        return root.historyPeak(root.downHistory) < 1 && root.historyPeak(root.upHistory) < 1
+        return root.networkAvailable && root.telemetryNowMs - root.lastNetworkTelemetryMs <= 5000 && root.historyPeak(root.downHistory) < 1 && root.historyPeak(root.upHistory) < 1
     }
     function historyFillProgress() {
         return Math.min(1, root.cpuHistory.length / root.historySeconds)
@@ -1726,7 +1744,8 @@ PlasmoidItem {
         id: netDetectSource
         engine: "executable"
         connectedSources: []
-        property string command: "sh -c 'set -- $(ip -o route show default 2>/dev/null); iface=$5; if [ -n \"$iface\" ]; then printf \"%s\\n\" \"$iface\"; exit 0; fi; for iface in $(ls /sys/class/net/); do case \"$iface\" in lo|docker*|br-*|veth*|tailscale*|wlxd*) continue ;; esac; printf \"%s\\n\" \"$iface\"; break; done'"
+        property string scriptPath: Qt.resolvedUrl("../code/network_interface.py").toString().replace("file://", "")
+        property string command: "python3 " + scriptPath
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1734,12 +1753,14 @@ PlasmoidItem {
             var iface = buffer.trim()
             buffer = ""
             disconnectSource(source)
-            if (iface.length > 0 && iface !== root.netIf) {
+            if (Number(data["exit code"]) !== 0) iface = ""
+            if (iface !== root.netIf) {
+                networkCountersSource.disconnectSource(networkCountersSource.command)
+                networkCountersSource.buffer = ""
+                networkCountersSource.generation += 1
                 root.netIf = iface
-                root.previousRxBytes = -1
-                root.previousTxBytes = -1
-                root.previousNetworkSampleMs = 0
-                networkCountersSource.connectSource(networkCountersSource.command)
+                root.resetNetwork()
+                if (iface.length > 0) networkCountersSource.connectSource(networkCountersSource.command)
             }
         }
     }
@@ -1751,29 +1772,38 @@ PlasmoidItem {
         engine: "executable"
         connectedSources: []
         property string scriptPath: Qt.resolvedUrl("../code/network_counters.sh").toString().replace("file://", "")
-        property string command: "sh " + scriptPath + " " + root.netIf
+        // The helper ignores the final argument. It gives each interface
+        // generation a distinct executable source, including A -> B -> A.
+        property int generation: 0
+        property string command: "sh " + scriptPath + " " + root.netIf + " /proc/net/dev " + networkCountersSource.generation
         property string buffer: ""
         onNewData: function(source, data) {
+            if (source !== networkCountersSource.command) {
+                disconnectSource(source)
+                return
+            }
             buffer += data["stdout"] || ""
             if (data["exit code"] === undefined) return
             var output = buffer.trim()
             var exitCode = data["exit code"]
             buffer = ""
             disconnectSource(source)
-            if (exitCode !== 0) return
+            if (exitCode !== 0) { root.resetNetwork(); return }
             var fields = output.split(/\s+/)
-            if (fields.length !== 2) return
+            if (fields.length !== 2) { root.resetNetwork(); return }
             var rxBytes = parseFloat(fields[0])
             var txBytes = parseFloat(fields[1])
             var now = Date.now()
-            if (isNaN(rxBytes) || isNaN(txBytes)) return
+            if (!isFinite(rxBytes) || !isFinite(txBytes)) { root.resetNetwork(); return }
             if (root.previousNetworkSampleMs > 0 && now > root.previousNetworkSampleMs) {
                 var elapsedSeconds = (now - root.previousNetworkSampleMs) / 1000
                 root.down = Math.max(0, rxBytes - root.previousRxBytes) / elapsedSeconds
                 root.up = Math.max(0, txBytes - root.previousTxBytes) / elapsedSeconds
+                root.networkAvailable = true
             } else {
                 root.down = 0
                 root.up = 0
+                root.networkAvailable = false
             }
             root.previousRxBytes = rxBytes
             root.previousTxBytes = txBytes
