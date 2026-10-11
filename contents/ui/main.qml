@@ -79,21 +79,66 @@ PlasmoidItem {
     property string hermesGatewayState: "UNKNOWN"
     property string hindsightState: "UNKNOWN"
     // Observation health of the Hindsight bank, read by
-    // contents/code/hindsight_observation_health.py. Guards the
-    // observation_scopes="shared" switch. The card leads with the SCOPE
-    // distribution: how many observation scopes exist and how many
-    // observations made it into the shared, untagged one. "NEU" is the share of
-    // rows created AFTER the switch that are untagged -- that is the signal that
-    // actually reacts to a fix in a retain path, because the all-time TAGS-0 and
-    // PROOF-1 percentages are diluted by every legacy row.
+    // contents/code/hindsight_observation_health.py. The bank was rebuilt on
+    // 2026-10-02, so the card reports the rebuild-proof quality signals: how many
+    // observations merged more than one raw fact (obsMergePct), raw facts still
+    // without an observation (obsOrphans), the gap between the newest raw fact and
+    // the newest observation (obsLagHours) and the observation-scope split with
+    // its trend. Thresholds arrive in the payload (obsThresholds); the all-time
+    // tagless/single-proof percentages stay in the tooltip as context.
     property real obsTaglessPct: -1
     property real obsSingleProofPct: -1
     property int obsCount: 0
-    property int obsSinceSwitch: 0
+    property real obsMergePct: -1
+    property int obsMerged: -1
+    property int obsOrphans: -1
+    // Orphan split: upstream Hindsight >= 0.10 merges a losing fact's content
+    // into the surviving observation WITHOUT keeping its source_memory_ids
+    // reference, so a fully processed fact (consolidated_at set) still counts
+    // in obsOrphans. Only obsOrphanBacklog (no consolidated_at) is a real
+    // "consolidation never ran here" signal; obsOrphanConsolidated is the
+    // benign bookkeeping remainder. The health rule gates on the backlog only.
+    property int obsOrphanBacklog: -1
+    property int obsOrphanConsolidated: -1
+    property int obsRawFacts: -1
+    property real obsLagHours: -1
     property int obsScopeTotal: -1
+    property int obsPreviousScopeTotal: -1
+    // Tag drift: scopes that only wrap an existing, non-empty tag set. Such a
+    // scope splits a merge pool that already existed, because consolidation merges
+    // only inside one scope. The untagged scope is excluded from the comparison --
+    // every tagged scope is a superset of it, which would flag a normal bank.
+    property int obsDriftScopes: -1
+    property int obsPreviousDriftScopes: -1
     property int obsUntaggedObservations: -1
-    property real obsCohortTaglessPct: -1
-    property real obsBaselineCohortTaglessPct: 0.6
+    // Share of all observations sitting in the untagged catch-all scope. The scope
+    // count alone reads very differently when one of those scopes holds 81%.
+    property real obsUntaggedSharePct: -1
+    property int obsLargestScope: -1
+    property real obsLargestScopeSharePct: -1
+    // Throughput of consolidation itself, counted from the raw facts'
+    // consolidated_at stamps inside the payload's window. LAG cannot show this:
+    // observation timestamps are copied from the source fact, so one recent
+    // consolidation keeps LAG at 0.0h.
+    property real obsConsolidatedRecent: -1
+    property real obsConsolidatedRecentUnrefPct: -1
+    property real obsConsolidatedNewestHours: -1
+    // Sample audit of the unreferenced facts: how much of each fact's vocabulary
+    // survives inside an observation. Advisory only -- consolidation paraphrases,
+    // so a low value is expected and the fact row itself stays valid.
+    property int obsOrphanCheckSample: -1
+    property int obsOrphanCheckCovered: -1
+    property real obsOrphanCheckMedianContainment: -1
+    property var obsThresholds: null
+    // Rolling merge trend of the card's own polls. It replaces the frozen pre-reset
+    // reference (1009 observations / 37.6% merges): the rebuilt bank happened to sit
+    // at the same merge share, so that number invited a "same as before" reading
+    // that means nothing today. Memory only -- it restarts with the widget.
+    property var obsMergeHistory: []
+    // One window at the card's five-minute poll cadence, capped so a long-running
+    // widget cannot grow without limit.
+    readonly property double obsTrendWindowMs: 24 * 60 * 60 * 1000
+    readonly property int obsTrendMaxPoints: 512
     property bool obsHealthUnavailable: true
 
     // df(1) view, read by contents/code/disk_usage.py. The Plasma sensors cannot
@@ -385,54 +430,245 @@ PlasmoidItem {
     function openAiOauthBorderColor() { return root.serviceBorderColor(root.openAiOauthState()) }
 
     // --- Hindsight observation health -------------------------------------
-    // "SCOPE n" = how many observation scopes the bank holds (frozen plateau
-    // 147/148 while the switch was blind on the sweep path). "SHARED x" = how
-    // many observations actually reached the shared untagged scope; it grows only
-    // as NEW observations consolidate, because old rows keep their tags for good.
-    // "NEU y%" is the sensitive signal: the untagged share among rows created
-    // after the switch. The old "TAGS 0"/"PROOF 1" all-time percentages moved
-    // ~1.3 points per 20 new untagged rows, so they could not show the fix --
-    // they stay in the tooltip as context.
+    // The bank was deleted and rebuilt on 2026-10-02 22:15 UTC, so the old
+    // switch-cohort comparison has no reference left. The card now leads with
+    // the metrics that survive a rebuild: "MERGE p%" = share of observations
+    // backed by MORE than one raw fact (higher is better -- consolidation that
+    // never merges only copies raw facts), "BACKLOG n" = raw facts not yet
+    // consolidated (must stay 0; legacy "ORPHAN Σ" is the total without references), "SCOPE n DELTA d" = distinct observation
+    // scopes and their trend (observation_scopes comes from the SOURCE fact's
+    // tags and merging only happens inside one scope, so a rising count with no
+    // new topic means tag drift), "LAG h" = how far the newest observation
+    // trails the newest raw fact (the observable backlog). Thresholds travel
+    // inside the payload, the all-time "TAGS 0"/"PROOF 1" percentages stay in
+    // the tooltip as context.
     function fmtPct1(value) {
         if (value === null || value === undefined || value < 0 || !isFinite(value)) return "--"
         return (Math.round(value * 10) / 10).toFixed(1) + "%"
     }
 
-    function obsHealthLabel() {
-        if (root.obsHealthUnavailable) return "? OBS"
-        if (root.obsScopeTotal < 0) return "BEREICHE ? · GETEILT " + root.obsUntaggedObservations
-        return "BEREICHE " + root.obsScopeTotal + " · GETEILT " + root.obsUntaggedObservations
-            + " · NEU OHNE TAGS " + root.fmtPct1(root.obsCohortTaglessPct)
+    // Whole percent: a health indicator does not need a decimal, and every extra
+    // glyph costs card width on the narrow side monitor.
+    function fmtPct0(value) {
+        if (value === null || value === undefined || value < 0 || !isFinite(value)) return "--"
+        return Math.round(value) + "%"
     }
 
-    // Colour rule: the scope count must no longer climb while the untagged share
-    // among NEW rows is above the pre-fix plateau. Before the sweep fix the
-    // plateau sat at 0.6%, so anything above it means the switch now reaches a
-    // path it previously missed.
+    function fmtLagHours(value) {
+        if (value === null || value === undefined || value < 0 || !isFinite(value)) return "--"
+        return (Math.round(value * 10) / 10).toFixed(1) + "h"
+    }
+
+    // A 0..1 fraction (the orphan audit's token containment) as a whole
+    // percentage; unmeasured (-1/None) prints "--" instead of a perfect 0%.
+    function fmtFractionPct(value) {
+        if (value === null || value === undefined || value < 0 || !isFinite(value)) return "--"
+        return Math.round(value * 100) + "%"
+    }
+
+    function obsInt(value) {
+        if (value === null || value === undefined || value < 0 || !isFinite(value)) return "?"
+        return String(Math.round(value))
+    }
+
+    // Thresholds come from the helper payload; the fallbacks only apply before
+    // the first successful poll, and they match the helper's constants.
+    function obsThreshold(name, fallback) {
+        var value = root.obsThresholds ? root.obsThresholds[name] : undefined
+        return (value === undefined || value === null || !isFinite(value)) ? fallback : Number(value)
+    }
+
+    function obsScopeTrend() {
+        if (root.obsScopeTotal < 0 || root.obsPreviousScopeTotal < 0) return null
+        return root.obsScopeTotal - root.obsPreviousScopeTotal
+    }
+
+    function obsScopeTrendLabel() {
+        var delta = root.obsScopeTrend()
+        if (delta === null) return "Δ ?"
+        if (delta > 0) return "Δ +" + delta
+        if (delta < 0) return "Δ " + delta
+        return "Δ 0"
+    }
+
+    function obsHealthLabel() {
+        if (root.obsHealthUnavailable) return "? OBS"
+        return "MERGE " + root.fmtPct0(root.obsMergePct)
+            + " · " + (root.obsOrphanBacklog >= 0 ? "BACKLOG " + root.obsInt(root.obsOrphanBacklog)
+                : "ORPHAN Σ " + root.obsInt(root.obsOrphans))
+            + " · SCOPE " + root.obsInt(root.obsScopeTotal) + " " + root.obsScopeTrendLabel()
+            + " · DRIFT " + root.obsInt(root.obsDriftScopes)
+            + " · UNTAG " + root.fmtPct0(root.obsUntaggedSharePct)
+            + " · LAG " + root.fmtLagHours(root.obsLagHours)
+    }
+
+    function updateObsScopeTotal(nextTotal) {
+        if (nextTotal < 0 || !isFinite(nextTotal)) {
+            root.obsPreviousScopeTotal = -1
+            root.obsScopeTotal = -1
+            return
+        }
+        root.obsPreviousScopeTotal = root.obsScopeTotal
+        root.obsScopeTotal = nextTotal
+    }
+
+    function updateObsDriftTotal(nextDrift) {
+        if (nextDrift < 0 || !isFinite(nextDrift)) {
+            root.obsPreviousDriftScopes = -1
+            root.obsDriftScopes = -1
+            return
+        }
+        root.obsPreviousDriftScopes = root.obsDriftScopes
+        root.obsDriftScopes = nextDrift
+    }
+
+    // A rising scope count is only a problem when a scope started wrapping an
+    // existing tag set (drift): a brand-new topic opens a new merge pool, while a
+    // tag permutation splits a pool that already existed. Without drift data the
+    // old strict rule stands, so an unmeasured state never reads as healthy.
+    function obsScopeTrendOk() {
+        if (root.obsScopeTotal < 0 || root.obsPreviousScopeTotal < 0) return false
+        if (root.obsScopeTotal <= root.obsPreviousScopeTotal) return true
+        if (root.obsDriftScopes < 0 || root.obsPreviousDriftScopes < 0) return false
+        return root.obsDriftScopes <= root.obsPreviousDriftScopes
+    }
+
+    // Rolling merge trend, memory only: the window and its cap live with the other
+    // properties, the recording itself is a plain function so the QML logic stays
+    // testable outside Plasma.
+    function obsRecordMergeTrend(mergePct, obsCount) {
+        if (mergePct === null || mergePct === undefined || mergePct < 0 || !isFinite(mergePct)) return
+        var now = Date.now()
+        var history = root.obsMergeHistory.slice()
+        history.push({ "t": now, "merge": Number(mergePct), "obs": Number(obsCount) })
+        var cutoff = now - root.obsTrendWindowMs
+        var kept = []
+        for (var i = 0; i < history.length; i++) if (history[i].t >= cutoff) kept.push(history[i])
+        if (kept.length > root.obsTrendMaxPoints) kept = kept.slice(kept.length - root.obsTrendMaxPoints)
+        root.obsMergeHistory = kept
+    }
+
+    // The pre-reset baseline was dropped because a static "before" number next to a
+    // matching current one reads like a live benchmark. This trend only covers the
+    // widget's own uptime and is not persisted, so it says so.
+    function obsMergeTrendText() {
+        var history = root.obsMergeHistory
+        var points = history ? history.length : 0
+        if (points < 2) return "MERGE-TREND SEIT WIDGET-START SAMMELT (POLLS: " + points + ")"
+        var first = history[0]
+        var last = history[history.length - 1]
+        var hours = (last.t - first.t) / 3600000
+        return "MERGE-TREND SEIT WIDGET-START " + root.fmtPct0(first.merge) + " → " + root.fmtPct0(last.merge)
+            + " (" + points + " POLLS / " + (Math.round(hours * 10) / 10).toFixed(1) + "H)"
+    }
+
+    // One reset path for both failure modes (unreachable API, malformed payload):
+    // every metric goes back to "unknown" so no stale number survives a failed
+    // poll, and the scope trend restarts from scratch.
+    function resetObsHealth() {
+        root.obsHealthUnavailable = true
+        root.obsTaglessPct = -1
+        root.obsSingleProofPct = -1
+        root.obsCount = 0
+        root.obsMergePct = -1
+        root.obsMerged = -1
+        root.obsOrphans = -1
+        root.obsOrphanBacklog = -1
+        root.obsOrphanConsolidated = -1
+        root.obsRawFacts = -1
+        root.obsLagHours = -1
+        root.obsUntaggedObservations = -1
+        root.obsUntaggedSharePct = -1
+        root.obsLargestScope = -1
+        root.obsLargestScopeSharePct = -1
+        root.obsConsolidatedRecent = -1
+        root.obsConsolidatedRecentUnrefPct = -1
+        root.obsConsolidatedNewestHours = -1
+        root.obsOrphanCheckSample = -1
+        root.obsOrphanCheckCovered = -1
+        root.obsOrphanCheckMedianContainment = -1
+        root.obsThresholds = null
+        // The merge trend is history, not a live reading: a failed poll is not a
+        // data point, so the trend survives it and keeps its own window.
+        root.updateObsScopeTotal(-1)
+        root.updateObsDriftTotal(-1)
+    }
+
+    // Healthy means: enough merging, no real backlog (raw facts the
+    // consolidation never touched), a measurable backlog gap that is small,
+    // and a scope split that did not grow into tag drift between two valid polls.
+    // obsOrphans alone over-alarms since Hindsight >= 0.10: a merged-losing
+    // fact keeps its content in the surviving observation but loses its
+    // source_memory_ids reference, so it counts as orphaned even though
+    // consolidation processed it (consolidated_at set). Only facts WITHOUT
+    // consolidated_at -- obsOrphanBacklog -- are a real stuck signal.
     function obsHealthOk() {
         if (root.obsHealthUnavailable) return false
-        if (root.obsCohortTaglessPct < 0) return false
-        return root.obsCohortTaglessPct > root.obsBaselineCohortTaglessPct
+        if (root.obsMergePct < 0 || root.obsOrphans < 0 || root.obsLagHours < 0) return false
+        if (root.obsScopeTotal < 0 || root.obsPreviousScopeTotal < 0) return false
+        // Older helper payload without the split: fall back to the strict
+        // total so the card never upgrades an unmeasured state to healthy.
+        var backlog = root.obsOrphanBacklog >= 0 ? root.obsOrphanBacklog : root.obsOrphans
+        return root.obsMergePct >= root.obsThreshold("merge_target_pct", 25)
+            && backlog === 0
+            && root.obsLagHours <= root.obsThreshold("lag_ok_hours", 2)
+            && root.obsScopeTrendOk()
     }
 
     function obsHealthTone() {
-        if (root.obsHealthUnavailable) return root.muted
+        if (root.obsHealthUnavailable || root.obsScopeTotal < 0 || root.obsPreviousScopeTotal < 0) return root.muted
         return root.obsHealthOk() ? root.cyan : root.warning
     }
 
     function obsHealthBorderColor() {
-        if (root.obsHealthUnavailable) return root.muted
+        if (root.obsHealthUnavailable || root.obsScopeTotal < 0 || root.obsPreviousScopeTotal < 0) return root.muted
         return root.obsHealthOk() ? root.cyan : root.warning
     }
 
     function obsHealthDetail() {
         if (root.obsHealthUnavailable) return "API NICHT ERREICHBAR"
+        var target = root.obsThreshold("merge_target_pct", 25)
+        var floor = root.obsThreshold("merge_floor_pct", 15)
+        var lagOk = root.obsThreshold("lag_ok_hours", 2)
+        var untagWarn = root.obsThreshold("untagged_share_warn_pct", 50)
+        var windowHours = root.obsThreshold("consolidated_window_hours", 24)
+        var minContainment = root.obsThreshold("orphan_check_min_containment_pct", 20)
+        var state = root.obsHealthOk() ? "GESUND" : "PRÜFEN"
+        if (!root.obsHealthOk() && root.obsMergePct >= 0 && root.obsMergePct < floor) state = "ZU WENIG MERGE"
         var parts = []
-        parts.push(root.obsScopeTotal + " SCOPES (" + root.obsUntaggedObservations + " OBS IM SHARED SCOPE)")
-        parts.push("NEU SEIT SWITCH " + root.obsSinceSwitch + " / DAVON OHNE TAGS "
-            + root.obsCohortTaglessPct + "% (PLATEAU " + root.obsBaselineCohortTaglessPct + "%)")
+        parts.push("ZUSTAND " + state + " (SCHWELLE MERGE " + target + "% / WARN " + floor + "% · LAG " + lagOk + "h)")
+        parts.push("MERGE " + root.fmtPct1(root.obsMergePct) + " (" + root.obsInt(root.obsMerged) + " VON "
+            + root.obsInt(root.obsCount) + " OBS MIT PROOF >= 2) · " + root.obsMergeTrendText())
+        parts.push("ORPHAN " + root.obsInt(root.obsOrphans) + " VON " + root.obsInt(root.obsRawFacts)
+            + " ROHFAKTEN OHNE OBSERVATION · DAVON " + root.obsInt(root.obsOrphanBacklog)
+            + " OHNE KONSOLIDIERUNG (ECHTES BACKLOG) UND " + root.obsInt(root.obsOrphanConsolidated)
+            + " KONSOLIDIERT OHNE REFERENZ (BUCHUNGSARTEFAKT)")
+        parts.push("KONSOLIDIERUNG " + root.obsInt(windowHours) + "H: " + root.obsInt(root.obsConsolidatedRecent)
+            + " ROHFAKTEN KONSOLIDIERT · DAVON " + root.fmtPct0(root.obsConsolidatedRecentUnrefPct)
+            + " OHNE REFERENZ · JÜNGSTE KONSOLIDIERUNG VOR " + root.fmtLagHours(root.obsConsolidatedNewestHours))
+        parts.push("LAG " + root.fmtLagHours(root.obsLagHours)
+            + " ZWISCHEN JÜNGSTEM ROHFAKT UND JÜNGSTER OBSERVATION · BLEIBT ~0, SOLANGE IRGENDEINE "
+            + "KONSOLIDIERUNG NEUE FAKTEN ANFASST, DESHALB OBEN DIE 24H-ZAHL")
+        parts.push(root.obsScopeTotal < 0 || root.obsPreviousScopeTotal < 0
+            ? "SCOPE-TREND UNBEKANNT (ZWEI ERFOLGREICHE ABFRAGEN NÖTIG)"
+            : "SCOPE-TREND " + root.obsPreviousScopeTotal + " → " + root.obsScopeTotal
+              + (root.obsScopeTotal > root.obsPreviousScopeTotal
+                  ? (root.obsScopeTrendOk() ? " (STEIGEND, NEUES THEMA · AKZEPTIERT)" : " (STEIGEND, TAG-DRIFT)")
+                  : " (NICHT STEIGEND)"))
+        parts.push("DRIFT " + root.obsInt(root.obsDriftScopes) + " SCOPES UMFASSEN EIN ANDERES TAG-SET "
+            + "(TAG-DRIFT, VORHER " + root.obsInt(root.obsPreviousDriftScopes) + ") · EIN THEMA-BUCKET "
+            + "KANN NUR INNERHALB EINES SCOPES MERGEN")
+        parts.push("UNTAG " + root.fmtPct0(root.obsUntaggedSharePct) + " DER OBS LIEGEN IM TAGLOSEN SAMMEL-SCOPE ("
+            + root.obsInt(root.obsUntaggedObservations) + " OBS · WARN AB " + root.fmtPct0(untagWarn) + ")")
+        parts.push("GRÖSSTER SCOPE " + root.obsInt(root.obsLargestScope) + " OBS ("
+            + root.fmtPct0(root.obsLargestScopeSharePct) + " DER BANK)")
+        parts.push("ORPHAN-AUDIT " + root.obsInt(root.obsOrphanCheckSample) + " STICHPROBEN · "
+            + root.obsInt(root.obsOrphanCheckCovered) + " ÜBER " + root.fmtPct0(minContainment)
+            + " TOKEN-ÜBERDECKUNG · MEDIAN " + root.fmtFractionPct(root.obsOrphanCheckMedianContainment)
+            + " · NIEDRIG IST ERWARTET (KONSOLIDIERUNG PARAPHRASIERT), DIE FAKTEN-ZEILE SELBST BLEIBT "
+            + "GÜLTIG UND ABRUFBAR · ROWS: hindsight_observation_health.py --orphan-audit")
         parts.push("GESAMT " + root.obsCount + " OBS · TAGS 0 " + root.obsTaglessPct
-            + "% (BASIS 1.7) · PROOF 1 " + root.obsSingleProofPct + "% (BASIS 62.4)")
+            + "% · PROOF 1 " + root.obsSingleProofPct + "%")
         return parts.join("\n")
     }
     function gpuPowerText(drawValue, limitValue) {
@@ -1497,10 +1733,11 @@ PlasmoidItem {
         }
     }
 
-    // Hindsight observation health: guards the observation_scopes="shared"
-    // switch by reporting the SCOPE distribution (how many observation scopes
-    // exist, how many observations reached the shared untagged one) plus the
-    // untagged share among rows created after the switch. The all-time
+    // Hindsight observation health: reports the rebuild-proof quality signals
+    // (MERGE, BACKLOG, LAG) plus the scope structure that actually explains them --
+    // tag drift among the scopes and the share of observations sitting in the single
+    // untagged catch-all pool. The consolidation throughput and the sample audit of
+    // the unreferenced facts replace the old frozen pre-reset reference. The all-time
     // TAGS-0/PROOF-1 percentages stay in the tooltip as context only.
     PlasmaSupport.DataSource {
         id: obsHealthSource
@@ -1519,40 +1756,47 @@ PlasmoidItem {
             // Explicit drift signal: an unreachable API or malformed payload
             // resets the card instead of leaving stale numbers on screen.
             if (!payload || payload.error) {
-                root.obsHealthUnavailable = true
-                root.obsTaglessPct = -1
-                root.obsSingleProofPct = -1
-                root.obsScopeTotal = -1
-                root.obsUntaggedObservations = -1
-                root.obsCohortTaglessPct = -1
+                root.resetObsHealth()
                 return
             }
             var tagless = Number(payload.tagless_pct)
             var single = Number(payload.single_proof_pct)
             if (isNaN(tagless) || isNaN(single)) {
-                root.obsHealthUnavailable = true
-                root.obsTaglessPct = -1
-                root.obsSingleProofPct = -1
-                root.obsScopeTotal = -1
-                root.obsUntaggedObservations = -1
-                root.obsCohortTaglessPct = -1
+                root.resetObsHealth()
                 return
             }
             root.obsHealthUnavailable = false
             root.obsTaglessPct = tagless
             root.obsSingleProofPct = single
             root.obsCount = Number(payload.observations) || 0
-            root.obsSinceSwitch = Number(payload.since_switch) || 0
             // Null means "field absent", which must not read as 0 on the card.
             function numOr(value, fallback) {
                 if (value === null || value === undefined) return fallback
                 var parsed = Number(value)
                 return isNaN(parsed) ? fallback : parsed
             }
-            root.obsScopeTotal = numOr(payload.scope_total, -1)
+            root.obsMergePct = numOr(payload.merge_pct, -1)
+            root.obsMerged = numOr(payload.merged, -1)
+            root.obsOrphans = numOr(payload.orphans, -1)
+            root.obsOrphanBacklog = numOr(payload.orphan_backlog, -1)
+            root.obsOrphanConsolidated = numOr(payload.orphan_consolidated, -1)
+            root.obsRawFacts = numOr(payload.raw_facts, -1)
+            root.obsLagHours = numOr(payload.lag_hours, -1)
+            root.obsConsolidatedRecent = numOr(payload.consolidated_recent, -1)
+            root.obsConsolidatedRecentUnrefPct = numOr(payload.consolidated_recent_unreferenced_pct, -1)
+            root.obsConsolidatedNewestHours = numOr(payload.consolidated_newest_hours, -1)
+            root.obsOrphanCheckSample = numOr(payload.orphan_check_sample, -1)
+            root.obsOrphanCheckCovered = numOr(payload.orphan_check_covered, -1)
+            root.obsOrphanCheckMedianContainment = numOr(payload.orphan_check_median_containment, -1)
+            root.updateObsScopeTotal(numOr(payload.scope_total, -1))
+            root.updateObsDriftTotal(numOr(payload.drift_scopes, -1))
             root.obsUntaggedObservations = numOr(payload.untagged_observations, -1)
-            root.obsCohortTaglessPct = numOr(payload.since_switch_tagless_pct, -1)
-            root.obsBaselineCohortTaglessPct = numOr(payload.baseline_cohort_tagless_pct, 0.6)
+            root.obsUntaggedSharePct = numOr(payload.untagged_share_pct, -1)
+            root.obsLargestScope = numOr(payload.largest_scope_observations, -1)
+            root.obsLargestScopeSharePct = numOr(payload.largest_scope_share_pct, -1)
+            root.obsThresholds = payload.thresholds || null
+            // A successful poll is the only thing that may extend the trend.
+            root.obsRecordMergeTrend(root.obsMergePct, root.obsCount)
         }
     }
 
