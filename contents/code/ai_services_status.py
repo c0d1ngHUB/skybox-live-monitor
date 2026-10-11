@@ -8,6 +8,7 @@ secrets, credentials, or remote traffic.
 from __future__ import annotations
 
 import json
+from http.client import HTTPException
 import re
 import subprocess
 import sys
@@ -42,7 +43,7 @@ def fetch_json(url: str) -> Any:
         with LOCAL_OPENER.open(req, timeout=TIMEOUT) as response:
             raw = response.read().decode("utf-8", "replace")
         return json.loads(raw)
-    except (URLError, HTTPError, ValueError, TimeoutError, subprocess.SubprocessError):
+    except (URLError, HTTPError, HTTPException, OSError, ValueError, TimeoutError, subprocess.SubprocessError):
         return None
 
 

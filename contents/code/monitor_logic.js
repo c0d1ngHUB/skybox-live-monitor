@@ -7,6 +7,35 @@ function historyX(index, length, width, maxSamples) {
     return (start + index) * width / (maxSamples - 1)
 }
 
+// Null represents an actual telemetry gap, never zero load.
+function telemetrySample(value, available, stampMs, nowMs, maxAgeMs) {
+    if (!available || stampMs <= 0 || nowMs - stampMs > maxAgeMs || !isFinite(value)) return null
+    return value
+}
+
+// Preserve original positions so separated runs are never joined across gaps.
+function historySegments(data) {
+    var segments = []
+    var start = -1
+    for (var i = 0; i <= data.length; i++) {
+        var valid = i < data.length && data[i] !== null && data[i] !== undefined && isFinite(data[i])
+        if (valid && start < 0) start = i
+        if (!valid && start >= 0) {
+            segments.push({start: start, end: i - 1})
+            start = -1
+        }
+    }
+    return segments
+}
+
+// Age of the oldest fast telemetry source. Missing readings never count as fresh.
+// Disk and service health have separate, slower polling cadences.
+function telemetryAgeSeconds(nowMs, cpuMs, gpuMs, networkMs) {
+    var oldest = Math.min(cpuMs, gpuMs, networkMs)
+    if (!isFinite(oldest) || oldest <= 0) return null
+    return Math.max(0, Math.floor((nowMs - oldest) / 1000))
+}
+
 // Domains that refresh on a slow cadence carry their own staleness budget.
 // The disk footer is polled every 30 s (space barely moves), so the generic
 // 15 s window would flag DISK as stale between two perfectly healthy reads.
@@ -215,9 +244,62 @@ function adaptiveNetworkScale(samples, direction) {
     }
 }
 
+// Fast polling reads utilization only; process/VRAM polling stays independent.
+function parseGpuLoads(output) {
+    var byIndex = ({})
+    var lines = String(output || "").trim().split("\n")
+    for (var i = 0; i < lines.length; i++) {
+        var fields = lines[i].split(",")
+        if (fields.length !== 3) continue
+        var index = fields[0].trim()
+        var uuid = fields[1].trim()
+        var raw = fields[2].trim()
+        if (!/^\d+$/.test(index) || !uuid || !/^\d+(\.\d+)?$/.test(raw)) continue
+        var usage = Number(raw)
+        if (!isFinite(usage) || usage < 0 || usage > 100) continue
+        byIndex[index] = {uuid: uuid, usage: usage}
+    }
+    return byIndex
+}
+
+function gpuProcessRole(name) {
+    return name === "hindsight-api" ? "EMBED / RERANK" : ""
+}
+
+// Keep timestamped observations, not a sticky maximum or fabricated load.
+function nextGpuLoadState(previous, entry, nowMs) {
+    var samples = previous ? previous.samples || [] : []
+    samples = samples.filter(function(sample) { return nowMs - sample.stampMs <= 30000 && sample.stampMs <= nowMs })
+    if (!entry || typeof entry.usage !== "number" || !isFinite(entry.usage) || entry.usage < 0 || entry.usage > 100 || !entry.uuid) {
+        // A failed poll cannot invalidate a previously measured burst. Keep
+        // device identity and recent history, but hide the unavailable reading.
+        return {available: false, uuid: previous ? previous.uuid : "", usage: 0, stampMs: 0, samples: samples}
+    }
+    if (!previous || previous.uuid !== entry.uuid) samples = []
+    samples.push({stampMs: nowMs, usage: entry.usage})
+    return {available: true, uuid: entry.uuid, usage: entry.usage, stampMs: nowMs, samples: samples}
+}
+
+function gpuLoadPeak(state, nowMs) {
+    if (!state || !state.available || state.stampMs <= 0 || nowMs - state.stampMs > 1500) return null
+    var peak = null
+    var samples = state.samples || []
+    for (var i = 0; i < samples.length; i++) {
+        if (nowMs - samples[i].stampMs > 30000 || samples[i].stampMs > nowMs) continue
+        peak = peak === null ? samples[i].usage : Math.max(peak, samples[i].usage)
+    }
+    return peak
+}
+
 if (typeof module !== "undefined") {
     module.exports = {
+        parseGpuLoads: parseGpuLoads,
+        gpuProcessRole: gpuProcessRole,
+        nextGpuLoadState: nextGpuLoadState,
+        gpuLoadPeak: gpuLoadPeak,
         historyX: historyX,
+        historySegments: historySegments,
+        telemetrySample: telemetrySample,
         staleDomains: staleDomains,
         staleAfterMsFor: staleAfterMsFor,
         parseNvidiaMemory: parseNvidiaMemory,

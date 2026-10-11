@@ -19,8 +19,13 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
     cutoff = now - 24 * 60 * 60
     connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
     try:
+        # Older databases predate these columns; retain their plain-response
+        # behavior without hiding tool preambles in current schemas.
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(messages)")}
+        tool_calls_column = "messages.tool_calls" if "tool_calls" in columns else "NULL"
+        finish_column = "messages.finish_reason" if "finish_reason" in columns else "NULL"
         rows = connection.execute(
-            """WITH RECURSIVE lineage(session_id, root_id, source) AS (
+            f"""WITH RECURSIVE lineage(session_id, root_id, source) AS (
                    SELECT id, id, source
                    FROM sessions
                    WHERE parent_session_id IS NULL
@@ -29,7 +34,7 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
                    FROM sessions AS child
                    JOIN lineage ON child.parent_session_id = lineage.session_id
                )
-               SELECT lineage.root_id, messages.role, messages.timestamp
+               SELECT lineage.root_id, messages.role, messages.timestamp, {tool_calls_column}, {finish_column}
                FROM messages
                JOIN lineage ON lineage.session_id = messages.session_id
                WHERE messages.timestamp >= ? AND messages.timestamp <= ?
@@ -41,12 +46,22 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
 
         active_turn = {}
         longest = 0.0
-        for lineage_id, role, timestamp in rows:
+        for lineage_id, role, timestamp, tool_calls, finish_reason in rows:
             if role == "user":
                 active_turn[lineage_id] = timestamp
                 continue
             if role != "assistant" or lineage_id not in active_turn:
                 continue
+            if str(finish_reason or "").lower() not in {"", "stop", "end_turn"}:
+                continue
+            if tool_calls:
+                try:
+                    calls = json.loads(tool_calls)
+                except (ValueError, TypeError):
+                    # Malformed call metadata cannot prove completion.
+                    continue
+                if calls:
+                    continue
             duration = timestamp - active_turn.pop(lineage_id)
             if duration >= 0:
                 longest = max(longest, duration)

@@ -98,11 +98,12 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     assert 'powerText:root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts)' in text
     assert 'powerText:root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts)' in text
     assert 'powerText:root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts)' in text
-    assert 'text: modelData.powerText || ""' in text
+    assert 'mainText: cardData.powerText || ""' in text
+    assert 'text: (cardData.powerText || "").replace("POWER ", "")' in text
     assert 'vramFill:root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB)' in text
     assert 'vramFill:root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB)' in text
     assert 'vramFill:root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB)' in text
-    assert 'text: "VRAM " + Math.round(modelData.vramFill || 0) + "%"' in text
+    assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)' in text
     assert 'gpuFill:' not in text
     assert 'id: gpuTelemetrySource' in text
     assert 'gpu_telemetry.py' in text
@@ -115,7 +116,7 @@ def test_cpu_card_shows_top_four_processes_in_its_detail_area():
     assert 'id: topCpuSource' in text
     assert 'cpu_process_snapshot.py' in text
     assert 'MonitorLogic.cpuProcessRates' in text
-    assert 'property string heading: metricKind === "cpu" ? root.cpuProcessHeading() : (metricKind === "gpu" ? "TOP · VRAM" : "TOP · RAM")' in text
+    assert 'property string heading: metricKind === "cpu" ? root.cpuProcessHeading() : (metricKind === "gpu" ? cardData.gpuName : "TOP · RAM")' in text
     assert 'function cpuProcessHeading()' in text
     assert 'function cpuDetailLabel()' in text
     assert 'cpu/all/coreCount' in text
@@ -130,7 +131,7 @@ def test_ram_card_shows_top_four_processes_in_its_detail_area():
     assert 'id: topRamSource' in text
     assert 'ps -eo rss=,comm= --sort=-rss | head -4' in text
     assert 'processes:root.topRamProcesses' in text
-    assert 'if (isFinite(mib) && mib >= 1024) return (mib / 1024).toFixed(1) + " GiB"' in text
+    assert 'if (metricLabel === "RAM" && number >= 1024) return (number / 1024).toFixed(1) + "G"' in text
     assert 'processes.length < 4' in text
     assert 'onTriggered: topRamSource.connectSource(topRamSource.command)' in text
 
@@ -158,27 +159,45 @@ def _match_int(pattern, text):
     return int(match.group(1))
 
 
-def _grid_geometry(cards):
-    """Grid metrics of the four process cards, read from the QML source."""
-    grid = cards[cards.index("Grid {"):cards.index("Repeater {")]
+def _card_geometry(cards):
+    """Geometry of the five process cards, read from the QML source."""
+    container = cards[cards.index("Item {"):cards.index("Repeater {")]
     return {
-        "height": _match_int(r"Layout\.preferredHeight:\s*(\d+)", grid),
-        "columns": _match_int(r"\bcolumns:\s*(\d+)", grid),
-        "rows": _match_int(r"\brows:\s*(\d+)", grid),
-        "columnSpacing": _match_int(r"columnSpacing:\s*(\d+)", grid),
-        "rowSpacing": _match_int(r"rowSpacing:\s*(\d+)", grid),
+        "height": _match_int(r"Layout\.preferredHeight:\s*(\d+)", container),
+        "spacing": _match_int(r"readonly property int cardSpacing:\s*(\d+)", container),
+        "gpuColumns": _match_int(r"readonly property int gpuColumns:\s*(\d+)", container),
+        "lowerColumns": _match_int(r"readonly property int lowerColumns:\s*(\d+)", container),
     }
 
 
 def _delegate_geometry(cards):
     delegate = cards[cards.index("delegate: Rectangle {"):cards.index("id: metricKpi")]
     return {
-        "columnGap": _match_int(r"width:\s*\(parent\.width\s*-\s*(\d+)\)", delegate),
-        "columns": _match_int(r"width:\s*\(parent\.width\s*-\s*\d+\)\s*/\s*(\d+)", delegate),
-        "rowGap": _match_int(r"height:\s*\(parent\.height\s*-\s*(\d+)\)", delegate),
-        "rows": _match_int(r"height:\s*\(parent\.height\s*-\s*\d+\)\s*/\s*(\d+)", delegate),
         "margins": _match_int(r"anchors\.margins:\s*(\d+)", delegate),
     }
+
+
+def test_cpu_and_ram_fill_the_lower_row_without_moving_the_three_gpu_cards():
+    cards = source().split("// --- Three-GPU row", 1)[1].split("// --- NETWORK section", 1)[0]
+    geometry = _card_geometry(cards)
+    delegate = cards[cards.index("delegate: Rectangle {"):cards.index("id: metricKpi")]
+    assert geometry["gpuColumns"] == 3
+    assert geometry["lowerColumns"] == 2
+    assert len(re.findall(r'\{kind:"gpu"', cards)) == geometry["gpuColumns"]
+    assert len(re.findall(r'\{kind:"(?:cpu|ram)"', cards)) == geometry["lowerColumns"]
+    assert 'width: index < parent.gpuColumns ? parent.gpuCardWidth : parent.lowerCardWidth' in delegate
+    assert 'x: index < parent.gpuColumns ? index * (parent.gpuCardWidth + parent.cardSpacing) : (index - parent.gpuColumns) * (parent.lowerCardWidth + parent.cardSpacing)' in delegate
+    assert 'y: index < parent.gpuColumns ? 0 : parent.cardHeight + parent.cardSpacing' in delegate
+    assert 'readonly property real gpuCardWidth: (width - (gpuColumns - 1) * cardSpacing) / gpuColumns' in cards
+    assert 'readonly property real lowerCardWidth: (width - (lowerColumns - 1) * cardSpacing) / lowerColumns' in cards
+    assert 'readonly property real cardHeight: (height - cardSpacing) / 2' in cards
+    for width in (600, 900, 1200):
+        gap = geometry["spacing"]
+        gpu_width = (width - (geometry["gpuColumns"] - 1) * gap) / geometry["gpuColumns"]
+        lower_width = (width - (geometry["lowerColumns"] - 1) * gap) / geometry["lowerColumns"]
+        assert gpu_width * geometry["gpuColumns"] + gap * (geometry["gpuColumns"] - 1) == width
+        assert lower_width * geometry["lowerColumns"] + gap * (geometry["lowerColumns"] - 1) == width
+        assert lower_width > gpu_width
 
 
 def _coupled_process_row_count(text):
@@ -226,22 +245,17 @@ def test_process_cards_keep_their_height_while_showing_four_rows():
     """
     text = source()
     cards = text[text.index("// --- Three-GPU row"):text.index("// --- NETWORK section")]
-    grid = _grid_geometry(cards)
+    grid = _card_geometry(cards)
     delegate = _delegate_geometry(cards)
 
-    assert delegate["columns"] == grid["columns"], "card delegate and Grid columns disagree"
-    assert delegate["rows"] == grid["rows"], "card delegate and Grid rows disagree"
-    assert grid["columns"] * grid["rows"] == 6, (
-        "the process grid must stay a 3x2 layout (three GPU cards, then CPU/RAM)"
-    )
     # The GPUs are the reason the first row is three wide: they must fill it
-    # exactly, or the row wraps and the cards stop sitting next to each other.
-    assert len(re.findall(r'\{kind:"gpu"', cards)) == grid["columns"], (
+    # exactly, without leaving a slot in the second row.
+    assert len(re.findall(r'\{kind:"gpu"', cards)) == grid["gpuColumns"], (
         "the GPU cards do not fill the first row exactly"
     )
-    assert len(re.findall(r'\{kind:"', cards)) == 5
+    assert len(re.findall(r'\{kind:"', cards)) == grid["gpuColumns"] + grid["lowerColumns"]
 
-    card_height = (grid["height"] - delegate["rowGap"]) / grid["rows"]
+    card_height = (grid["height"] - grid["spacing"]) / 2
     inner_height = card_height - 2 * delegate["margins"]
 
     process_details = cards[cards.index("id: processDetails"):]
@@ -280,13 +294,13 @@ def test_gpu_chart_marks_the_now_point_without_the_removed_banner():
 
 def test_compact_cards_preserve_legible_operational_detail():
     text = source()
-    assert 'Layout.preferredHeight: 278' in text
+    assert 'Layout.preferredHeight: 342' in text
     assert 'columns: 2' in text and 'rows: 2' in text
     assert 'Layout.preferredHeight: 94' in text
     assert 'font.pixelSize: 13' in text
     assert 'font.pixelSize: 14' in text
-    assert 'mainText: modelData.label' in text
-    assert 'Text { anchors.fill: parent; text: modelData.label' in text
+    assert 'mainText: cardData.label' in text
+    assert 'Text { anchors.fill: parent; text: cardData.label' in text
     assert 'elide: Text.ElideMiddle' in text
     assert 'elide: Text.ElideRight' in text
     assert '"SYSTEM DISK /"' in text
@@ -402,7 +416,7 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'columns: 2' in text and 'rows: 2' in text
     assert 'text: "LOAD 1M"' in text
     assert 'text: "PROCESSES"' in text
-    assert 'sessionLabel: "HERMES-SESSION"' in text
+    assert 'sessionLabel: "ANTW. MAX24H"' in text
     assert 'root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"' in text
     assert 'OPENAI 0AUTH' not in text
     assert 'id: openAiOauthCard' in text
@@ -419,17 +433,13 @@ def test_system_and_ai_service_rows_place_related_status_together():
 def test_three_gpu_cards_share_one_row_and_the_process_cards_one_more():
     """All three GPU cards sit side by side; CPU and RAM keep the second row.
 
-    The column count, the delegate width and the card count are coupled: a
-    three-column grid with a two-card width overflows the row, and a two-column
-    grid with three GPU cards wraps one of them onto the CPU/RAM row.
+    The order determines which delegates use the upper and lower geometry.
     """
     text = source()
     cards = text[text.index("// --- Three-GPU row"):text.index("// --- NETWORK section")]
-    assert 'columns: 3' in cards
-    assert 'rows: 2' in cards
-    assert 'width: (parent.width - 32) / 3' in cards
-    assert 'width: (parent.width - 16) / 2' not in cards
-    assert len(re.findall(r'\{kind:"gpu"', cards)) == 3
+    geometry = _card_geometry(cards)
+    assert geometry["gpuColumns"] == 3
+    assert geometry["lowerColumns"] == 2
     assert len(re.findall(r'\{kind:"', cards)) == 5
     # GPU 0/1/2 must be the first three cells, in that order, followed by CPU/RAM.
     order = re.findall(r'\{kind:"(\w+)"', cards)
@@ -488,17 +498,17 @@ def test_narrow_cards_fit_their_key_figures_without_cutting_them(self=None):
     assert 'return "TOP · CPU %"' in text
     assert 'function fmtMemoryPairExact(usedBytes, totalBytes)' in text
     assert 'mainText: root.fmtMemoryPairExact(root.ramUsedBytes, root.ramTotalBytes)' in text
-    assert 'mainText: "VRAM " + root.fmtVram(modelData.vramUsedMiB || 0)' in text
+    assert 'mainText: cardData.available ? "VRAM " + root.fmtVram(cardData.vramUsedMiB || 0)' in text
 
 
 def test_gpu_card_uses_primary_gpu_value_and_one_unambiguous_vram_bar():
     text = source()
     assert 'property color orange: "#FF9F43"' in text
-    assert 'color: (modelData.vramFill || 0) >= 85 ? root.critical : root.cyan' in text
+    assert 'color: (cardData.vramFill || 0) >= 95 ? root.critical : ((cardData.vramFill || 0) >= 85 ? root.warning : root.cyan)' in text
     assert text.count('vramFill:root.vramPercent(') == 3
-    assert 'text: "VRAM " + Math.round(modelData.vramFill || 0) + "%"' in text
-    assert 'Math.max(0, Math.min(1, (modelData.vramFill || 0) / 100))' in text
-    assert '(modelData.vramFill || 0) >= 85 ? root.critical : root.cyan' in text
+    assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)' in text
+    assert 'Math.max(0, Math.min(1, (cardData.vramFill || 0) / 100))' in text
+    assert '(cardData.vramFill || 0) >= 95 ? root.critical : ((cardData.vramFill || 0) >= 85 ? root.warning : root.cyan)' in text
     assert 'gpuFill:' not in text
     assert 'function fmtMemoryPair(usedBytes, totalBytes)' in text
     assert 'detail:root.fmtMemoryPair(root.ramUsedBytes, root.ramTotalBytes)' in text
@@ -658,8 +668,8 @@ def test_elided_model_process_and_system_texts_expose_full_tooltips():
     text = source()
     assert text.count('PlasmaCore.ToolTipArea {') >= 4
     assert 'mainText: parent.process.name' in text
-    assert 'mainText: modelData.label' in text
-    assert 'sessionLabel: "HERMES-SESSION"' in text
+    assert 'mainText: cardData.label' in text
+    assert 'sessionLabel: "ANTW. MAX24H"' in text
     assert '"Längste abgeschlossene Hermes-Antwort der letzten 24 h" + profileHint' in text
 
 
@@ -682,7 +692,7 @@ def test_gpu_power_uses_a_compact_bounded_draw_over_limit_label():
     text = source()
     assert 'function gpuPowerText(drawValue, limitValue)' in text
     assert 'return "POWER " + draw.toFixed(0) + "/" + limit.toFixed(0) + " W"' in text
-    power_block = text[text.index('visible: modelData.kind === "gpu" && !!modelData.powerText'):text.index('// --- CPU card:')]
+    power_block = text[text.index('visible: cardData.kind === "gpu" && !!cardData.powerText'):text.index('// --- CPU card:')]
     assert 'width: parent.width - 4' in power_block
     assert 'elide: Text.ElideRight' in power_block
 
@@ -724,21 +734,96 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'root.obsHealthTone()' in text
 
 
-def test_obs_card_leads_with_the_scope_distribution():
+def test_obs_card_leads_with_the_merging_health_of_the_current_bank():
     text = source()
-    # The all-time percentages cannot show the sweep fix, so the card must lead
-    # with the scope count, the shared-scope rows and the post-switch cohort.
-    assert 'SCOPE " + root.obsScopeTotal' in text
-    assert '" · SHARED " + root.obsUntaggedObservations' in text
-    assert '" · NEU " + root.fmtPct1(root.obsCohortTaglessPct)' in text
-    # The cohort is compared against the pre-fix plateau, not the 2026-09-24 baseline.
-    assert 'root.obsCohortTaglessPct > root.obsBaselineCohortTaglessPct' in text
+    # The bank was rebuilt on 2026-10-02, so the card leads with the metrics that
+    # survive a rebuild: how much consolidation merges, backlog and scope split.
+    assert '"MERGE " + root.fmtPct0(root.obsMergePct)' in text
+    assert '"BACKLOG " + root.obsInt(root.obsOrphanBacklog)' in text
+    assert '" · SCOPE " + root.obsInt(root.obsScopeTotal)' in text
+    assert 'LAG " + root.fmtLagHours(root.obsLagHours)' in text
+    # The scope count alone says nothing about how the bank is really split, so
+    # the bar also carries the tag drift (scopes that only wrap an existing tag
+    # set) and the share of observations sitting in the untagged catch-all pool.
+    assert '" · DRIFT " + root.obsInt(root.obsDriftScopes)' in text
+    assert '" · UNTAG " + root.fmtPct0(root.obsUntaggedSharePct)' in text
+    # Scope split is reported as a trend against the previous valid poll.
+    assert 'root.obsScopeTrendLabel()' in text
+    assert 'root.obsScopeTotal <= root.obsPreviousScopeTotal' in text
+    # Thresholds travel with the payload instead of being duplicated in QML.
+    assert 'root.obsThreshold(' in text
+    assert 'payload.thresholds' in text
     # Absent fields must not read as zero.
-    assert 'payload.scope_total, -1' in text
-    assert 'payload.since_switch_tagless_pct, -1' in text
-    # No stale values on screen when the API is unreachable.
-    assert text.count('root.obsScopeTotal = -1') >= 2
-    assert text.count('root.obsCohortTaglessPct = -1') >= 2
+    assert 'payload.merge_pct, -1' in text
+    assert 'payload.lag_hours, -1' in text
+    assert 'payload.orphans, -1' in text
+    assert 'payload.drift_scopes, -1' in text
+    assert 'payload.untagged_share_pct, -1' in text
+    assert 'payload.orphan_check_median_containment, -1' in text
+    # No stale values on screen when the API is unreachable or the payload is malformed:
+    # both branches go through one reset path that blanks every metric.
+    assert text.count('root.resetObsHealth()') >= 2
+    assert 'root.updateObsScopeTotal(-1)' in text
+    reset = text[text.index('    function resetObsHealth()'):text.index('    function obsHealthOk()')]
+    for field in ('obsHealthUnavailable', 'obsMergePct', 'obsOrphans', 'obsLagHours',
+                  'obsLargestScope', 'obsUntaggedSharePct', 'obsConsolidatedRecent',
+                  'obsOrphanCheckMedianContainment'):
+        assert field in reset, f"resetObsHealth leaves {field} stale"
+    # The scope total and the drift count are cleared through the shared helpers,
+    # which also reset the trends so the next poll cannot report a delta against a
+    # stale baseline.
+    assert 'root.updateObsScopeTotal(-1)' in reset
+    assert 'root.updateObsDriftTotal(-1)' in reset
+
+
+def test_obs_card_accepts_a_rising_scope_count_only_without_new_tag_drift():
+    text = source()
+    rule = text[text.index('    function obsScopeTrendOk()'):text.index('    function obsHealthOk()')]
+    # An unchanged or shrinking scope count stays healthy, exactly as before.
+    assert 'root.obsScopeTotal <= root.obsPreviousScopeTotal' in rule
+    # A rising count is only accepted when no scope started wrapping an existing
+    # tag set: a brand-new topic opens a new pool, while a tag permutation splits
+    # an existing one. Without drift data the old strict verdict stands.
+    assert 'root.obsDriftScopes <= root.obsPreviousDriftScopes' in rule
+    assert 'return false' in rule
+    assert 'root.obsScopeTrendOk()' in text
+
+
+def test_obs_tooltip_carries_the_new_context_and_no_frozen_reference():
+    text = source()
+    detail = text[text.index('function obsHealthDetail()'):text.index('function gpuPowerText')]
+    # Throughput replaces the frozen pre-reset reference: LAG alone cannot show
+    # whether consolidation ran at all.
+    assert '"KONSOLIDIERUNG " + root.obsInt(windowHours) + "H: "' in detail
+    assert 'consolidated_window_hours' in detail
+    assert 'OHNE REFERENZ' in detail
+    # The sample audit of unreferenced facts is named, and its limits are stated
+    # instead of reading as a pass/fail gate.
+    assert 'ORPHAN-AUDIT' in detail
+    assert 'PARAPHRASIERT' in detail
+    assert 'DRIFT ' in detail
+    assert 'UNTAG' in detail
+    # The pre-reset snapshot (1009 obs / 37.6% merge) and the stale scope basis are
+    # gone: the rebuilt bank sat at the same merge share, which made the number
+    # read like a live benchmark.
+    assert 'VOR DEM RESET' not in text
+    assert 'SCOPE-BASIS' not in text
+    assert 'obsReferenceMergePct' not in text
+    assert 'obsReferenceObservations' not in text
+
+
+def test_obs_card_keeps_its_own_rolling_merge_trend_instead_of_a_frozen_reference():
+    text = source()
+    # A rolling trend of the card's own polls replaces the frozen pre-reset
+    # baseline. It is labelled as "since widget start" because it is not
+    # persisted and starts over with the widget.
+    assert 'property var obsMergeHistory' in text
+    assert 'root.obsRecordMergeTrend(' in text
+    assert 'TREND SEIT WIDGET-START' in text
+    history = text[text.index('    function obsRecordMergeTrend('):text.index('    function obsMergeTrendText(')]
+    # The window is bounded, so the history cannot grow without limit.
+    assert 'obsTrendWindowMs' in text
+    assert 'slice(' in history
 
 
 def test_obs_card_keeps_the_all_time_figures_in_the_tooltip_only():
@@ -748,7 +833,7 @@ def test_obs_card_keeps_the_all_time_figures_in_the_tooltip_only():
     # They were the headline before; they must not be in the card label any more.
     label = text[text.index('function obsHealthLabel()'):text.index('function obsHealthOk()')]
     assert 'TAGS 0' not in label and 'PROOF 1' not in label
-    assert 'SCOPE ' in label
+    assert 'MERGE ' in label
 
 
 def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():
