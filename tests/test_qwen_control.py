@@ -37,7 +37,7 @@ def test_status_uses_qwen_server_not_the_persistent_gateway(monkeypatch, load, a
     helper = load_helper()
 
     def capture(command, **kwargs):
-        assert "qwen38-llama-server.service" in command
+        assert "qwen38-ninfer.service" in command
         assert "qwen38-gateway.service" not in command
         return subprocess.CompletedProcess(command, 0,
             f"LoadState={load}\nActiveState={active}\nSubState=dead\n", "")

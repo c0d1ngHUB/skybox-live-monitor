@@ -50,7 +50,7 @@ def test_stop_waits_until_a_started_service_binds_its_http_socket(tmp_path):
     fake_bin.mkdir()
     fake = fake_bin / "systemctl"
     fake.write_text(f"#!{sys.executable}\nimport sys\n"
-                    "if 'is-active' in sys.argv:print('inactive' if 'qwen38-llama-server.service' in sys.argv else 'active')\n")
+                    "if 'is-active' in sys.argv:print('inactive' if 'qwen38-ninfer.service' in sys.argv else 'active')\n")
     fake.chmod(0o755)
     original = stop_script.read_text()
     isolated = original.replace("for port in 11439 11440; do",

@@ -22,7 +22,7 @@ def test_qwen_stop_does_not_start_check_or_probe_decommissioned_nimble(tmp_path)
     prefix = (f"#!{sys.executable}\nimport json,sys\nfrom pathlib import Path\n"
               f"with Path({str(calls)!r}).open('a') as f:f.write(json.dumps(sys.argv)+'\\n')\n")
     systemctl = fake_bin / "systemctl"
-    systemctl.write_text(prefix + "if 'is-active' in sys.argv:print('inactive' if 'qwen38-llama-server.service' in sys.argv else 'active')\n")
+    systemctl.write_text(prefix + "if 'is-active' in sys.argv:print('inactive' if 'qwen38-ninfer.service' in sys.argv else 'active')\n")
     systemctl.chmod(0o755)
     curl = fake_bin / "curl"
     curl.write_text(prefix + "print(json.dumps({'models':[]}))\n")

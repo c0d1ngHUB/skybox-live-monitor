@@ -34,7 +34,7 @@ def fetch_props() -> dict | None:
 def qwen_status() -> dict:
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "show", "qwen38-llama-server.service",
+            ["systemctl", "--user", "show", "qwen38-ninfer.service",
              "--property=LoadState,ActiveState,SubState"],
             capture_output=True, text=True, timeout=PROBE_TIMEOUT, check=False,
         )
@@ -42,7 +42,7 @@ def qwen_status() -> dict:
         return {"state": "unknown", "detail": "Qwen-Dienstzustand nicht lesbar."}
     props = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
     if props.get("LoadState") == "not-found":
-        return {"state": "unavailable", "detail": "qwen38-llama-server.service ist nicht installiert."}
+        return {"state": "unavailable", "detail": "qwen38-ninfer.service ist nicht installiert."}
     if result.returncode != 0 or props.get("LoadState") != "loaded":
         return {"state": "unknown", "detail": "Qwen-Dienstzustand nicht lesbar."}
     state = {
