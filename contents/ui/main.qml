@@ -73,6 +73,8 @@ PlasmoidItem {
     property int processCount: 0
     property real hermesMaxThinkSeconds: 0
     property string hermesMaxThinkService: ""
+    property bool hermesMaxThinkUnavailable: true
+    property bool hermesMaxThinkPartial: false
     property int openAiActiveKeys: -1
     property int openAiTotalKeys: -1
     property int openAiFetchFailures: 0
@@ -1632,9 +1634,11 @@ PlasmoidItem {
                                     property string sessionLabel: "ANTW. MAX24H"
                                     property string profileHint: root.hermesMaxThinkService.length > 0 ? " · Profil: " + root.hermesMaxThinkService.toLowerCase() : ""
                                     mainText: "Längste abgeschlossene Hermes-Antwort der letzten 24 h" + profileHint
+                                        + (root.hermesMaxThinkUnavailable ? "\nAntwortzeiten nicht lesbar."
+                                            : root.hermesMaxThinkPartial ? "\nTeilabfrage: Mindestens diese Dauer; einzelne Profile sind nicht lesbar." : "")
                                     Text { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: parent.sessionLabel; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
                                 }
-                                Text { id: thinkDuration; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtDuration(root.hermesMaxThinkSeconds); color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
+                                Text { id: thinkDuration; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.hermesMaxThinkUnavailable ? "--" : (root.hermesMaxThinkPartial ? "≥ " : "") + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.hermesMaxThinkUnavailable || root.hermesMaxThinkPartial ? root.warning : root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                             }
                         }
                     }
@@ -1726,9 +1730,16 @@ PlasmoidItem {
             try { payload = JSON.parse(buffer.trim()) } catch (error) { payload = null }
             buffer = ""
             disconnectSource(source)
-            if (!payload) return
-            var seconds = Number(payload.seconds)
-            if (!isNaN(seconds)) root.hermesMaxThinkSeconds = Math.max(0, seconds)
+            var valid = Number(data["exit code"]) === 0 && payload && !payload.error
+                && typeof payload.seconds === "number" && isFinite(payload.seconds) && payload.seconds >= 0
+            root.hermesMaxThinkUnavailable = !valid
+            root.hermesMaxThinkPartial = !!(valid && payload.partial === true)
+            if (!valid) {
+                root.hermesMaxThinkSeconds = 0
+                root.hermesMaxThinkService = ""
+                return
+            }
+            root.hermesMaxThinkSeconds = payload.seconds
             root.hermesMaxThinkService = String(payload.service || "").toUpperCase()
         }
     }

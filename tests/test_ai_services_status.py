@@ -112,11 +112,9 @@ def test_hindsight_status_accepts_live_healthy_payload():
     assert status.state == "healthy"
 
 
-def test_gateway_status_maps_inactive_to_down():
-    original = ai.run_capture
-    ai.run_capture = lambda command, timeout=ai.TIMEOUT: "inactive" if command[:3] == ["systemctl", "--user", "is-active"] else ""
-    try:
-        status = ai.hermes_gateway_status()
-    finally:
-        ai.run_capture = original
+def test_gateway_status_maps_inactive_to_down(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(ai.subprocess, "run", lambda command, **kwargs:
+                        subprocess.CompletedProcess(command, 3, "inactive", ""))
+    status = ai.hermes_gateway_status()
     assert status.state == "down"

@@ -31,6 +31,10 @@ def test_qwen_button_executes_start_stop_handles_failure_and_blocks_duplicate_cl
     ctl.write_text(f"#!{sys.executable}\nfrom pathlib import Path\n"
                    f"print('LoadState=loaded\\nActiveState='+Path({str(state)!r}).read_text()+'\\nSubState=dead')\n")
     ctl.chmod(0o755)
+    docker = fake_bin / "docker"
+    docker.write_text(f"#!{sys.executable}\nfrom pathlib import Path\n"
+                      f"if Path({str(state)!r}).read_text()=='active':print('running')\n")
+    docker.chmod(0o755)
     for action, target in [("start", "active"), ("stop", "inactive")]:
         script = commands / f"qwen38-{action}"
         script.write_text(f"#!{sys.executable}\nfrom pathlib import Path\nimport sys,time\n"

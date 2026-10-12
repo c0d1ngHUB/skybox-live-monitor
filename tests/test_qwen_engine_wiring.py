@@ -39,6 +39,9 @@ def _write_fake(tmp_path: Path, ninfer_active: bool) -> tuple[Path, Path]:
     curl = fake_bin / "curl"
     curl.write_text(record + "print('{\"models\": []}')\n")
     curl.chmod(0o755)
+    docker = fake_bin / "docker"
+    docker.write_text(record + ("print('running')\n" if ninfer_active else ""))
+    docker.chmod(0o755)
     return fake_bin, calls
 
 

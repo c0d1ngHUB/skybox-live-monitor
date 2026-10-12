@@ -9,6 +9,7 @@ import argparse
 import json
 from pathlib import Path
 import sqlite3
+import stat
 import time
 
 
@@ -76,11 +77,23 @@ def service_label(db_path: Path) -> str:
     return "default"
 
 
-def discover_databases(root: Path) -> list[Path]:
+def discover_databases(root: Path, failed_profiles: list[str] | None = None) -> list[Path]:
     databases = [root / "state.db"]
+    failures = failed_profiles if failed_profiles is not None else []
     profiles = root / "profiles"
-    if profiles.is_dir():
-        databases.extend(sorted(profiles.glob("*/state.db")))
+    try:
+        directories = sorted(profiles.iterdir())
+    except FileNotFoundError:
+        return databases
+    except OSError:
+        failures.append("profiles")
+        return databases
+    for profile in directories:
+        try:
+            if stat.S_ISDIR(profile.stat().st_mode):
+                databases.append(profile / "state.db")
+        except OSError:
+            failures.append(profile.name)
     return databases
 
 
@@ -91,20 +104,36 @@ def main() -> None:
     parser.add_argument("--now", type=float, default=None)
     args = parser.parse_args()
 
+    value = 0
+    service = ""
+    readable = 0
+    failed_profiles = []
     try:
-        databases = [Path(args.db).expanduser()] if args.db else discover_databases(Path(args.root).expanduser())
-        current_time = args.now or time.time()
-        value = 0
-        service = ""
+        databases = [Path(args.db).expanduser()] if args.db else discover_databases(Path(args.root).expanduser(), failed_profiles)
+        current_time = args.now if args.now is not None else time.time()
         for database in databases:
-            candidate = longest_completed_turn(database, current_time)
+            try:
+                # stat raises on permission errors; is_file/glob can silently
+                # suppress them and falsely report a complete profile maximum.
+                database.stat()
+                candidate = longest_completed_turn(database, current_time)
+            except FileNotFoundError:
+                continue
+            except (OSError, sqlite3.Error):
+                failed_profiles.append(service_label(database))
+                continue
+            readable += 1
             if candidate > value:
                 value = candidate
                 service = service_label(database)
     except (OSError, sqlite3.Error):
-        value = 0
-        service = ""
-    print(json.dumps({"seconds": value, "service": service}, separators=(",", ":")))
+        failed_profiles.append("discovery")
+    payload = {"seconds": value if readable else None, "service": service}
+    if failed_profiles:
+        payload.update(partial=bool(readable), failed_profiles=failed_profiles)
+    if not readable:
+        payload["error"] = "database_unavailable"
+    print(json.dumps(payload, separators=(",", ":")))
 
 
 if __name__ == "__main__":

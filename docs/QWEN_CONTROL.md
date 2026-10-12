@@ -7,7 +7,7 @@ The AI SERVICES header contains one state-dependent start/stop button.
 - `contents/ui/QwenControl.qml` owns the button and independent 3-second status polling.
 - `contents/code/qwen_control.py` reads `qwen38-ninfer.service` and invokes only `~/.local/bin/qwen38-start` / `qwen38-stop`.
 - A sleeping Qwen server is still ON: its session reservation is not released until the server is stopped.
-- Actions disable the button, use a per-user process lock and return verified service state. Unique executable-source request IDs discard disconnected/stale completions before buffer mutation.
+- Actions disable the button, use a per-user process lock and return verified service state. An active unit also requires a confirmed running NInfer container; Docker query failures produce UNKNOWN. Unique executable-source request IDs discard disconnected/stale completions before buffer mutation.
 - The priority gateway remains active when Qwen is OFF. Boot settings and model configuration are not modified.
 - Stopping interrupts Qwen requests and restores only the Hindsight Ollama service. GPT-OSS warm-up follows its unit. Nimble is no longer used: it is never started, checked or probed by the stop script. The existing gateway configuration already has `[gpu_handoff].nimble = false` and remains unchanged.
 
@@ -36,6 +36,23 @@ before: serving on `http://127.0.0.1:11437`, `/props.is_sleeping`, control via
 - The llama.cpp wrapper and unit are archived as `*.bak-ninfer-switch-*`;
   `qwen38-llama-server.service` remains resolvable as a symlink alias to the
   new unit, so anything that only knows the old unit name keeps working.
+
+### Failure recovery (2026-10-12)
+
+The detached container can exit while the oneshot unit remains `active/exited`.
+The status helper therefore checks the exact `qwen38-ninfer` container through
+`docker container ls` before displaying ON. Sleeping still means ON; an
+unreadable Docker state is UNKNOWN. The Plasma user needs access to the same
+Docker daemon used by the start wrapper.
+
+The NInfer wrapper removes its container when startup fails or receives a
+termination signal. `ExecStopPost=docker rm -f qwen38-ninfer` also cleans up a
+failed or forcibly interrupted `ExecStart`, for which systemd skips `ExecStop`.
+The start script resets a confirmed stale active unit before retrying; a failed
+Docker query aborts the action instead of treating the container as absent.
+These wrappers and the user unit are local runtime dependencies outside this
+repository. The local regression suite exercises copies with fake Docker and a
+transient systemd unit; it does not load the production model.
 
 ## Existing stop-script readiness fix
 

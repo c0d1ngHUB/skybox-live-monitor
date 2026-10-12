@@ -31,6 +31,22 @@ def fetch_props() -> dict | None:
         return None
 
 
+def container_state() -> str | None:
+    """An empty successful list means absent; query failures remain unknown."""
+    try:
+        result = subprocess.run(
+            ["docker", "container", "ls", "--all", "--filter", "name=^/qwen38-ninfer$",
+             "--format", "{{.State}}"],
+            capture_output=True, text=True, timeout=PROBE_TIMEOUT, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    state = result.stdout.strip()
+    return state if state in {"", "created", "running", "paused", "restarting", "removing", "exited", "dead"} else None
+
+
 def qwen_status() -> dict:
     try:
         result = subprocess.run(
@@ -56,6 +72,11 @@ def qwen_status() -> dict:
         "unknown": "Qwen-Dienstzustand unbekannt.",
     }[state]
     if state == "running":
+        engine = container_state()
+        if engine is None:
+            return {"state": "unknown", "detail": "Qwen-Containerzustand nicht lesbar."}
+        if engine != "running":
+            return {"state": "failed", "detail": "Qwen-Container läuft nicht; Start erneut versuchen."}
         model = fetch_props()
         if model is not None and model.get("is_sleeping") is True:
             state, detail = "sleeping", "Qwen ist eingeschaltet und schläft; die Sitzung bleibt reserviert."

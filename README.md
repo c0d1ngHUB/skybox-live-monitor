@@ -34,6 +34,8 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 - NVIDIA VRAM telemetry via `nvidia-smi`
 - Longest completed Hermes run across the default and named profiles;
   assistant tool-call preambles and unfinished turns do not count as completion
+  One unreadable profile does not discard other readings: a partial maximum is
+  marked `≥` with a tooltip, and wholly unavailable timing appears as `--`.
 - GPU and network history show gaps when readings fail or expire; unavailable
   network readings are labelled rather than repeated as new measurements
 - Default-route interface detection supports gateway, VPN and PPP routes and
@@ -72,6 +74,8 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   in its tooltip. Stopping interrupts Qwen requests and restores Hindsight only;
   the decommissioned Nimble service is neither started nor probed.
   Boot settings and gateway configuration are not changed.
+- Gateway query failures appear as UNKNOWN; OFFLINE requires a confirmed inactive
+  or failed gateway state.
 - No analytics uploads; local system probes and Hindsight HTTP health queries
 - OpenAI OAuth availability is read through the local `hermes auth list` command; only aggregate counts reach the widget
 

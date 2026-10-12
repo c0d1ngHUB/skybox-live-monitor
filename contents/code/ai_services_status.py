@@ -48,12 +48,19 @@ def fetch_json(url: str) -> Any:
 
 
 def hermes_gateway_status() -> ServiceStatus:
-    out = run_capture(["systemctl", "--user", "is-active", "hermes-gateway.service"])
-    if out == "active":
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", "hermes-gateway.service"],
+            capture_output=True, text=True, timeout=TIMEOUT, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ServiceStatus("unknown")
+    out = (result.stdout or "").strip()
+    if result.returncode == 0 and out == "active":
         return ServiceStatus("running")
-    if out:
+    if result.returncode in {0, 3} and out in {"inactive", "failed"}:
         return ServiceStatus("down")
-    return ServiceStatus("down")
+    return ServiceStatus("unknown")
 
 
 def hindsight_status() -> ServiceStatus:

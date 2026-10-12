@@ -43,6 +43,7 @@ def test_status_uses_qwen_server_not_the_persistent_gateway(monkeypatch, load, a
             f"LoadState={load}\nActiveState={active}\nSubState=dead\n", "")
 
     monkeypatch.setattr(helper.subprocess, "run", capture)
+    monkeypatch.setattr(helper, "container_state", lambda: "running")
     monkeypatch.setattr(helper, "fetch_props", lambda: props)
     assert helper.qwen_status()["state"] == want
 
