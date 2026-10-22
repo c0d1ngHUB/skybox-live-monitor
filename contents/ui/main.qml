@@ -1128,6 +1128,17 @@ PlasmoidItem {
                 }
             }
 
+            BlackwellHealth {
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                Layout.minimumHeight: implicitHeight
+                ink: root.ink
+                muted: root.muted
+                accent: root.violet
+                warning: root.warning
+                critical: root.critical
+            }
+
             // --- Three-GPU row followed by two full-width CPU/RAM cards ---
             Item {
                 Layout.fillWidth: true
