@@ -3,10 +3,43 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
+
+import pytest
 
 ROOT=Path(__file__).parents[1]
 
+
+def qml_runner(tmp_path):
+    """Probe dependencies only; actual component/test failures must never skip."""
+    runner = shutil.which('qmltestrunner') or '/usr/lib/qt6/bin/qmltestrunner'
+    probe = tmp_path / 'tst_dependencies.qml'
+    probe.write_text('''import QtQuick
+import QtTest
+import org.kde.plasma.core as PlasmaCore
+import org.kde.plasma.plasma5support as PlasmaSupport
+TestCase { name: "Dependencies"; function test_imports() { verify(true) } }
+''')
+    try:
+        result = subprocess.run([runner, '-input', str(probe)],
+            env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'},
+            text=True, capture_output=True, timeout=25)
+    except OSError as error:
+        reason = str(error)
+    else:
+        if result.returncode == 0:
+            if 'Dependencies::test_imports()' not in result.stdout:
+                pytest.fail('Qt dependency probe did not execute its test: ' + result.stdout + result.stderr)
+            return runner
+        reason = result.stdout + result.stderr
+    message = 'Qt Quick/Plasma integration dependencies unavailable: ' + reason
+    if os.environ.get('SKYBOX_REQUIRE_QML') == '1':
+        pytest.fail(message)
+    pytest.skip(message)
+
+
 def test_health_widget_click_staleness_nulls_and_events(tmp_path):
+    runner = qml_runner(tmp_path)
     code='''import QtQuick
 import QtTest
 import '''+json.dumps((ROOT/'contents/ui').as_uri())+'''
@@ -43,6 +76,7 @@ Item {
 }
 '''
     (tmp_path/'tst_health.qml').write_text(code)
-    result=subprocess.run(['/usr/lib/qt6/bin/qmltestrunner','-input',str(tmp_path)],env={**os.environ,'QT_QPA_PLATFORM':'offscreen'},text=True,capture_output=True,timeout=25)
+    result=subprocess.run([runner,'-input',str(tmp_path/'tst_health.qml')],env={**os.environ,'QT_QPA_PLATFORM':'offscreen'},text=True,capture_output=True,timeout=25)
     assert result.returncode==0,result.stdout+result.stderr
+    assert 'BlackwellHealth::test_health()' in result.stdout, result.stdout + result.stderr
     assert 'ReferenceError' not in result.stderr and 'TypeError' not in result.stderr
