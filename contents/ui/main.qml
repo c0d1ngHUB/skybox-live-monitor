@@ -1155,9 +1155,9 @@ PlasmoidItem {
                     model: 5
                     delegate: Rectangle {
                         readonly property var cardData: [
-                            {kind:"gpu", label:"GPU 0 · " + root.gpu0Name, gpuName:root.gpu0Name, gpuIndex:0, labelText: root.cardGpuLabel(0, root.gpu0Name), labelTooltip: root.cardGpuTooltip(0, root.gpu0Name), available:root.gpu0Available, value:root.gpu0Available && root.gpuLoadAvailable(0) ? Math.round(root.gpu0Usage) + "%" : "--", detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE", color:root.violet, detailColor:root.gpuTempColor(root.gpu0Temp, root.muted), healthLevel:!root.gpu0Available ? 2 : ((root.gpu0Temp >= 90 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 95) ? 2 : ((root.gpu0Temp >= 85 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB), vramUsedMiB:root.gpu0VramUsedMiB, vramTotalMiB:root.gpu0VramTotalMiB, powerText:root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts), processes:root.topGpu0Processes, processCount:root.gpu0ProcessCount, processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable},
-                            {kind:"gpu", label:"GPU 1 · " + root.gpu1Name, gpuName:root.gpu1Name, gpuIndex:1, labelText: root.cardGpuLabel(1, root.gpu1Name), labelTooltip: root.cardGpuTooltip(1, root.gpu1Name), available:root.gpu1Available, value:root.gpu1Available && root.gpuLoadAvailable(1) ? Math.round(root.gpu1Usage) + "%" : "--", detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE", color:root.cyan, detailColor:root.gpuTempColor(root.gpu1Temp, root.muted), healthLevel:!root.gpu1Available ? 2 : ((root.gpu1Temp >= 90 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 95) ? 2 : ((root.gpu1Temp >= 85 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB), vramUsedMiB:root.gpu1VramUsedMiB, vramTotalMiB:root.gpu1VramTotalMiB, powerText:root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts), processes:root.topGpu1Processes, processCount:root.gpu1ProcessCount, processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable},
-                            {kind:"gpu", label:"GPU 2 · " + root.gpu2Name, gpuName:root.gpu2Name, gpuIndex:2, labelText: root.cardGpuLabel(2, root.gpu2Name), labelTooltip: root.cardGpuTooltip(2, root.gpu2Name), available:root.gpu2Available, value:root.gpu2Available && root.gpuLoadAvailable(2) ? Math.round(root.gpu2Usage) + "%" : "--", detail:root.gpu2Available ? Math.round(root.gpu2Temp) + "°C" : "UNAVAILABLE", color:root.lime, detailColor:root.gpuTempColor(root.gpu2Temp, root.muted), healthLevel:!root.gpu2Available ? 2 : ((root.gpu2Temp >= 90 || root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) >= 95) ? 2 : ((root.gpu2Temp >= 85 || root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB), vramUsedMiB:root.gpu2VramUsedMiB, vramTotalMiB:root.gpu2VramTotalMiB, powerText:root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts), processes:root.topGpu2Processes, processCount:root.gpu2ProcessCount, processUnavailable:!root.gpu2Available || root.gpuProcessUnavailable},
+                            {kind:"gpu", label:"GPU 0 · " + root.gpu0Name, gpuName:root.gpu0Name, gpuIndex:0, labelText: root.cardGpuLabel(0, root.gpu0Name), labelTooltip: root.cardGpuTooltip(0, root.gpu0Name), available:root.gpu0Available, value:root.gpu0Available && root.gpuLoadAvailable(0) ? Math.round(root.gpu0Usage) + "%" : "--", detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE", color:root.violet, detailColor:root.gpuTempColor(root.gpu0Temp, root.muted), healthLevel:!root.gpu0Available ? 2 : ((root.gpu0Temp >= 90 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 95) ? 2 : ((root.gpu0Temp >= 85 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu0Available ? root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) : 0, vramUsedMiB:root.gpu0VramUsedMiB, vramTotalMiB:root.gpu0VramTotalMiB, powerText:root.gpu0Available ? root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts) : "", processes:root.topGpu0Processes, processCount:root.gpu0ProcessCount, processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable},
+                            {kind:"gpu", label:"GPU 1 · " + root.gpu1Name, gpuName:root.gpu1Name, gpuIndex:1, labelText: root.cardGpuLabel(1, root.gpu1Name), labelTooltip: root.cardGpuTooltip(1, root.gpu1Name), available:root.gpu1Available, value:root.gpu1Available && root.gpuLoadAvailable(1) ? Math.round(root.gpu1Usage) + "%" : "--", detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE", color:root.cyan, detailColor:root.gpuTempColor(root.gpu1Temp, root.muted), healthLevel:!root.gpu1Available ? 2 : ((root.gpu1Temp >= 90 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 95) ? 2 : ((root.gpu1Temp >= 85 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu1Available ? root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) : 0, vramUsedMiB:root.gpu1VramUsedMiB, vramTotalMiB:root.gpu1VramTotalMiB, powerText:root.gpu1Available ? root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts) : "", processes:root.topGpu1Processes, processCount:root.gpu1ProcessCount, processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable},
+                            {kind:"gpu", label:"GPU 2 · " + root.gpu2Name, gpuName:root.gpu2Name, gpuIndex:2, labelText: root.cardGpuLabel(2, root.gpu2Name), labelTooltip: root.cardGpuTooltip(2, root.gpu2Name), available:root.gpu2Available, value:root.gpu2Available && root.gpuLoadAvailable(2) ? Math.round(root.gpu2Usage) + "%" : "--", detail:root.gpu2Available ? Math.round(root.gpu2Temp) + "°C" : "UNAVAILABLE", color:root.lime, detailColor:root.gpuTempColor(root.gpu2Temp, root.muted), healthLevel:!root.gpu2Available ? 2 : ((root.gpu2Temp >= 90 || root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) >= 95) ? 2 : ((root.gpu2Temp >= 85 || root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu2Available ? root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) : 0, vramUsedMiB:root.gpu2VramUsedMiB, vramTotalMiB:root.gpu2VramTotalMiB, powerText:root.gpu2Available ? root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts) : "", processes:root.topGpu2Processes, processCount:root.gpu2ProcessCount, processUnavailable:!root.gpu2Available || root.gpuProcessUnavailable},
                             {kind:"cpu", label:"CPU", value:Math.round(root.cpu) + "%", detail:root.cpuDetailLabel(), color:root.blue, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel:root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0), processes:root.topCpuProcesses, processCount:root.topCpuProcesses.length, processUnavailable:root.cpuProcessUnavailable},
                             {kind:"ram", label:"RAM", value:Math.round(root.ram) + "%", detail:root.fmtMemoryPair(root.ramUsedBytes, root.ramTotalBytes), color:root.orange, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel:root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0), processes:root.topRamProcesses, processCount:root.topRamProcesses.length, processUnavailable:root.ramProcessUnavailable}
                         ][index]
@@ -1666,9 +1666,9 @@ PlasmoidItem {
                 root.telemetryNowMs = Date.now()
                 if (root.lastServiceTelemetryMs > 0 && root.telemetryNowMs - root.lastServiceTelemetryMs > 60000) root.resetServices()
                 root.cpuHistory = root.push(root.cpuHistory, root.cpu)
-                root.gpu0History = root.push(root.gpu0History, MonitorLogic.telemetrySample(root.gpu0Usage, root.gpu0Available && root.gpuLoadAvailable(0), root.lastGpuTelemetryMs, root.telemetryNowMs, 15000))
-                root.gpu1History = root.push(root.gpu1History, MonitorLogic.telemetrySample(root.gpu1Usage, root.gpu1Available && root.gpuLoadAvailable(1), root.lastGpuTelemetryMs, root.telemetryNowMs, 15000))
-                root.gpu2History = root.push(root.gpu2History, MonitorLogic.telemetrySample(root.gpu2Usage, root.gpu2Available && root.gpuLoadAvailable(2), root.lastGpuTelemetryMs, root.telemetryNowMs, 15000))
+                root.gpu0History = root.push(root.gpu0History, MonitorLogic.gpuLoadSample(root.gpuLoadStates["0"], root.telemetryNowMs))
+                root.gpu1History = root.push(root.gpu1History, MonitorLogic.gpuLoadSample(root.gpuLoadStates["1"], root.telemetryNowMs))
+                root.gpu2History = root.push(root.gpu2History, MonitorLogic.gpuLoadSample(root.gpuLoadStates["2"], root.telemetryNowMs))
                 root.ramHistory = root.push(root.ramHistory, root.ram)
                 root.downHistory = root.push(root.downHistory, MonitorLogic.telemetrySample(root.down, root.networkAvailable, root.lastNetworkTelemetryMs, root.telemetryNowMs, 5000))
                 root.upHistory = root.push(root.upHistory, MonitorLogic.telemetrySample(root.up, root.networkAvailable, root.lastNetworkTelemetryMs, root.telemetryNowMs, 5000))
@@ -1685,8 +1685,8 @@ PlasmoidItem {
         id: diskUsageSource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/disk_usage.py").toString().replace("file://", "")
-        property string command: "python3 " + scriptPath + " /"
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/disk_usage.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + " /"
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1731,8 +1731,8 @@ PlasmoidItem {
         id: hermesThinkSource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/hermes_max_think.py").toString().replace("file://", "")
-        property string command: "python3 " + scriptPath
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/hermes_max_think.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath)
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1765,8 +1765,8 @@ PlasmoidItem {
         id: obsHealthSource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/hindsight_observation_health.py").toString().replace("file://", "")
-        property string command: "python3 " + scriptPath
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/hindsight_observation_health.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath)
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1828,8 +1828,8 @@ PlasmoidItem {
         id: openAiKeysSource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/hermes_openai_keys.py").toString().replace("file://", "")
-        property string command: "python3 " + scriptPath
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/hermes_openai_keys.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath)
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1860,8 +1860,8 @@ PlasmoidItem {
         id: aiServicesSource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/ai_services_status.py").toString().replace("file://", "")
-        property string command: "python3 " + scriptPath
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/ai_services_status.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath)
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1896,8 +1896,8 @@ PlasmoidItem {
         id: gpuTelemetrySource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/gpu_telemetry.py").toString().replace("file://", "")
-        property string command: "python3 " + scriptPath
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/gpu_telemetry.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath)
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1950,8 +1950,8 @@ PlasmoidItem {
         id: topCpuSource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/cpu_process_snapshot.py").toString().replace("file://", "")
-        property string command: "python3 " + scriptPath
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/cpu_process_snapshot.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath)
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -2019,8 +2019,8 @@ PlasmoidItem {
         id: netDetectSource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/network_interface.py").toString().replace("file://", "")
-        property string command: "python3 " + scriptPath
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/network_interface.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath)
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -2046,11 +2046,11 @@ PlasmoidItem {
         id: networkCountersSource
         engine: "executable"
         connectedSources: []
-        property string scriptPath: Qt.resolvedUrl("../code/network_counters.sh").toString().replace("file://", "")
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/network_counters.sh"))
         // The helper ignores the final argument. It gives each interface
         // generation a distinct executable source, including A -> B -> A.
         property int generation: 0
-        property string command: "sh " + scriptPath + " " + root.netIf + " /proc/net/dev " + networkCountersSource.generation
+        property string command: "sh " + MonitorLogic.shellQuote(scriptPath) + " " + MonitorLogic.shellQuote(root.netIf) + " /proc/net/dev " + networkCountersSource.generation
         property string buffer: ""
         onNewData: function(source, data) {
             if (source !== networkCountersSource.command) {

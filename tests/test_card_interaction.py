@@ -34,6 +34,7 @@ def test_live_card_updates_preserve_hover_and_visible_details(tmp_path):
     cards = cards.replace('mainText: cardData.available ? "VRAM "', 'objectName: "vramTip"; mainText: cardData.available ? "VRAM "')
     cards = cards.replace('text: root.gpuVramUsedText(', 'objectName: "vramValue"; text: root.gpuVramUsedText(')
     cards = cards.replace('width: parent.width * Math.max(', 'objectName: "vramFill"; width: parent.width * Math.max(')
+    cards = cards.replace('mainText: cardData.powerText || ""', 'objectName: "powerTip"; mainText: cardData.powerText || ""')
     cards = cards.replace('mainText: root.fmtMemoryPairExact(', 'objectName: "ramTip"; mainText: root.fmtMemoryPairExact(')
     for data in ('modelData', 'cardData'):
         cards = cards.replace('text: ' + data + '.value', 'objectName: "usageValue"; text: ' + data + '.value', 1)
@@ -82,7 +83,28 @@ Item {
             verify(tip.containsMouse)
             compare(tip.mainText,"14.0 / 29.8 GiB")
         }
+        function test_unavailable_gpu_hides_power_and_vram_fill_then_recovers() {
+            var entry={short_name:"Synthetic GPU",temperature_c:40,
+                memory_used_mib:12000,memory_total_mib:24000,
+                power_draw_w:100,power_limit_w:115,process_count:0,processes:[]}
+            for(var index=0;index<3;index++) {
+                var card=findChild(metricCards,"card"+index)
+                var fill=findChild(card,"vramFill"),power=findChild(card,"powerTip")
+                root.applyGpuTelemetry(entry,index); wait(20)
+                compare(power.mainText,"POWER 100/115 W");verify(power.visible)
+                verify(fill.width>0)
+                root.applyGpuTelemetry(null,index); wait(20)
+                compare(findChild(card,"vramValue").text,"VRAM --")
+                compare(findChild(card,"vramTip").mainText,"VRAM UNAVAILABLE")
+                compare(power.mainText,"");compare(power.visible,false)
+                compare(fill.width,0)
+                root.applyGpuTelemetry(entry,index);wait(20)
+                compare(power.mainText,"POWER 100/115 W");verify(power.visible)
+                verify(fill.width>0)
+            }
+        }
         function test_vram_label_is_outside_fill_and_alerts_match_card() {
+            root.gpu0Available=true;root.gpu0VramTotalMiB=8192
             var card=findChild(metricCards,"card0")
             var value=findChild(card,"vramValue"),fill=findChild(card,"vramFill")
             verify(value!==null && fill!==null)

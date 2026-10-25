@@ -1,4 +1,5 @@
 import QtQuick 2.15
+import "../code/monitor_logic.js" as MonitorLogic
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasma5support 2.0 as PlasmaSupport
 
@@ -174,8 +175,8 @@ Rectangle {
         property int requestId: 0
         property double startedMs: 0
         property string buffer: ""
-        property string scriptPath: Qt.resolvedUrl("../code/blackwell_health.py").toString().replace("file://", "")
-        property string command: "python3 '" + scriptPath.replace(/'/g, "'\\''") + "' --session " + health.session + " # skybox-request-" + requestId
+        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/blackwell_health.py"))
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + " --session " + health.session + " # skybox-request-" + requestId
         onNewData: function(name, data) {
             if (name !== command) return
             buffer += data["stdout"] || ""
