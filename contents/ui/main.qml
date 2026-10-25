@@ -211,11 +211,11 @@ PlasmoidItem {
     property bool networkAvailable: false
     property double lastServiceTelemetryMs: 0
 
+    // OAuth counts come from their own source (openAiKeysSource) and have
+    // their own failure handling; a service-poll failure must not wipe them.
     function resetServices() {
         root.hermesGatewayState = "UNKNOWN"
         root.hindsightState = "UNKNOWN"
-        root.openAiActiveKeys = -1
-        root.openAiTotalKeys = 0
     }
     function resetNetwork() {
         root.networkAvailable = false
@@ -1714,7 +1714,10 @@ PlasmoidItem {
         id: processCountSource
         engine: "executable"
         connectedSources: []
-        property string command: "sh -c 'ps -e --no-headers | wc -l'"
+        // Count /proc PIDs with shell builtins only. The executable engine runs
+        // this via /bin/sh -c, so that one shell is the only process the
+        // measurement adds (ps | wc used to inflate the count by three).
+        property string command: "set -- /proc/[0-9]*; echo $(($# - 1))"
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -1871,24 +1874,13 @@ PlasmoidItem {
             buffer = ""
             disconnectSource(source)
             if (Number(data["exit code"]) !== 0 || !payload
-                    || typeof payload.gateway !== "string" || typeof payload.hindsight !== "string"
-                    || typeof payload.openai_oauth_available !== "number" || typeof payload.openai_oauth_total !== "number"
-                    || !isFinite(Number(payload.openai_oauth_available)) || !isFinite(Number(payload.openai_oauth_total))) {
+                    || typeof payload.gateway !== "string" || typeof payload.hindsight !== "string") {
                 root.resetServices()
                 return
             }
             root.lastServiceTelemetryMs = Date.now()
             root.hermesGatewayState = (payload.gateway || "UNKNOWN").toUpperCase()
             root.hindsightState = (payload.hindsight || "UNKNOWN").toUpperCase()
-            if (Number(payload.openai_oauth_available) >= 0) root.openAiActiveKeys = Number(payload.openai_oauth_available)
-            if (Number(payload.openai_oauth_total) >= 0) root.openAiTotalKeys = Number(payload.openai_oauth_total)
-            // An unavailable aggregator means the dedicated helper never
-            // produced a valid aggregate; keep the OAuth card at unknown
-            // instead of letting a stale successful count persist.
-            if (Number(payload.openai_oauth_available) < 0 || Number(payload.openai_oauth_total) < 0) {
-                root.openAiActiveKeys = -1
-                root.openAiTotalKeys = 0
-            }
         }
     }
 
@@ -1934,7 +1926,9 @@ PlasmoidItem {
         engine: "executable"
         connectedSources: []
         // No Python startup or process enumeration in the fast sampling path.
-        property string command: "nvidia-smi --query-gpu=index,uuid,utilization.gpu --format=csv,noheader,nounits"
+        // A hung nvidia-smi would block this source (connectSource on a running
+        // command is a no-op), so bound it; a killed call is a missing sample.
+        property string command: "timeout 2 nvidia-smi --query-gpu=index,uuid,utilization.gpu --format=csv,noheader,nounits"
         property string buffer: ""
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
@@ -2160,8 +2154,10 @@ PlasmoidItem {
         onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
     }
 
+    // Sole steady-state OAuth poll (the service poll no longer runs
+    // `hermes auth list`); one minute tracks elapsing cooldowns closely.
     Timer {
-        interval: 900000
+        interval: 60000
         running: true
         repeat: true
         onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)

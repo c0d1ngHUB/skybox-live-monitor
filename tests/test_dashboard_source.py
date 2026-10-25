@@ -407,7 +407,7 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'property int openAiTotalKeys: -1' in text
     assert 'function fmtDuration(seconds)' in text
     assert 'id: processCountSource' in text
-    assert 'ps -e --no-headers | wc -l' in text
+    assert 'set -- /proc/[0-9]*; echo $(($# - 1))' in text
     assert 'id: hermesThinkSource' in text
     assert 'hermes_max_think.py' in text
     assert 'id: openAiKeysSource' in text
@@ -423,8 +423,6 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'root.openAiOauthLabel()' in text
     assert 'root.openAiOauthTone()' in text
     assert 'function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }' in text
-    assert 'payload.openai_oauth_available' in text
-    assert 'payload.openai_oauth_total' in text
     assert 'font.pixelSize: 14' in text
     assert 'Layout.preferredHeight: 178' in text
 
@@ -878,14 +876,10 @@ def test_openai_keys_polls_again_while_availability_is_unknown():
     assert text.count('onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)') == 2
 
 
-def test_ai_services_source_never_keeps_stale_oauth_counts():
+def test_ai_services_source_does_not_touch_oauth_counts():
     text = source()
     block = text[text.index("id: aiServicesSource"):text.index("id: gpuTelemetrySource")]
-    assert 'if (Number(payload.openai_oauth_available) >= 0) root.openAiActiveKeys' in block
-    assert 'if (Number(payload.openai_oauth_total) >= 0) root.openAiTotalKeys' in block
-    assert 'if (Number(payload.openai_oauth_available) < 0 || Number(payload.openai_oauth_total) < 0) {' in block
-    assert 'root.openAiActiveKeys = -1' in block
-    assert 'root.openAiTotalKeys = 0' in block
+    assert 'openai' not in block.lower()
 
 
 def test_oauth_label_and_state_cover_every_helper_failure_mode():

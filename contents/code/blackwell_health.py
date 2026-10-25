@@ -3,8 +3,12 @@
 
 Ten-second samples estimate board energy, not system or per-process energy.
 Gaps >25 s and failed polls are excluded, never interpolated as healthy zeros.
-ECC aggregates and PCIe AER totals have separate baselines and may overlap
-between endpoint/rootport: their deltas are not a count of unique incidents.
+PCIe AER endpoint/rootport totals have separate baselines and may overlap:
+their deltas are not a count of unique incidents. ECC is intentionally not
+monitored (it stays disabled on this card by decision).
+
+The target GPU is the first one whose name contains "Blackwell", or the UUID
+in SKYBOX_BLACKWELL_UUID, so a swapped card is picked up without code edits.
 """
 from __future__ import annotations
 import argparse
@@ -17,10 +21,8 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-UUID = 'GPU-2bc81341-8b1a-3a2e-679b-7a2bb75c6d9e'
-ECC_FIELDS = ('sram_correctable', 'dram_correctable', 'sram_uncorrectable_parity',
-              'sram_uncorrectable_secded', 'dram_uncorrectable')
 MAX_GAP = 25
+CACHE_TTL = 86400
 
 def capture(argv):
     try:
@@ -35,6 +37,18 @@ def numeric(text):
         return value if math.isfinite(value) and value >= 0 else None
     except (ValueError, IndexError):
         return None
+
+def target_uuid():
+    """Explicit override first, else the first GPU named like a Blackwell."""
+    override = os.environ.get('SKYBOX_BLACKWELL_UUID', '').strip()
+    if override:
+        return override
+    listing = capture(['nvidia-smi', '--query-gpu=uuid,name', '--format=csv,noheader'])
+    for line in (listing or '').splitlines():
+        uuid, _, name = line.partition(',')
+        if 'blackwell' in name.lower() and uuid.strip().startswith('GPU-'):
+            return uuid.strip()
+    return None
 
 def parse_gpu(xml, uuid):
     root = ET.fromstring(xml)
@@ -55,10 +69,7 @@ def parse_gpu(xml, uuid):
         bdf = bdf[4:]
     if not re.fullmatch(r'[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]', bdf):
         bdf = None
-    mode = gpu.findtext('ecc_mode/current_ecc')
     return {'uuid': uuid, 'bdf': bdf, 'name': gpu.findtext('product_name'),
-            'ecc_mode': mode if mode in ('Enabled', 'Disabled') else None,
-            'ecc': {k: num('ecc_errors/aggregate/' + k) for k in ECC_FIELDS},
             'reasons_complete': bool(flags) and all(v in ('Active', 'Not Active') for v in flags.values()),
             'thermal': thermal, 'reasons': [k for k, v in flags.items() if v == 'Active'] if flags else None,
             'sm_mhz': num('clocks/sm_clock'), 'memory_mhz': num('clocks/mem_clock'),
@@ -113,7 +124,7 @@ def journal(cursor=None):
         return None
 
 def advance(old, reading, now, boot, session):
-    uuid = reading['uuid'] if reading else old.get('uuid', UUID)
+    uuid = reading['uuid'] if reading else old.get('uuid')
     same = old.get('boot') == boot and old.get('session') == session and old.get('uuid') == uuid
     state = json.loads(json.dumps(old)) if same else {
         'boot': boot, 'session': session, 'uuid': uuid, 'started': now,
@@ -135,7 +146,7 @@ def advance(old, reading, now, boot, session):
     else:
         if same and state.get('available') is False:
             event('recovery', 'GPU-Messung wieder verfügbar')
-        for group in ('ecc', 'aer'):
+        for group in ('aer',):
             for key, value in reading.get(group, {}).items():
                 if value is None:
                     continue
@@ -184,9 +195,10 @@ def advance(old, reading, now, boot, session):
 def collect(state, session):
     now = time.time()
     boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    output = capture(['nvidia-smi', '-i', UUID, '-q', '-x'])
+    uuid = target_uuid()
+    output = capture(['nvidia-smi', '-i', uuid, '-q', '-x']) if uuid else None
     try:
-        reading = parse_gpu(output, UUID) if output else None
+        reading = parse_gpu(output, uuid) if output else None
     except (ET.ParseError, ValueError):
         reading = None
     if reading:
@@ -212,6 +224,19 @@ def state_path(cache, session, boot):
     return cache / ('blackwell-health-' + identity + '.json')
 
 
+def expire_cache(cache, keep):
+    """Remove idle session files, the pre-session legacy file and orphaned temps.
+
+    Active sessions update their mtime every poll, so only idle files expire.
+    """
+    for candidate in cache.glob('blackwell-health*'):
+        try:
+            if candidate != keep and candidate.is_file() and time.time() - candidate.stat().st_mtime > CACHE_TTL:
+                candidate.unlink()
+        except OSError:
+            pass
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--session', default='cli')
@@ -220,13 +245,7 @@ def main():
     cache.mkdir(mode=0o700, parents=True, exist_ok=True)
     boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     path = state_path(cache, args.session, boot)
-    # Active sessions update their mtime every poll; expire only idle session files.
-    for expired in cache.glob('blackwell-health-*.json'):
-        try:
-            if expired != path and time.time() - expired.stat().st_mtime > 86400:
-                expired.unlink()
-        except OSError:
-            pass
+    expire_cache(cache, keep=path)
     try:
         state = json.loads(path.read_text())
         if not isinstance(state, dict) or state.get('version') != 1:

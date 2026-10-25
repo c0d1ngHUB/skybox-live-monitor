@@ -18,12 +18,15 @@ Rectangle {
     property string session: String(Date.now()) + "-" + Math.floor(Math.random() * 1000000000000).toString(36)
     readonly property bool fresh: !!payload && payload.available === true && typeof payload.stamp === "number" && nowMs / 1000 >= payload.stamp && nowMs / 1000 - payload.stamp <= 25
     readonly property var current: fresh && payload.current ? payload.current : ({})
-    readonly property bool uncertain: !fresh || !current.ecc_mode || !complete(current.ecc) || !complete(current.aer) || current.thermal === null || !payload.journal_available
+    // ECC is deliberately off and not monitored. An unreadable kernel journal
+    // only disables Xid capture; it is shown as a hint, not as a warning state.
+    readonly property bool uncertain: !fresh || !complete(current.aer) || current.thermal === null
+    readonly property bool journalReadable: fresh && payload.journal_available === true
     readonly property bool thermal: fresh && current.thermal === true
     readonly property bool eventWarning: {
         var events = payload && payload.events ? payload.events : []
         for (var i = 0; i < events.length; i++) {
-            if (nowMs / 1000 - events[i].time <= 120 && ["ecc", "aer", "xid", "thermal"].indexOf(events[i].kind) >= 0) return true
+            if (nowMs / 1000 - events[i].time <= 120 && ["aer", "xid", "thermal"].indexOf(events[i].kind) >= 0) return true
         }
         return false
     }
@@ -58,14 +61,13 @@ Rectangle {
         var lines = ["GPU-Board-Schätzung · Messung alle 10 s · keine Prozess-/Systemenergie.",
             "Seit Widgetstart " + (payload ? new Date(payload.started * 1000).toLocaleTimeString() : "--")
             + " · erfasste Zeit " + number(payload ? payload.covered_s : null) + " s (Messlücken ausgeschlossen).",
-            "Ø letzte 60 s: " + number(fresh ? payload.average_w : null, 1) + " W · abgedeckt " + number(fresh ? payload.average_covered_s : null) + " s.",
-            "ECC-Aggregate (ältere Fehler sind keine neuen Ereignisse):"]
-        var ecc = current.ecc || ({})
-        for (var key in ecc) lines.push("  " + key + ": " + number(ecc[key]))
+            "Ø letzte 60 s: " + number(fresh ? payload.average_w : null, 1) + " W · abgedeckt " + number(fresh ? payload.average_covered_s : null) + " s."]
         lines.push("PCIe AER seit Boot (Endpoint/Rootport können dasselbe Ereignis zählen):")
         var aer = current.aer || ({})
         for (var name in aer) lines.push("  " + name + ": " + number(aer[name]))
-        lines.push("Xid-Kerneljournal: " + (fresh && payload.journal_available ? "lesbar · neue Ereignisse ab Monitoringstart" : "UNBEKANNT / nicht lesbar"))
+        if (!fresh) lines.push("Xid-Kerneljournal: UNBEKANNT")
+        else if (journalReadable) lines.push("Xid-Kerneljournal: lesbar · neue Ereignisse ab Monitoringstart")
+        else lines.push("Hinweis: Kernel-Journal nicht lesbar (Benutzer nicht in Gruppe systemd-journal) · Xid-Ereignisse werden nicht erfasst.")
         lines.push("Ereignisse (letzte 20, nur lokal seit Widgetstart):")
         var events = payload && payload.events ? payload.events : []
         if (!events.length) lines.push("  Keine erfassten Ereignisse; unbekannte Quellen sind kein Fehlerfrei-Nachweis.")
@@ -74,9 +76,10 @@ Rectangle {
     }
     Text {
         id: heading
+        objectName: "blackwellHeading"
         anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 10
-        text: "BLACKWELL · " + (!health.fresh ? "UNBEKANNT" : "ECC " + (health.current.ecc_mode === "Enabled" ? "AN" : health.current.ecc_mode === "Disabled" ? "AUS" : "?"))
-            + " · ECC Σ " + health.total(health.current.ecc) + " · AER Σ " + health.total(health.current.aer) + (health.eventWarning ? " · NEUES EREIGNIS" : "")
+        text: "BLACKWELL · " + (!health.fresh ? "UNBEKANNT" : health.number(health.current.temperature_c) + "°C · PCIe AER Σ " + health.total(health.current.aer))
+            + (health.eventWarning ? " · NEUES EREIGNIS" : "")
         color: health.fresh ? health.ink : health.warning
         font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true
         width: parent.width - toggle.width - 32; elide: Text.ElideRight
@@ -88,6 +91,7 @@ Rectangle {
         color: health.accent; font.family: "DejaVu Sans Mono"; font.pixelSize: 12
     }
     Text {
+        objectName: "blackwellSummary"
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: heading.bottom
         anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 5
         text: "Ø60s " + health.number(health.fresh ? health.payload.average_w : null, 1) + "W · ~"
@@ -115,7 +119,7 @@ Rectangle {
         Text {
             width: parent.width
             text: "SM " + health.number(health.current.sm_mhz) + " MHz · VRAM " + health.number(health.current.memory_mhz)
-                + " MHz · LIMIT " + health.number(health.current.limit_w) + " W · Xid " + (health.fresh && health.payload.journal_available ? "LESBAR" : "UNBEKANNT")
+                + " MHz · LIMIT " + health.number(health.current.limit_w) + " W · Xid " + (!health.fresh ? "UNBEKANNT" : health.journalReadable ? "LESBAR" : "N/V")
             color: health.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; elide: Text.ElideRight
         }
         Text {

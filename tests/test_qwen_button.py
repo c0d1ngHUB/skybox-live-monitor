@@ -52,7 +52,7 @@ Item {{
     TestCase {{
         name: "SkyboxQwenButton"; when: windowShown
         function test_start_stop_and_double_click() {{
-            tryCompare(control, "state", "stopped", 10000)
+            tryCompare(control, "qwenState", "stopped", 10000)
             var button = findChild(control, "qwenToggleButton")
             verify(button !== null)
             verify(button.enabled)
@@ -66,32 +66,32 @@ Item {{
             verify(button.text.indexOf("stoppen") >= 0)
             button.forceActiveFocus()
             keyClick(Qt.Key_Space)
-            tryCompare(control, "state", "stopped", 10000)
+            tryCompare(control, "qwenState", "stopped", 10000)
             tryCompare(control, "actionBusy", false, 10000)
             compare(control.errorMessage, "")
             // Unknown or external transitions cannot dispatch a command.
             var states = ["unknown", "unavailable", "starting", "stopping"]
             for (var i=0;i<states.length;i++) {{
-                control.state = states[i]
+                control.qwenState = states[i]
                 verify(!button.enabled)
                 mouseClick(button)
                 verify(!control.actionBusy)
             }}
-            control.state = "sleeping"
+            control.qwenState = "sleeping"
             verify(button.enabled)
             verify(button.text.indexOf("stoppen") >= 0, "Sleeping Qwen is ON, not OFF")
             // The second start fails through the real subprocess boundary.
-            control.state = "stopped"
+            control.qwenState = "stopped"
             mouseClick(button)
             tryCompare(control, "actionBusy", false, 10000)
             verify(control.errorMessage.indexOf("deliberate test failure") >= 0)
-            compare(control.state, "stopped")
+            compare(control.qwenState, "stopped")
             verify(button.enabled)
             verify(control.toolTipText.indexOf(control.errorMessage) >= 0)
             // A disconnected older request must not overwrite current truth.
-            control.state = "running"
+            control.qwenState = "running"
             control.handleData("old disconnected command", {{"stdout": '{{"state":"stopped"}}', "exit code": 0}})
-            compare(control.state, "running")
+            compare(control.qwenState, "running")
         }}
     }}
 }}'''

@@ -27,10 +27,8 @@ def reading():
 def step(state,r,t):
     return module().advance(state,r,t,'boot','session')
 
-def test_parser_retains_real_reasons_and_ecc_fields():
+def test_parser_retains_real_reasons_and_clock_fields():
     r=reading()
-    assert r['ecc_mode']=='Enabled'
-    assert r['ecc']['dram_uncorrectable']==0
     assert r['power_w']==100 and r['limit_w']==115
     assert r['thermal'] is False
     assert r['reasons']==['sw_power_cap','reliability']
@@ -38,24 +36,24 @@ def test_parser_retains_real_reasons_and_ecc_fields():
 
 def test_missing_and_nonfinite_values_are_unknown_not_zero():
     m=module(); r=m.parse_gpu('<nvidia_smi_log><gpu><uuid>GPU-test</uuid></gpu></nvidia_smi_log>','GPU-test')
-    assert r['thermal'] is None and r['ecc_mode'] is None
-    assert r['power_w'] is None and r['ecc']['dram_correctable'] is None
+    assert r['thermal'] is None
+    assert r['power_w'] is None
     assert r['reasons_complete'] is False
     assert m.numeric('NaN') is None and m.numeric('inf') is None
     with pytest.raises(ValueError): m.parse_gpu(XML,'GPU-wrong')
 
 def test_baseline_is_not_new_error_and_recovery_detects_increment():
-    r=reading(); r['ecc']['dram_correctable']=10
+    r=reading(); r['aer']['gpu/correctable']=10
     s=step({},r,100)
     assert s['new_faults']==0 and s['events']==[]
     s=step(s,None,110)
     assert s['available'] is False and s['events'][-1]['kind']=='measurement'
-    r['ecc']['dram_correctable']=12
+    r['aer']['gpu/correctable']=12
     s=step(s,r,120)
     assert s['new_faults']==2
-    assert sum(e['kind']=='ecc' for e in s['events'])==1
+    assert sum(e['kind']=='aer' for e in s['events'])==1
     s=step(s,r,130)
-    assert sum(e['kind']=='ecc' for e in s['events'])==1
+    assert sum(e['kind']=='aer' for e in s['events'])==1
 
 def test_energy_integrates_only_covered_intervals_and_window_average():
     r=reading(); s=step({},r,100)
@@ -107,7 +105,7 @@ def test_xid_targets_only_matching_pci_and_deduplicates_cursor():
 def test_history_and_events_are_bounded():
     s={};r=reading()
     for t in range(100,4000,10):
-        r['ecc']['dram_correctable']+=1;s=step(s,r,t)
+        r['aer']['gpu/correctable']+=1;s=step(s,r,t)
     assert len(s['history'])<=14 and len(s['events'])<=20
 
 def test_ui_integrates_health_component():

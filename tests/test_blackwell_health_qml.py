@@ -56,10 +56,10 @@ Item {
    var t=Date.now()/1000
    h.payload={available:true,stamp:t,started:t-60,covered_s:50,energy_wh:1.2,
      average_w:100,average_covered_s:50,journal_available:false,events:[],history:[],
-     current:{ecc_mode:"Enabled",ecc:{dram_correctable:0},aer:{"gpu/fatal":0},thermal:false,reasons_complete:true,reasons:["sw_power_cap"],sm_mhz:2000,memory_mhz:14001,limit_w:115}}
+     current:{aer:{"gpu/fatal":0},thermal:false,reasons_complete:true,reasons:["sw_power_cap"],sm_mhz:2000,memory_mhz:14001,limit_w:115}}
    h.nowMs=t*1000
-   compare(h.fresh,true);compare(h.uncertain,true)
-   h.payload.events=[{kind:"ecc",time:t,text:"ecc/dram_correctable +1"}]
+   compare(h.fresh,true);compare(h.uncertain,false)
+   h.payload.events=[{kind:"aer",time:t,text:"aer/gpu/fatal +1"}]
    h.payload=Object.assign({},h.payload)
    compare(h.eventWarning,true)
    compare(h.reasonsText(),"POWER-LIMIT")
