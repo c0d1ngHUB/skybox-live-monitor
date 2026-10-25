@@ -34,15 +34,26 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
                    SELECT child.id, lineage.root_id, child.source
                    FROM sessions AS child
                    JOIN lineage ON child.parent_session_id = lineage.session_id
+               ), previous_turn AS (
+                   -- Seed each lineage with its latest pre-window user message.
+                   -- Keep subsequent old completions too: they consume the turn
+                   -- and must not be re-paired with in-window housekeeping.
+                   SELECT lineage.root_id, MAX(messages.timestamp) AS started
+                   FROM messages
+                   JOIN lineage ON lineage.session_id = messages.session_id
+                   WHERE messages.role = 'user' AND messages.timestamp < ?
+                     AND lineage.source != 'subagent'
+                   GROUP BY lineage.root_id
                )
                SELECT lineage.root_id, messages.role, messages.timestamp, {tool_calls_column}, {finish_column}
                FROM messages
                JOIN lineage ON lineage.session_id = messages.session_id
-               WHERE messages.timestamp >= ? AND messages.timestamp <= ?
+               LEFT JOIN previous_turn ON previous_turn.root_id = lineage.root_id
+               WHERE messages.timestamp >= COALESCE(previous_turn.started, ?) AND messages.timestamp <= ?
                  AND (messages.role != 'assistant' OR (messages.content IS NOT NULL AND trim(messages.content) != ''))
                  AND lineage.source != 'subagent'
                ORDER BY messages.timestamp, messages.id""",
-            (cutoff, now),
+            (cutoff, cutoff, now),
         )
 
         active_turn = {}
@@ -64,7 +75,7 @@ def longest_completed_turn(db_path: Path, now: float) -> int:
                 if calls:
                     continue
             duration = timestamp - active_turn.pop(lineage_id)
-            if duration >= 0:
+            if timestamp >= cutoff and duration >= 0:
                 longest = max(longest, duration)
         return max(0, round(longest))
     finally:
