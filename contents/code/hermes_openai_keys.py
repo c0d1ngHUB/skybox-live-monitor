@@ -60,12 +60,19 @@ def count_openai_credentials(output: str) -> tuple[int, int]:
             break
         if not in_provider or not re.match(r"^\s+#\d+\s+", line):
             continue
-        if not re.search(r"\soauth\s", f" {line.strip()} "):
+        # Auth-list has a free-form label, then auth type, optional identity
+        # fields (new CLI), source, and finally health status. Never scan the
+        # label, credential ID or source for words such as "dead".
+        credential = re.match(
+            r"^\s+#\d+\s+.+\s+oauth\s+(?:id=\S+\s+priority=\S+\s+)?\S+(.*)$",
+            line,
+        )
+        if credential is None:
             continue
 
         total += 1
-        lowered = line.lower()
-        if not any(marker in lowered for marker in UNAVAILABLE_MARKERS):
+        status = credential.group(1).strip().lower()
+        if not any(status.startswith(marker) for marker in (*UNAVAILABLE_MARKERS, "auth failed")):
             active += 1
 
     return active, total
