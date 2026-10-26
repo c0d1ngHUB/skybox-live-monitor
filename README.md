@@ -77,7 +77,7 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 - Gateway query failures appear as UNKNOWN; OFFLINE requires a confirmed inactive
   or failed gateway state.
 - No analytics uploads; local system probes and Hindsight HTTP health queries
-- OpenAI OAuth availability is read through the local `hermes auth list` command; only aggregate counts reach the widget
+- OpenAI OAuth availability is read through the local `hermes auth list` command; only aggregate counts reach the widget (polled once per minute; an elapsed cooldown shown as `(ready to retry)` counts as available, matching the Hermes credential pool)
 
 ## Requirements
 

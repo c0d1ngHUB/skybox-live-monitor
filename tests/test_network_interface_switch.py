@@ -19,7 +19,7 @@ def network_harness():
         return block.split("onNewData: function(source, data) {", 1)[1].rsplit("\n        }", 1)[0]
 
     command = counters.split("property string command: ", 1)[1].split("\n", 1)[0]
-    return """
+    return 'const MonitorLogic=require(' + json.dumps(str(QML.parent.parent / 'code/monitor_logic.js')) + ');\n' + """
 var now=1000; Date.now=()=>now;
 var root={netIf:'eth0',down:0,up:0,networkAvailable:false,
  previousRxBytes:-1,previousTxBytes:-1,previousNetworkSampleMs:0,lastNetworkTelemetryMs:0};

@@ -95,7 +95,8 @@ var buffer='',source=''; function disconnectSource(){};
 ''' + qml_function('resetServices') + '\nroot.resetServices=resetServices;\n' + handler('aiServicesSource','gpuTelemetrySource') + '\nhandle('+json.dumps(data)+'); console.log(JSON.stringify(root));'
     result = node(script)
     assert result['hermesGatewayState'] == result['hindsightState'] == 'UNKNOWN'
-    assert result['openAiActiveKeys'] == -1
+    # OAuth counts have their own source and failure handling since 2026-10-25.
+    assert result['openAiActiveKeys'] == 3
 
 
 def test_failed_network_poll_invalidates_rate():
@@ -123,9 +124,9 @@ def test_history_timer_records_missing_samples():
     source = QML.read_text()
     body = source.split('root.telemetryNowMs = Date.now()',1)[1].split('computeGraph.requestPaint()',1)[0]
     script = LOGIC.read_text()+'''
-var MonitorLogic={telemetrySample:telemetrySample};
+var MonitorLogic={telemetrySample:telemetrySample,gpuLoadSample:gpuLoadSample};
 var root={cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpu2History:[],downHistory:[],upHistory:[],gpu0Usage:87,gpu1Usage:0,gpu2Usage:10,gpu0Available:false,gpu1Available:true,gpu2Available:true,networkAvailable:false,down:12000000,up:100000,lastGpuTelemetryMs:Date.now(),lastNetworkTelemetryMs:Date.now(),telemetryNowMs:Date.now(),lastServiceTelemetryMs:Date.now()};
-root.push=function(h,v){return h.concat([v]);};root.resetServices=function(){};root.gpuLoadAvailable=function(){return true;};
+root.gpuLoadStates={};root.push=function(h,v){return h.concat([v]);};root.resetServices=function(){};
 ''' + body + '\nconsole.log(JSON.stringify({gpu:root.gpu0History,network:root.downHistory}));'
     assert node(script) == {'gpu':[None],'network':[None]}
 
@@ -139,8 +140,8 @@ def test_disk_total_has_only_root_filesystem_producer():
     assert node(script) == 1000
 
 
-def test_service_null_counts_do_not_claim_health():
-    data = {'stdout':json.dumps({'gateway':'running','hindsight':'healthy','openai_oauth_available':None,'openai_oauth_total':None}),'exit code':0}
+def test_service_null_states_do_not_claim_health():
+    data = {'stdout':json.dumps({'gateway':None,'hindsight':'healthy'}),'exit code':0}
     script = "var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3};var buffer='',source='';function disconnectSource(){};"+qml_function('resetServices')+';root.resetServices=resetServices;'+handler('aiServicesSource','gpuTelemetrySource')+';handle('+json.dumps(data)+');console.log(JSON.stringify(root.hermesGatewayState));'
     assert node(script) == 'UNKNOWN'
 
@@ -167,8 +168,8 @@ def test_stalled_service_poll_expires_without_expiring_fresh_services(age, expec
     source = QML.read_text()
     body = 'root.telemetryNowMs = Date.now()'+source.split('root.telemetryNowMs = Date.now()',1)[1].split('computeGraph.requestPaint()',1)[0]
     script = LOGIC.read_text()+'''
-var MonitorLogic={telemetrySample:telemetrySample};
-var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3,cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpu2History:[],downHistory:[],upHistory:[],lastServiceTelemetryMs:Date.now()-61000};
+var MonitorLogic={telemetrySample:telemetrySample,gpuLoadSample:gpuLoadSample};
+var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3,cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpu2History:[],gpuLoadStates:{},downHistory:[],upHistory:[],lastServiceTelemetryMs:Date.now()-61000};
 root.push=function(h,v){return h.concat([v]);};
 ''' .replace('Date.now()-61000','Date.now()-'+str(age)) + qml_function('resetServices')+';root.resetServices=resetServices;'+body+';console.log(JSON.stringify([root.hermesGatewayState,root.hindsightState]));'
     assert node(script) == expected

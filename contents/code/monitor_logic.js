@@ -1,5 +1,13 @@
 // Pure monitor helpers shared by QML and the Node-based regression tests.
 
+function localFilePath(url) {
+    return decodeURIComponent(String(url).replace(/^file:\/\//, ""))
+}
+
+function shellQuote(value) {
+    return "'" + String(value).replace(/'/g, "'\\''") + "'"
+}
+
 function historyX(index, length, width, maxSamples) {
     if (maxSamples <= 1 || width <= 0) return 0
     var visibleLength = Math.max(1, Math.min(length, maxSamples))
@@ -75,7 +83,7 @@ function staleDomains(nowMs, updates, staleAfterMs) {
 
 function normalizeServiceState(raw) {
     var value = String(raw || "UNKNOWN").trim().toUpperCase()
-    if (value === "RUNNING" || value === "HEALTHY" || value === "OK" || value === "IDLE") return "OPERATIONAL"
+    if (value === "OPERATIONAL" || value === "RUNNING" || value === "HEALTHY" || value === "OK" || value === "IDLE") return "OPERATIONAL"
     if (value === "DEGRADED" || value === "WARN" || value === "WARNING") return "DEGRADED"
     if (value === "DOWN" || value === "ERROR" || value === "OFFLINE" || value === "DISCONNECTED") return "OFFLINE"
     // "Nothing set up yet" is not a fault: an empty credential store must not
@@ -280,6 +288,12 @@ function nextGpuLoadState(previous, entry, nowMs) {
     return {available: true, uuid: entry.uuid, usage: entry.usage, stampMs: nowMs, samples: samples}
 }
 
+// History follows the fast utilization poll, never the slow VRAM/process poll.
+function gpuLoadSample(state, nowMs) {
+    if (!state) return null
+    return telemetrySample(state.usage, state.available, state.stampMs, nowMs, 1500)
+}
+
 function gpuLoadPeak(state, nowMs) {
     if (!state || !state.available || state.stampMs <= 0 || nowMs - state.stampMs > 1500) return null
     var peak = null
@@ -293,9 +307,12 @@ function gpuLoadPeak(state, nowMs) {
 
 if (typeof module !== "undefined") {
     module.exports = {
+        localFilePath: localFilePath,
+        shellQuote: shellQuote,
         parseGpuLoads: parseGpuLoads,
         gpuProcessRole: gpuProcessRole,
         nextGpuLoadState: nextGpuLoadState,
+        gpuLoadSample: gpuLoadSample,
         gpuLoadPeak: gpuLoadPeak,
         historyX: historyX,
         historySegments: historySegments,

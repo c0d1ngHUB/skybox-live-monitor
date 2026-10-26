@@ -95,14 +95,14 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     assert 'detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE"' in text
     assert 'detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE"' in text
     assert 'detail:root.gpu2Available ? Math.round(root.gpu2Temp) + "°C" : "UNAVAILABLE"' in text
-    assert 'powerText:root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts)' in text
-    assert 'powerText:root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts)' in text
-    assert 'powerText:root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts)' in text
+    assert 'powerText:root.gpu0Available ? root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts) : ""' in text
+    assert 'powerText:root.gpu1Available ? root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts) : ""' in text
+    assert 'powerText:root.gpu2Available ? root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts) : ""' in text
     assert 'mainText: cardData.powerText || ""' in text
     assert 'text: (cardData.powerText || "").replace("POWER ", "")' in text
-    assert 'vramFill:root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB)' in text
-    assert 'vramFill:root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB)' in text
-    assert 'vramFill:root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB)' in text
+    assert 'vramFill:root.gpu0Available ? root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) : 0' in text
+    assert 'vramFill:root.gpu1Available ? root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) : 0' in text
+    assert 'vramFill:root.gpu2Available ? root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) : 0' in text
     assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)' in text
     assert 'gpuFill:' not in text
     assert 'id: gpuTelemetrySource' in text
@@ -407,7 +407,7 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'property int openAiTotalKeys: -1' in text
     assert 'function fmtDuration(seconds)' in text
     assert 'id: processCountSource' in text
-    assert 'ps -e --no-headers | wc -l' in text
+    assert 'set -- /proc/[0-9]*; echo $(($# - 1))' in text
     assert 'id: hermesThinkSource' in text
     assert 'hermes_max_think.py' in text
     assert 'id: openAiKeysSource' in text
@@ -423,8 +423,6 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'root.openAiOauthLabel()' in text
     assert 'root.openAiOauthTone()' in text
     assert 'function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }' in text
-    assert 'payload.openai_oauth_available' in text
-    assert 'payload.openai_oauth_total' in text
     assert 'font.pixelSize: 14' in text
     assert 'Layout.preferredHeight: 178' in text
 
@@ -505,7 +503,7 @@ def test_gpu_card_uses_primary_gpu_value_and_one_unambiguous_vram_bar():
     text = source()
     assert 'property color orange: "#FF9F43"' in text
     assert 'color: (cardData.vramFill || 0) >= 95 ? root.critical : ((cardData.vramFill || 0) >= 85 ? root.warning : root.cyan)' in text
-    assert text.count('vramFill:root.vramPercent(') == 3
+    assert len(re.findall(r'vramFill:root.gpu[012]Available \? root.vramPercent\(', text)) == 3
     assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)' in text
     assert 'Math.max(0, Math.min(1, (cardData.vramFill || 0) / 100))' in text
     assert '(cardData.vramFill || 0) >= 95 ? root.critical : ((cardData.vramFill || 0) >= 85 ? root.warning : root.cyan)' in text
@@ -878,14 +876,10 @@ def test_openai_keys_polls_again_while_availability_is_unknown():
     assert text.count('onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)') == 2
 
 
-def test_ai_services_source_never_keeps_stale_oauth_counts():
+def test_ai_services_source_does_not_touch_oauth_counts():
     text = source()
     block = text[text.index("id: aiServicesSource"):text.index("id: gpuTelemetrySource")]
-    assert 'if (Number(payload.openai_oauth_available) >= 0) root.openAiActiveKeys' in block
-    assert 'if (Number(payload.openai_oauth_total) >= 0) root.openAiTotalKeys' in block
-    assert 'if (Number(payload.openai_oauth_available) < 0 || Number(payload.openai_oauth_total) < 0) {' in block
-    assert 'root.openAiActiveKeys = -1' in block
-    assert 'root.openAiTotalKeys = 0' in block
+    assert 'openai' not in block.lower()
 
 
 def test_oauth_label_and_state_cover_every_helper_failure_mode():

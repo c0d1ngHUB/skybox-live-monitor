@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import json
 from http.client import HTTPException
-import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.error import URLError, HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -27,14 +25,6 @@ LOCAL_OPENER = build_opener(ProxyHandler({}))
 class ServiceStatus:
     state: str = "unknown"
     detail: str = ""
-
-
-def run_capture(command: list[str], timeout: float = TIMEOUT) -> str:
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return (result.stdout or "").strip()
 
 
 def fetch_json(url: str) -> Any:
@@ -71,27 +61,15 @@ def hindsight_status() -> ServiceStatus:
     return ServiceStatus("error")
 
 
-def openai_oauth_availability() -> tuple[int, int]:
-    """Read privacy-safe aggregate availability from the dedicated helper."""
-    helper = Path(__file__).with_name("hermes_openai_keys.py")
-    # The helper itself runs ``hermes auth list`` with a 15s timeout; give it room
-    # instead of cutting it off at the generic 2.5s probe budget.
-    out = run_capture([sys.executable, str(helper)], timeout=20.0)
-    match = re.fullmatch(r"(-?\d+)\s+(\d+)", out)
-    if not match:
-        return -1, -1
-    return int(match.group(1)), int(match.group(2))
-
-
 def main() -> int:
     gateway = hermes_gateway_status()
     hindsight = hindsight_status()
-    openai_available, openai_total = openai_oauth_availability()
+    # OAuth key availability is polled separately by the widget
+    # (hermes_openai_keys.py); running `hermes auth list` here every 15 s
+    # duplicated that work at ~0.5 s CPU per poll.
     payload = {
         "gateway": gateway.state,
         "hindsight": hindsight.state,
-        "openai_oauth_available": openai_available,
-        "openai_oauth_total": openai_total,
     }
     print(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
     return 0

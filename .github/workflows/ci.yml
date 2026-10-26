@@ -11,25 +11,30 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Plasma 6 QML modules are available in Debian 13, unlike Ubuntu 24.04.
+    container: debian:trixie
+    env:
+      SKYBOX_REQUIRE_QML: "1"
+      QT_QPA_PLATFORM: offscreen
     steps:
+      - name: Install test and Qt 6 Plasma dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git python3 python3-pytest nodejs \
+            qt6-declarative-dev-tools qml6-module-qttest \
+            qml6-module-qtquick qml6-module-qtquick-window \
+            qml6-module-qtquick-layouts qml6-module-qtqml-workerscript \
+            plasma-desktoptheme plasma-workspace qml6-module-org-kde-plasma-plasma5support
+          useradd --create-home skybox-test
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Install Python test runner
-        run: python3 -m pip install pytest
       - name: Validate metadata
         run: python3 -m json.tool metadata.json >/dev/null
       - name: Check JavaScript syntax
         run: node --check contents/code/monitor_logic.js
-      - name: Run Python regression tests
-        run: python3 -m pytest -q
+      - name: Run Python and required QML regression tests
+        run: runuser -u skybox-test -- python3 -m pytest -q -p no:cacheprovider
       - name: Reject unsafe QML layout positioning
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qt6-declarative-dev-tools
           /usr/lib/qt6/bin/qmllint contents/ui/main.qml 2> qmllint.log || true
           ! grep -q '\[Quick.layout-positioning\]' qmllint.log

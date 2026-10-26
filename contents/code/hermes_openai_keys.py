@@ -14,6 +14,8 @@ import sys
 
 
 UNAVAILABLE_MARKERS = ("rate-limited", "cooldown", "exhausted", "dead", "disabled", "invalid")
+# Only time-boxed cooldowns can elapse; auth failures/dead keys never recover alone.
+RETRYABLE_MARKERS = ("rate-limited", "cooldown", "exhausted")
 
 
 def configured_monitor_profile() -> str:
@@ -60,12 +62,23 @@ def count_openai_credentials(output: str) -> tuple[int, int]:
             break
         if not in_provider or not re.match(r"^\s+#\d+\s+", line):
             continue
-        if not re.search(r"\soauth\s", f" {line.strip()} "):
+        # Auth-list has a free-form label, then auth type, optional identity
+        # fields (new CLI), source, and finally health status. Never scan the
+        # label, credential ID or source for words such as "dead".
+        credential = re.match(
+            r"^\s+#\d+\s+.+\s+oauth\s+(?:id=\S+\s+priority=\S+\s+)?\S+(.*)$",
+            line,
+        )
+        if credential is None:
             continue
 
         total += 1
-        lowered = line.lower()
-        if not any(marker in lowered for marker in UNAVAILABLE_MARKERS):
+        status = credential.group(1).strip().lower().rstrip("← ").strip()
+        # An elapsed cooldown is printed as "... (ready to retry)"; the Hermes
+        # credential pool treats such entries as available again, so must we.
+        if status.endswith("(ready to retry)") and status.startswith(RETRYABLE_MARKERS):
+            active += 1
+        elif not any(status.startswith(marker) for marker in (*UNAVAILABLE_MARKERS, "auth failed")):
             active += 1
 
     return active, total
