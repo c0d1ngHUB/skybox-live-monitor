@@ -1,0 +1,40 @@
+# Forgejo host-runner checks only. No publishing or deployment.
+# .forgejo/workflows takes precedence over imported GitHub workflows.
+name: Forgejo CI
+'on':
+  push:
+    branches:
+    - main
+    - master
+    - ci/forgejo-verification-20261023
+  pull_request: {}
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: forgejo-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env: {}
+    steps:
+    - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Run project verification
+      shell: bash
+      run: 'set -euo pipefail
+
+        uv run --no-project --python 3.13 --with pytest python -m pytest -q
+
+        python3 -m json.tool metadata.json >/dev/null
+
+        node --check contents/code/monitor_logic.js
+
+        qmllint contents/ui/main.qml contents/ui/QwenControl.qml > "$RUNNER_TEMP/qmllint.log" 2>&1 || status=$?
+
+        if grep -q "\[Quick.layout-positioning\]" "$RUNNER_TEMP/qmllint.log"; then cat "$RUNNER_TEMP/qmllint.log"; exit 1;
+        fi'
