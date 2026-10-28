@@ -64,6 +64,14 @@ def scripts(tmp_path, monkeypatch):
     runtime.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    fake_bin=tmp_path/'bin';fake_bin.mkdir()
+    ctl=fake_bin/'systemctl'
+    ctl.write_text(f'#!{sys.executable}\nimport os,sys\n'
+        +'if "hindsight-ollama.service" not in sys.argv:sys.exit(1)\n'
+        +'state=os.environ.get("HINDSIGHT_TEST_STATE","active");print(state);sys.exit(0 if state=="active" else 3)\n')
+    ctl.chmod(0o755)
+    import os
+    monkeypatch.setenv('PATH',str(fake_bin)+os.pathsep+os.environ['PATH'])
     state = tmp_path / "state"
     calls = tmp_path / "calls"
     state.write_text("stopped")
@@ -181,6 +189,39 @@ def timed_helper(scripts, monkeypatch):
     # External systemd/docker verification is isolated; scripts and processes are real.
     monkeypatch.setattr(helper, "handoff_settled", lambda: state.read_text() == "stopped", raising=False)
     return helper
+
+
+def test_explicit_unsettled_cleanup_preserves_barrier_and_blocks_next_dispatch(scripts, monkeypatch):
+    directory,state,calls=scripts
+    (directory/'qwen38-stop').write_text(f'#!{sys.executable}\nimport sys\nsys.stderr.write("container still present\\n");sys.exit(75)\n')
+    helper=timed_helper(scripts,monkeypatch)
+    first=helper.run_action('stop')
+    assert first['state']=='unknown'
+    assert helper.recovery_barrier().is_file()
+    second=helper.run_action('start')
+    assert second['ok'] is False
+    assert not calls.exists(), 'A fresh start must not bypass explicitly failed cleanup'
+
+
+def test_ordinary_existing_session_error_does_not_schedule_cancellation(scripts, monkeypatch):
+    directory,state,calls=scripts
+    state.write_text('running')
+    (directory/'qwen38-start').write_text(f'#!{sys.executable}\nimport sys\nsys.exit(7)\n')
+    helper=timed_helper(scripts,monkeypatch)
+    result=helper.run_action('start')
+    assert result['ok'] is False and result['state']=='running'
+    assert not helper.recovery_barrier().exists()
+    assert not calls.exists()
+
+
+def test_unreadable_prior_backend_prevents_start_without_dispatch(scripts,monkeypatch):
+    directory,state,calls=scripts
+    monkeypatch.setenv('HINDSIGHT_TEST_STATE','unknown')
+    helper=timed_helper(scripts,monkeypatch)
+    result=helper.run_action('start')
+    assert result['ok'] is False
+    assert not calls.exists()
+    assert not helper.recovery_barrier().exists()
 
 
 def test_timed_out_descendant_cannot_finish_after_next_operation(scripts, monkeypatch, tmp_path):

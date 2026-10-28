@@ -14,26 +14,43 @@
 # is no longer used.
 set -uo pipefail
 
+# Automatic rollback of a failed start preserves a backend deliberately left
+# off. An explicit user stop retains the established Hindsight handback.
+restore_hindsight=1
+if (( $# )); then
+  if (( $# == 1 )) && [[ "$1" == --no-restore ]]; then
+    restore_hindsight=0
+  else
+    echo "Usage: qwen38-stop [--no-restore]" >&2
+    exit 64
+  fi
+fi
+
 if ! systemctl --user stop qwen38-ninfer.service; then
   echo "Qwen stop did not settle; Hindsight will not be reloaded onto a possibly occupied GPU." >&2
-  exit 1
+  exit 75
 fi
 
 # ExecStop/ExecStopPost deliberately ignore Docker failures in the unit. Verify
 # actual absence before restoring another model to the same GPU.
 if ! remaining_container=$(docker container ls --all --filter 'name=^/qwen38-ninfer$' --format '{{.State}}'); then
   echo "Qwen container cleanup cannot be verified; Hindsight will not be reloaded." >&2
-  exit 1
+  exit 75
 fi
 if [[ -n "$remaining_container" ]]; then
   echo "Qwen container is still present after stop; Hindsight will not be reloaded." >&2
-  exit 1
+  exit 75
+fi
+
+if (( ! restore_hindsight )); then
+  # The blocking stop and container proof above have settled the operation.
+  exit 0
 fi
 
 # Restore only Hindsight; never revive the decommissioned Nimble service.
 if ! systemctl --user start hindsight-ollama.service; then
   echo "Hindsight backend could not be restored after Qwen stop." >&2
-  exit 1
+  exit 75
 fi
 
 rc=0
@@ -42,15 +59,15 @@ rc=0
 for unit in qwen38-ninfer.service; do
   state=$(systemctl --user is-active "$unit")
   printf '%-26s %s\n' "$unit" "$state"
-  [[ "$state" == inactive ]] || rc=1
+  [[ "$state" == inactive ]] || rc=75
 done
 state=$(systemctl --user is-active qwen38-gateway.service)
 printf '%-26s %s\n' qwen38-gateway.service "$state"
-[[ "$state" == active ]] || rc=1
+if [[ "$state" != active ]] && (( rc == 0 )); then rc=1; fi
 for unit in hindsight-ollama.service; do
   state=$(systemctl --user is-active "$unit")
   printf '%-26s %s\n' "$unit" "$state"
-  [[ "$state" == active ]] || rc=1
+  [[ "$state" == active ]] || rc=75
 done
 
 for port in 11439; do
@@ -60,7 +77,7 @@ for model in json.load(sys.stdin)["models"]:
     size, vram = model["size"], model["size_vram"]
     where = "full GPU" if size == vram else "SPLIT vram=%d" % vram
     print("  %-12s %d MiB  %s" % (model["name"], size // 1048576, where))
-' || rc=1
+' || rc=75
 done
 
 exit "$rc"

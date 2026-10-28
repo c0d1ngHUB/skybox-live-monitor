@@ -36,7 +36,14 @@
 - [x] Update affected existing tests only for intentional interfaces; run UI/logic tests and report results; do not deploy or commit.
 
 ## Task 4: Integration, review, merge, deployment (root)
-- [ ] Run required Qt suite, Node syntax, QML lint and whitespace; get one fresh independent whole-change review and fix material findings with regression tests.
+- [x] Run required Qt suite, Node syntax, QML lint and whitespace; get one fresh independent whole-change review and fix material findings with regression tests.
 - [ ] Commit changes, push Forgejo branch, create/attach PR, wait for required CI then merge; synchronize local main while preserving preexisting patch backup and mirror GitHub when safe.
 - [ ] Deploy widget and changed runtime scripts with byte parity, reload Plasma, verify live UI + service health and preserve rollback evidence.
 - [ ] Publish final report with commits, PR, CI, installed parity and verification limits.
+
+## Verification ledger
+
+- Baseline: 391 tests passed. Final integrated suite: 479 passed in 31.75 s with SKYBOX_REQUIRE_QML=1.
+- Independent whole-change review found two material integration gaps, both corrected in one RED/GREEN pass: explicit failed cleanup now retains a recovery barrier; pre-start backend restoration intent survives timeout/retry across helper instances.
+- Additional regressions preserve ordinary errors for existing Qwen sessions and prevent secondary gateway errors from masking an unresolved cleanup result. No deferred review findings.
+- Deliberate safe failure: an interrupted controller whose process completion cannot be proved requires manual verification before clearing the marker. This avoids acting on reused PIDs and is documented.

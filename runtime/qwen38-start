@@ -29,21 +29,28 @@ esac
 started_here=0
 rollback_start() {
   local result=$?
+  # Exit 75 is reserved for an unresolved handoff, not an ordinary command error.
+  if (( result == 75 )); then result=1; fi
   trap - EXIT
   if (( result != 0 && started_here )); then
     # A blocking stop replaces a still-pending start job and runs container
     # cleanup. Never reload the co-resident before that stop succeeds.
     if ! systemctl --user stop qwen38-ninfer.service; then
       echo "Qwen recovery failed: engine stop did not settle; Hindsight not reloaded." >&2
+      result=75
     elif ! remaining_container=$(docker container ls --all --filter 'name=^/qwen38-ninfer$' --format '{{.State}}'); then
       echo "Qwen recovery failed: container cleanup cannot be verified; Hindsight not reloaded." >&2
+      result=75
     elif [[ -n "$remaining_container" ]]; then
       echo "Qwen recovery failed: container still present; Hindsight not reloaded." >&2
+      result=75
     elif (( restore_hindsight )); then
       if ! systemctl --user start hindsight-ollama.service; then
         echo "Qwen recovery failed: previous Hindsight backend could not be restored." >&2
+        result=75
       elif [[ "$(systemctl --user is-active hindsight-ollama.service || true)" != active ]]; then
         echo "Qwen recovery failed: previous Hindsight backend is not active." >&2
+        result=75
       fi
     fi
   fi

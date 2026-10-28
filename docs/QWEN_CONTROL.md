@@ -77,6 +77,11 @@ and verifies unit/job/container state before permitting another action. A
 durable recovery marker prevents a later helper instance from bypassing
 unfinished cleanup; status polling only reads that marker. A retry first
 reconciles the previous action before dispatching the requested operation.
+The marker also records whether Hindsight was active before a new start, so
+automatic timeout recovery uses `qwen38-stop --no-restore` when it was off.
+An explicit user stop still performs the normal Hindsight handback. Start/stop
+scripts reserve exit 75 for an unresolved cleanup; the controller retains its
+barrier for that result even when the script returned before the timeout.
 
 If a controller itself is forcibly terminated before it can prove that its
 process group ended, the marker deliberately refuses automatic recovery. In
