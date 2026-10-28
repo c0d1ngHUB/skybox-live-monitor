@@ -103,6 +103,42 @@ Item {
                 verify(fill.width>0)
             }
         }
+        function test_unknown_sensor_values_and_valid_zero_have_distinct_cards() {
+            root.cpu=Qt.binding(function(){return root.systemSensorValue("cpu")})
+            root.ram=Qt.binding(function(){return root.systemSensorValue("ram")})
+            root.cpuTemp=Qt.binding(function(){return root.systemSensorValue("cpuTemp")})
+            root.recordSystemSensor("cpu",null,true)
+            root.recordSystemSensor("ram","unavailable",true)
+            root.recordSystemSensor("cpuTemp",null,true)
+            wait(20)
+            var cpu=findChild(metricCards,"card3"),ram=findChild(metricCards,"card4")
+            compare(findChild(cpu,"usageValue").text,"--")
+            compare(findChild(ram,"usageValue").text,"--")
+            compare(cpu.cardData.detail,"--°C")
+            root.recordSystemSensor("cpu",0,true)
+            root.recordSystemSensor("ram",0,true)
+            root.recordSystemSensor("cpuTemp",0,true)
+            wait(20)
+            compare(findChild(cpu,"usageValue").text,"0%")
+            compare(findChild(ram,"usageValue").text,"0%")
+            compare(cpu.cardData.detail,"0°C")
+            compare(cpu.cardData.healthLevel,0);compare(ram.cardData.healthLevel,0)
+        }
+        function test_missing_gpu_watts_keeps_vram_temperature_and_valid_zero() {
+            var entry={short_name:"Test",temperature_c:40,memory_used_mib:200,
+                memory_total_mib:1000,power_draw_w:null,power_limit_w:115,process_count:0,processes:[]}
+            for(var index=0;index<3;index++) {
+                var card=findChild(metricCards,"card"+index)
+                root.applyGpuTelemetry(entry,index);wait(20)
+                compare(findChild(card,"powerTip").mainText,"POWER --/115 W")
+                verify(findChild(card,"vramFill").width>0)
+                compare(card.cardData.detail,"40°C")
+                entry.power_draw_w=0;root.applyGpuTelemetry(entry,index);wait(20)
+                compare(findChild(card,"powerTip").mainText,"POWER 0/115 W")
+                compare(card.cardData.healthLevel,0)
+                entry.power_draw_w=null
+            }
+        }
         function test_vram_label_is_outside_fill_and_alerts_match_card() {
             root.gpu0Available=true;root.gpu0VramTotalMiB=8192
             var card=findChild(metricCards,"card0")

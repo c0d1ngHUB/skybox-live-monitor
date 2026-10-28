@@ -589,10 +589,11 @@ def test_each_sensor_and_source_matches_the_removed_freshness_tracking():
     assert "metricUpdateMs" not in text
     assert "root.markMetricFresh" not in text
     assert "domainUpdateMs" not in text
-    # The telemetry sources still deliver their values, just without the
-    # freshness bookkeeping that only fed the removed status banner.
-    assert 'root.cpu = root.clamp(parseFloat(value))' in text
-    assert 'root.ram = root.clamp(parseFloat(value))' in text
+    # Actual sensor availability is independent of the removed global banner.
+    # Invalid, zero and lost reads are exercised by test_telemetry_validity and
+    # the real Qt/private-bus sensor integration.
+    assert 'sensorId: "cpu/all/usage"' in text
+    assert 'sensorId: "memory/physical/usedPercent"' in text
 
 
 def test_cpu_processes_are_computed_from_interval_samples():
@@ -689,7 +690,8 @@ def test_timelines_remain_labeled_while_history_is_filling():
 def test_gpu_power_uses_a_compact_bounded_draw_over_limit_label():
     text = source()
     assert 'function gpuPowerText(drawValue, limitValue)' in text
-    assert 'return "POWER " + draw.toFixed(0) + "/" + limit.toFixed(0) + " W"' in text
+    # Label semantics (including unavailable watts) are executed in
+    # test_telemetry_validity; these checks only constrain the visible layout.
     power_block = text[text.index('visible: cardData.kind === "gpu" && !!cardData.powerText'):text.index('// --- CPU card:')]
     assert 'width: parent.width - 4' in power_block
     assert 'elide: Text.ElideRight' in power_block

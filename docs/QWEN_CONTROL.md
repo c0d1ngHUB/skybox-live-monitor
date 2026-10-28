@@ -22,8 +22,12 @@ before: serving on `http://127.0.0.1:11437`, `/props.is_sleeping`, control via
   `RemainAfterExit=yes`, **disabled at boot**, no autostart) starts
   `~/.local/bin/qwen38-ninfer`, which runs the digest-pinned image
   `ghcr.io/iamwavecut/ninfer-all@sha256:19b95534e0c54e6106f6931c757731294a1dce8bdc68e4c06132273d906fd24b`
-  as `docker run -d --rm --gpus '"device=2"'` with `~/models/ninfer` mounted
-  read-only and the model cache in the `ninfer-cache` volume.
+  with `docker run -d --rm --gpus "\"device=$GPU_UUID\""`, with
+  `~/models/ninfer` mounted read-only and the model cache in the `ninfer-cache`
+  volume. The wrapper resolves `GPU_UUID` from `QWEN_GPU_UUID`, falling back to
+  the installed Blackwell UUID (`GPU-2bc81341-8b1a-3a2e-679b-7a2bb75c6d9e`).
+  Set the same override for the `free-blackwell-for-qwen` gate when replacing
+  the card. Never substitute an enumeration index: indices change across boots.
 - Engine flags: 192k context (`--max-context 196608 --kv-capacity auto
   --kv-headroom-mib 192`), `rk4v4` KV compression, `--spec dflash2`
   speculation, vision (`--vision --vision-residency overlay`) and
@@ -50,9 +54,54 @@ termination signal. `ExecStopPost=docker rm -f qwen38-ninfer` also cleans up a
 failed or forcibly interrupted `ExecStart`, for which systemd skips `ExecStop`.
 The start script resets a confirmed stale active unit before retrying; a failed
 Docker query aborts the action instead of treating the container as absent.
-These wrappers and the user unit are local runtime dependencies outside this
-repository. The local regression suite exercises copies with fake Docker and a
-transient systemd unit; it does not load the production model.
+The changed start/stop scripts are versioned at `runtime/qwen38-start` and
+`runtime/qwen38-stop`; the engine wrapper, GPU-release gate and user unit remain
+local runtime dependencies. Tests execute the versioned start/stop scripts with
+fake service boundaries, so their recovery contract is also covered in CI.
+Engine-wrapper/unit tests use local copies with fake Docker and a transient
+systemd unit; they do not load the production model.
+
+### Whole-start rollback and controller timeouts
+
+The start script records whether Hindsight's backend was active before the
+attempt. If a new Qwen engine start, readiness check or gateway start fails, it
+performs a blocking engine stop and verifies that the container has disappeared
+before restoring that previously active backend. A backend deliberately left
+inactive is not started by rollback. Retrying an already-running Qwen session
+does not stop that existing session on a gateway-only error. Cleanup failures
+remain visible and never reload Hindsight onto a possibly occupied GPU.
+
+The controller owns an isolated process group for each action. On timeout it
+terminates the group, runs the existing stop handoff under the same user lock,
+and verifies unit/job/container state before permitting another action. A
+durable recovery marker prevents a later helper instance from bypassing
+unfinished cleanup; status polling only reads that marker. A retry first
+reconciles the previous action before dispatching the requested operation.
+The marker also records whether Hindsight was active before a new start, so
+automatic timeout recovery uses `qwen38-stop --no-restore` when it was off.
+An explicit user stop still performs the normal Hindsight handback. Start/stop
+scripts reserve exit 75 for an unresolved cleanup; the controller retains its
+barrier for that result even when the script returned before the timeout.
+
+If a controller itself is forcibly terminated before it can prove that its
+process group ended, the marker deliberately refuses automatic recovery. In
+that case the tooltip requests manual recovery: verify the old control
+processes are gone, settle the Qwen unit and its pending jobs, confirm container
+absence and the intended Hindsight state, then remove
+`$XDG_RUNTIME_DIR/skybox-qwen-control.recovery.json` (fallback:
+`~/.cache/skybox-live-monitor/skybox-qwen-control.recovery.json`). Never remove
+that marker merely to bypass an unresolved operation.
+
+Deploy start/stop scripts along with the widget after backing up their installed
+versions:
+
+```bash
+install -d "$HOME/.local/bin"
+install -m 0755 runtime/qwen38-start runtime/qwen38-stop "$HOME/.local/bin/"
+```
+
+These scripts use the existing units and engine; deploying them does not start a
+model or change boot settings.
 
 ## Existing stop-script readiness fix
 

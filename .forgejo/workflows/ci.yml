@@ -34,6 +34,8 @@ jobs:
 
         node --check contents/code/monitor_logic.js
 
+        bash -n runtime/qwen38-start runtime/qwen38-stop
+
         qmllint contents/ui/main.qml contents/ui/QwenControl.qml > "$RUNNER_TEMP/qmllint.log" 2>&1 || status=$?
 
         if grep -q "\[Quick.layout-positioning\]" "$RUNNER_TEMP/qmllint.log"; then cat "$RUNNER_TEMP/qmllint.log"; exit 1;

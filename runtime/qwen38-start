@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Start Qwen3.8 (NInfer engine) in the correct order: Docker server, then the
+# priority gateway.
+#
+# Why not just `systemctl --user start qwen38-ninfer`:
+# qwen38-gateway only carries After=qwen38-ninfer.service, and systemd never
+# pulls an ordering dependency up afterwards. Starting the server alone leaves
+# the gateway missing, and with it the GPU handoff -- so the Hindsight
+# co-resident (gpt-oss:20b) is never restored after Qwen goes to sleep, and
+# every Hermes request bypasses the priority queue.
+#
+# Releasing the Blackwell VRAM happens inside the unit itself
+# (ExecStartPre=free-blackwell-for-qwen), not here.
+set -euo pipefail
+
+PROPS=http://127.0.0.1:11437/props
+STATUS=http://127.0.0.1:11438/proxy/status
+READY_TIMEOUT=180
+
+# Snapshot before ExecStartPre releases the GPU. A failed engine/gateway start
+# must return an already-active Hindsight backend, without starting one that
+# the user had deliberately left off.
+backend_before=$(systemctl --user is-active hindsight-ollama.service || true)
+case "$backend_before" in
+  active|activating|reloading) restore_hindsight=1 ;;
+  inactive|failed) restore_hindsight=0 ;;
+  *) echo "Cannot read previous Hindsight state; Qwen start aborted." >&2; exit 1 ;;
+esac
+started_here=0
+rollback_start() {
+  local result=$?
+  # Exit 75 is reserved for an unresolved handoff, not an ordinary command error.
+  if (( result == 75 )); then result=1; fi
+  trap - EXIT
+  if (( result != 0 && started_here )); then
+    # A blocking stop replaces a still-pending start job and runs container
+    # cleanup. Never reload the co-resident before that stop succeeds.
+    if ! systemctl --user stop qwen38-ninfer.service; then
+      echo "Qwen recovery failed: engine stop did not settle; Hindsight not reloaded." >&2
+      result=75
+    elif ! remaining_container=$(docker container ls --all --filter 'name=^/qwen38-ninfer$' --format '{{.State}}'); then
+      echo "Qwen recovery failed: container cleanup cannot be verified; Hindsight not reloaded." >&2
+      result=75
+    elif [[ -n "$remaining_container" ]]; then
+      echo "Qwen recovery failed: container still present; Hindsight not reloaded." >&2
+      result=75
+    elif (( restore_hindsight )); then
+      if ! systemctl --user start hindsight-ollama.service; then
+        echo "Qwen recovery failed: previous Hindsight backend could not be restored." >&2
+        result=75
+      elif [[ "$(systemctl --user is-active hindsight-ollama.service || true)" != active ]]; then
+        echo "Qwen recovery failed: previous Hindsight backend is not active." >&2
+        result=75
+      fi
+    fi
+  fi
+  exit "$result"
+}
+trap rollback_start EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
+# RemainAfterExit leaves the oneshot unit active after a detached container dies.
+# Reset only a confirmed stale unit; a failed Docker query aborts this script.
+if [[ "$(systemctl --user is-active qwen38-ninfer.service || true)" == active ]]; then
+  container_state=$(docker container ls --all --filter 'name=^/qwen38-ninfer$' --format '{{.State}}')
+  if [[ "$container_state" != running ]]; then
+    started_here=1
+    systemctl --user stop qwen38-ninfer.service
+  fi
+else
+  started_here=1
+fi
+
+systemctl --user start qwen38-ninfer.service
+
+# Wait for the serving path, not for "started": the port binds while the model
+# is still warming up, so an early request would be answered with 503.
+deadline=$(( SECONDS + READY_TIMEOUT ))
+until curl -fsS --max-time 5 "$PROPS" >/dev/null 2>&1; do
+  if (( SECONDS >= deadline )); then
+    echo "qwen38-ninfer not ready after ${READY_TIMEOUT}s" >&2
+    systemctl --user status qwen38-ninfer.service --no-pager -n 15 >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
+
+systemctl --user start qwen38-gateway.service
+
+rc=0
+for unit in qwen38-ninfer.service qwen38-gateway.service; do
+  state=$(systemctl --user is-active "$unit")
+  printf '%-26s %s\n' "$unit" "$state"
+  [[ "$state" == active ]] || rc=1
+done
+
+curl -fsS --max-time 10 "$STATUS" 2>/dev/null || true
+echo
+exit "$rc"

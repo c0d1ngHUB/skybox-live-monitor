@@ -9,18 +9,19 @@ import "../code/monitor_logic.js" as MonitorLogic
 
 PlasmoidItem {
     id: root
-    property real cpu: 0
-    property real ram: 0
-    property real ramUsedBytes: 0
-    property real ramTotalBytes: 0
-    property real cpuTemp: 0
+    property real cpu: root.systemSensorValue("cpu")
+    property real ram: root.systemSensorValue("ram")
+    property real ramUsedBytes: root.systemSensorValue("ramUsedBytes")
+    property real ramTotalBytes: root.systemSensorValue("ramTotalBytes")
+    property real cpuTemp: root.systemSensorValue("cpuTemp")
+    property var systemSensorStates: ({})
     property bool gpu0Available: false
     property string gpu0Name: "GPU 0"
     property real gpu0Usage: root.gpuLoadStates["0"] ? root.gpuLoadStates["0"].usage : 0
     property real gpu0Temp: 0
     property real gpu0VramUsedMiB: 0
     property real gpu0VramTotalMiB: 0
-    property real gpu0PowerDrawWatts: 0
+    property real gpu0PowerDrawWatts: NaN
     property real gpu0PowerLimitWatts: 0
     property bool gpu1Available: false
     property string gpu1Name: "GPU 1"
@@ -28,7 +29,7 @@ PlasmoidItem {
     property real gpu1Temp: 0
     property real gpu1VramUsedMiB: 0
     property real gpu1VramTotalMiB: 0
-    property real gpu1PowerDrawWatts: 0
+    property real gpu1PowerDrawWatts: NaN
     property real gpu1PowerLimitWatts: 0
     // GPU 2 is the third card; each GPU keeps its own scalar properties because
     // QML does not notify bindings on mutations inside a var array.
@@ -38,7 +39,7 @@ PlasmoidItem {
     property real gpu2Temp: 0
     property real gpu2VramUsedMiB: 0
     property real gpu2VramTotalMiB: 0
-    property real gpu2PowerDrawWatts: 0
+    property real gpu2PowerDrawWatts: NaN
     property real gpu2PowerLimitWatts: 0
     property real down: 0
     property real up: 0
@@ -199,6 +200,7 @@ PlasmoidItem {
         return "PEAK 30s · " + (peak === null ? "--" : Math.round(peak) + "%")
     }
     property int historySeconds: 120
+    property double historyLastTickMs: 0
     property var cpuHistory: []
     property var gpu0History: []
     property var gpu1History: []
@@ -299,14 +301,14 @@ PlasmoidItem {
         return (v / 1024 / 1024 / 1024).toFixed(1) + " GiB"
     }
     function fmtMemoryPair(usedBytes, totalBytes) {
-        if (!usedBytes || !totalBytes) return "-- / -- GiB"
+        if (!isFinite(usedBytes) || usedBytes < 0 || !isFinite(totalBytes) || totalBytes <= 0) return "-- / -- GiB"
         var divisor = 1024 * 1024 * 1024
         // Whole GiB in the card: two decimals of "11.5 / 30.7 GiB" overflow the
         // narrow KPI column. The exact pair stays in the tooltip.
         return Math.round(usedBytes / divisor) + " / " + Math.round(totalBytes / divisor) + " GiB"
     }
     function fmtMemoryPairExact(usedBytes, totalBytes) {
-        if (!usedBytes || !totalBytes) return "-- / -- GiB"
+        if (!isFinite(usedBytes) || usedBytes < 0 || !isFinite(totalBytes) || totalBytes <= 0) return "-- / -- GiB"
         var divisor = 1024 * 1024 * 1024
         return (usedBytes / divisor).toFixed(1) + " / " + (totalBytes / divisor).toFixed(1) + " GiB"
     }
@@ -416,7 +418,7 @@ PlasmoidItem {
         return "TOP · CPU %"
     }
     function cpuDetailLabel() {
-        var temp = Math.round(root.cpuTemp) + "°C"
+        var temp = isFinite(root.cpuTemp) ? Math.round(root.cpuTemp) + "°C" : "--°C"
         // "20 THREADS" does not fit the narrow KPI column; "20T" does and keeps
         // the thread count that disambiguates the per-process percentages.
         return root.cpuCoreCount > 0 ? temp + " · " + root.cpuCoreCount + "T" : temp
@@ -674,10 +676,10 @@ PlasmoidItem {
         return parts.join("\n")
     }
     function gpuPowerText(drawValue, limitValue) {
-        var draw = Number(drawValue)
+        var draw = MonitorLogic.sensorNumber(drawValue)
         var limit = Number(limitValue)
-        if (!isFinite(draw) || !isFinite(limit) || limit <= 0) return ""
-        return "POWER " + draw.toFixed(0) + "/" + limit.toFixed(0) + " W"
+        if (!isFinite(limit) || limit <= 0) return ""
+        return "POWER " + (isFinite(draw) ? draw.toFixed(0) : "--") + "/" + limit.toFixed(0) + " W"
     }
 
     // nvidia-smi reports MiB; the visible GB label uses decimal gigabytes.
@@ -729,7 +731,7 @@ PlasmoidItem {
             root.gpu0Temp = Number(entry.temperature_c) || 0
             root.gpu0VramUsedMiB = Number(entry.memory_used_mib) || 0
             root.gpu0VramTotalMiB = Number(entry.memory_total_mib) || 0
-            root.gpu0PowerDrawWatts = Number(entry.power_draw_w) || 0
+            root.gpu0PowerDrawWatts = MonitorLogic.sensorNumber(entry.power_draw_w)
             root.gpu0PowerLimitWatts = Number(entry.power_limit_w) || 0
             root.gpu0ProcessCount = Number(entry.process_count) || 0
             root.topGpu0Processes = root.gpuProcessRows(entry)
@@ -742,7 +744,7 @@ PlasmoidItem {
             root.gpu1Temp = Number(entry.temperature_c) || 0
             root.gpu1VramUsedMiB = Number(entry.memory_used_mib) || 0
             root.gpu1VramTotalMiB = Number(entry.memory_total_mib) || 0
-            root.gpu1PowerDrawWatts = Number(entry.power_draw_w) || 0
+            root.gpu1PowerDrawWatts = MonitorLogic.sensorNumber(entry.power_draw_w)
             root.gpu1PowerLimitWatts = Number(entry.power_limit_w) || 0
             root.gpu1ProcessCount = Number(entry.process_count) || 0
             root.topGpu1Processes = root.gpuProcessRows(entry)
@@ -754,7 +756,7 @@ PlasmoidItem {
         root.gpu2Temp = Number(entry.temperature_c) || 0
         root.gpu2VramUsedMiB = Number(entry.memory_used_mib) || 0
         root.gpu2VramTotalMiB = Number(entry.memory_total_mib) || 0
-        root.gpu2PowerDrawWatts = Number(entry.power_draw_w) || 0
+        root.gpu2PowerDrawWatts = MonitorLogic.sensorNumber(entry.power_draw_w)
         root.gpu2PowerLimitWatts = Number(entry.power_limit_w) || 0
         root.gpu2ProcessCount = Number(entry.process_count) || 0
         root.topGpu2Processes = root.gpuProcessRows(entry)
@@ -803,11 +805,25 @@ PlasmoidItem {
         if (metric.healthLevel >= 1) return root.warning
         return root.quietBorder
     }
+    // libksysguard 6.3 emits valueChanged for each delivered sample, even if
+    // its numeric value is unchanged. Ready alone survives a daemon disconnect;
+    // receipt age detects lost reads. Status transitions are never heartbeats.
+    function recordSystemSensor(key, value, ready) {
+        var number = ready ? MonitorLogic.sensorNumber(value) : NaN
+        if ((key === "cpu" || key === "ram") && number > 100) number = NaN
+        if (key === "ramTotalBytes" && number === 0) number = NaN
+        var states = Object.assign({}, root.systemSensorStates)
+        states[key] = {value: number, available: isFinite(number), stampMs: Date.now()}
+        root.systemSensorStates = states
+    }
+    function systemSensorValue(key) {
+        var state = root.systemSensorStates[key]
+        if (!state) return NaN
+        var sample = MonitorLogic.telemetrySample(state.value, state.available, state.stampMs, Math.max(root.telemetryNowMs, Date.now()), 5000)
+        return sample === null ? NaN : sample
+    }
     function push(hist, value) {
-        var h = hist.slice(0)
-        h.push(value)
-        if (h.length > root.historySeconds) h.shift()
-        return h
+        return MonitorLogic.appendHistory(hist, value, root.historyLastTickMs, root.telemetryNowMs, root.historySeconds)
     }
 
     // P3c: Removed dead detectNetIf() — netDetectSource handles detection
@@ -1158,8 +1174,8 @@ PlasmoidItem {
                             {kind:"gpu", label:"GPU 0 · " + root.gpu0Name, gpuName:root.gpu0Name, gpuIndex:0, labelText: root.cardGpuLabel(0, root.gpu0Name), labelTooltip: root.cardGpuTooltip(0, root.gpu0Name), available:root.gpu0Available, value:root.gpu0Available && root.gpuLoadAvailable(0) ? Math.round(root.gpu0Usage) + "%" : "--", detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE", color:root.violet, detailColor:root.gpuTempColor(root.gpu0Temp, root.muted), healthLevel:!root.gpu0Available ? 2 : ((root.gpu0Temp >= 90 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 95) ? 2 : ((root.gpu0Temp >= 85 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu0Available ? root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) : 0, vramUsedMiB:root.gpu0VramUsedMiB, vramTotalMiB:root.gpu0VramTotalMiB, powerText:root.gpu0Available ? root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts) : "", processes:root.topGpu0Processes, processCount:root.gpu0ProcessCount, processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable},
                             {kind:"gpu", label:"GPU 1 · " + root.gpu1Name, gpuName:root.gpu1Name, gpuIndex:1, labelText: root.cardGpuLabel(1, root.gpu1Name), labelTooltip: root.cardGpuTooltip(1, root.gpu1Name), available:root.gpu1Available, value:root.gpu1Available && root.gpuLoadAvailable(1) ? Math.round(root.gpu1Usage) + "%" : "--", detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE", color:root.cyan, detailColor:root.gpuTempColor(root.gpu1Temp, root.muted), healthLevel:!root.gpu1Available ? 2 : ((root.gpu1Temp >= 90 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 95) ? 2 : ((root.gpu1Temp >= 85 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu1Available ? root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) : 0, vramUsedMiB:root.gpu1VramUsedMiB, vramTotalMiB:root.gpu1VramTotalMiB, powerText:root.gpu1Available ? root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts) : "", processes:root.topGpu1Processes, processCount:root.gpu1ProcessCount, processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable},
                             {kind:"gpu", label:"GPU 2 · " + root.gpu2Name, gpuName:root.gpu2Name, gpuIndex:2, labelText: root.cardGpuLabel(2, root.gpu2Name), labelTooltip: root.cardGpuTooltip(2, root.gpu2Name), available:root.gpu2Available, value:root.gpu2Available && root.gpuLoadAvailable(2) ? Math.round(root.gpu2Usage) + "%" : "--", detail:root.gpu2Available ? Math.round(root.gpu2Temp) + "°C" : "UNAVAILABLE", color:root.lime, detailColor:root.gpuTempColor(root.gpu2Temp, root.muted), healthLevel:!root.gpu2Available ? 2 : ((root.gpu2Temp >= 90 || root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) >= 95) ? 2 : ((root.gpu2Temp >= 85 || root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu2Available ? root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) : 0, vramUsedMiB:root.gpu2VramUsedMiB, vramTotalMiB:root.gpu2VramTotalMiB, powerText:root.gpu2Available ? root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts) : "", processes:root.topGpu2Processes, processCount:root.gpu2ProcessCount, processUnavailable:!root.gpu2Available || root.gpuProcessUnavailable},
-                            {kind:"cpu", label:"CPU", value:Math.round(root.cpu) + "%", detail:root.cpuDetailLabel(), color:root.blue, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel:root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0), processes:root.topCpuProcesses, processCount:root.topCpuProcesses.length, processUnavailable:root.cpuProcessUnavailable},
-                            {kind:"ram", label:"RAM", value:Math.round(root.ram) + "%", detail:root.fmtMemoryPair(root.ramUsedBytes, root.ramTotalBytes), color:root.orange, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel:root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0), processes:root.topRamProcesses, processCount:root.topRamProcesses.length, processUnavailable:root.ramProcessUnavailable}
+                            {kind:"cpu", label:"CPU", value:isFinite(root.cpu) ? Math.round(root.cpu) + "%" : "--", detail:root.cpuDetailLabel(), color:root.blue, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel:root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0), processes:root.topCpuProcesses, processCount:root.topCpuProcesses.length, processUnavailable:root.cpuProcessUnavailable},
+                            {kind:"ram", label:"RAM", value:isFinite(root.ram) ? Math.round(root.ram) + "%" : "--", detail:root.fmtMemoryPair(root.ramUsedBytes, root.ramTotalBytes), color:root.orange, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel:root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0), processes:root.topRamProcesses, processCount:root.topRamProcesses.length, processUnavailable:root.ramProcessUnavailable}
                         ][index]
                         x: index < parent.gpuColumns ? index * (parent.gpuCardWidth + parent.cardSpacing) : (index - parent.gpuColumns) * (parent.lowerCardWidth + parent.cardSpacing)
                         y: index < parent.gpuColumns ? 0 : parent.cardHeight + parent.cardSpacing
@@ -1665,13 +1681,14 @@ PlasmoidItem {
                 root.currentTime = root.refreshClock()
                 root.telemetryNowMs = Date.now()
                 if (root.lastServiceTelemetryMs > 0 && root.telemetryNowMs - root.lastServiceTelemetryMs > 60000) root.resetServices()
-                root.cpuHistory = root.push(root.cpuHistory, root.cpu)
+                root.cpuHistory = root.push(root.cpuHistory, isFinite(root.cpu) ? root.cpu : null)
                 root.gpu0History = root.push(root.gpu0History, MonitorLogic.gpuLoadSample(root.gpuLoadStates["0"], root.telemetryNowMs))
                 root.gpu1History = root.push(root.gpu1History, MonitorLogic.gpuLoadSample(root.gpuLoadStates["1"], root.telemetryNowMs))
                 root.gpu2History = root.push(root.gpu2History, MonitorLogic.gpuLoadSample(root.gpuLoadStates["2"], root.telemetryNowMs))
-                root.ramHistory = root.push(root.ramHistory, root.ram)
+                root.ramHistory = root.push(root.ramHistory, isFinite(root.ram) ? root.ram : null)
                 root.downHistory = root.push(root.downHistory, MonitorLogic.telemetrySample(root.down, root.networkAvailable, root.lastNetworkTelemetryMs, root.telemetryNowMs, 5000))
                 root.upHistory = root.push(root.upHistory, MonitorLogic.telemetrySample(root.up, root.networkAvailable, root.lastNetworkTelemetryMs, root.telemetryNowMs, 5000))
+                root.historyLastTickMs = root.telemetryNowMs
                 computeGraph.requestPaint()
                 downGraph.requestPaint()
                 upGraph.requestPaint()
@@ -2198,12 +2215,12 @@ PlasmoidItem {
     }
 
     // Static ksystemstats bindings for CPU, memory, disk and uptime.
-    Sensors.Sensor { sensorId: "cpu/all/usage"; enabled: true; onValueChanged: root.cpu = root.clamp(parseFloat(value)) }
-    Sensors.Sensor { sensorId: "cpu/all/averageTemperature"; enabled: true; onValueChanged: root.cpuTemp = parseFloat(value) || root.cpuTemp }
+    Sensors.Sensor { sensorId: "cpu/all/usage"; enabled: true; property bool readyForSamples: false; onValueChanged: root.recordSystemSensor("cpu", value, readyForSamples && status === Sensors.Sensor.Ready); onStatusChanged: { readyForSamples = false; Qt.callLater(function() { readyForSamples = status === Sensors.Sensor.Ready }); if (status !== Sensors.Sensor.Ready) root.recordSystemSensor("cpu", NaN, false) } }
+    Sensors.Sensor { sensorId: "cpu/all/averageTemperature"; enabled: true; property bool readyForSamples: false; onValueChanged: root.recordSystemSensor("cpuTemp", value, readyForSamples && status === Sensors.Sensor.Ready); onStatusChanged: { readyForSamples = false; Qt.callLater(function() { readyForSamples = status === Sensors.Sensor.Ready }); if (status !== Sensors.Sensor.Ready) root.recordSystemSensor("cpuTemp", NaN, false) } }
 
-    Sensors.Sensor { sensorId: "memory/physical/usedPercent"; enabled: true; onValueChanged: root.ram = root.clamp(parseFloat(value)) }
-    Sensors.Sensor { sensorId: "memory/physical/used"; enabled: true; onValueChanged: root.ramUsedBytes = parseFloat(value) || 0 }
-    Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; onValueChanged: root.ramTotalBytes = parseFloat(value) || 0 }
+    Sensors.Sensor { sensorId: "memory/physical/usedPercent"; enabled: true; property bool readyForSamples: false; onValueChanged: root.recordSystemSensor("ram", value, readyForSamples && status === Sensors.Sensor.Ready); onStatusChanged: { readyForSamples = false; Qt.callLater(function() { readyForSamples = status === Sensors.Sensor.Ready }); if (status !== Sensors.Sensor.Ready) root.recordSystemSensor("ram", NaN, false) } }
+    Sensors.Sensor { sensorId: "memory/physical/used"; enabled: true; property bool readyForSamples: false; onValueChanged: root.recordSystemSensor("ramUsedBytes", value, readyForSamples && status === Sensors.Sensor.Ready); onStatusChanged: { readyForSamples = false; Qt.callLater(function() { readyForSamples = status === Sensors.Sensor.Ready }); if (status !== Sensors.Sensor.Ready) root.recordSystemSensor("ramUsedBytes", NaN, false) } }
+    Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; property bool readyForSamples: false; onValueChanged: root.recordSystemSensor("ramTotalBytes", value, readyForSamples && status === Sensors.Sensor.Ready); onStatusChanged: { readyForSamples = false; Qt.callLater(function() { readyForSamples = status === Sensors.Sensor.Ready }); if (status !== Sensors.Sensor.Ready) root.recordSystemSensor("ramTotalBytes", NaN, false) } }
     Sensors.Sensor { sensorId: "os/system/uptime"; enabled: true; onValueChanged: root.uptimeSeconds = parseFloat(value) || 0 }
     Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage1"; enabled: true; onValueChanged: root.loadAverage = parseFloat(value) || 0 }
     Sensors.Sensor { sensorId: "cpu/all/coreCount"; enabled: true; onValueChanged: { root.cpuCoreCount = Math.round(parseFloat(value)) || 0 } }
