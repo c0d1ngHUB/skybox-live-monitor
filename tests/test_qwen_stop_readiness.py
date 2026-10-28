@@ -16,7 +16,7 @@ import pytest
 
 
 def test_stop_waits_until_a_started_service_binds_its_http_socket(tmp_path):
-    stop_script = Path.home() / ".local/bin/qwen38-stop"
+    stop_script = Path(__file__).resolve().parents[1] / "runtime/qwen38-stop"
     if not stop_script.is_file() or shutil.which("curl") is None:
         pytest.skip("Local Qwen handoff script and curl are required")
     triggered = threading.Event()
@@ -48,6 +48,9 @@ def test_stop_waits_until_a_started_service_binds_its_http_socket(tmp_path):
     delayed_thread.start()
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    docker.write_text("#!/bin/sh\nexit 0\n")
+    docker.chmod(0o755)
     fake = fake_bin / "systemctl"
     fake.write_text(f"#!{sys.executable}\nimport sys\n"
                     "if 'is-active' in sys.argv:print('inactive' if 'qwen38-ninfer.service' in sys.argv else 'active')\n")

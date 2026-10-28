@@ -99,6 +99,11 @@ kpackagetool6 --type Plasma/Applet --upgrade .
 
 Then add **Skybox Vertical System Dashboard** from Plasma's *Add Widgets* dialog.
 
+The optional Qwen button uses installed user scripts. Their versioned start/stop
+sources are in `runtime/`; see [Qwen control](docs/QWEN_CONTROL.md) for deployment,
+rollback and the stable GPU UUID configuration. A widget upgrade alone does not
+update scripts under `~/.local/bin`.
+
 After upgrading, remove and re-add the widget if Plasma still uses the old code. If necessary, restart the shell from the user session:
 
 ```bash

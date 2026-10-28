@@ -17,8 +17,33 @@ function historyX(index, length, width, maxSamples) {
 
 // Null represents an actual telemetry gap, never zero load.
 function telemetrySample(value, available, stampMs, nowMs, maxAgeMs) {
-    if (!available || stampMs <= 0 || nowMs - stampMs > maxAgeMs || !isFinite(value)) return null
+    if (!available || stampMs <= 0 || stampMs > nowMs || nowMs - stampMs > maxAgeMs || typeof value !== "number" || !isFinite(value)) return null
     return value
+}
+
+// One slot is one wall-clock second. Missed slots remain unknown rather than
+// backfilling the latest measurement. Bound work even after days of suspension.
+function appendHistory(history, value, previousMs, nowMs, maxSamples) {
+    if (!isFinite(previousMs) || previousMs <= 0 || nowMs < previousMs) return [value]
+    var slots = Math.floor(nowMs / 1000) - Math.floor(previousMs / 1000)
+    var kept = history.slice(Math.max(0, history.length - maxSamples))
+    if (slots === 0) {
+        if (kept.length) kept[kept.length - 1] = value
+        else kept.push(value)
+        return kept
+    }
+    if (slots >= maxSamples) kept = []
+    for (var i = 1; i < Math.min(slots, maxSamples); i++) kept.push(null)
+    kept.push(value)
+    return kept.slice(-maxSamples)
+}
+
+// Reject absent/partial numeric strings explicitly: Number(null) is zero and
+// parseFloat("42oops") would otherwise accept a failed sensor read as 42.
+function sensorNumber(value) {
+    if ((typeof value !== "number" && typeof value !== "string") || String(value).trim() === "") return NaN
+    var number = Number(value)
+    return isFinite(number) && number >= 0 ? number : NaN
 }
 
 // Preserve original positions so separated runs are never joined across gaps.
@@ -289,9 +314,13 @@ function nextGpuLoadState(previous, entry, nowMs) {
 }
 
 // History follows the fast utilization poll, never the slow VRAM/process poll.
+// Plasma can dispatch the 1-s history tick before a delayed process completion.
+// Allow 5 s for the 2-s command timeout, 500-ms poll and desktop scheduling;
+// an explicit failed poll still creates a gap immediately. Live/peak cards
+// retain their stricter freshness check in gpuLoadPeak.
 function gpuLoadSample(state, nowMs) {
     if (!state) return null
-    return telemetrySample(state.usage, state.available, state.stampMs, nowMs, 1500)
+    return telemetrySample(state.usage, state.available, state.stampMs, nowMs, 5000)
 }
 
 function gpuLoadPeak(state, nowMs) {
@@ -315,6 +344,8 @@ if (typeof module !== "undefined") {
         gpuLoadSample: gpuLoadSample,
         gpuLoadPeak: gpuLoadPeak,
         historyX: historyX,
+        appendHistory: appendHistory,
+        sensorNumber: sensorNumber,
         historySegments: historySegments,
         telemetrySample: telemetrySample,
         staleDomains: staleDomains,

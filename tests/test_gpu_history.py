@@ -76,8 +76,8 @@ def test_fresh_gpu_history_is_independent_of_slow_snapshot(index, slow_available
 
 @pytest.mark.parametrize("state,expected", [
     (load_state(usage=0), 0),
-    (load_state(stamp=18500), 93),  # Exactly 1500 ms old is still fresh.
-    (load_state(stamp=18499), None),
+    (load_state(stamp=15000), 93),  # Exactly 5000 ms old is still fresh.
+    (load_state(stamp=14999), None),
     (load_state(stamp=0), None),
     (load_state(available=False), None),
     (None, None),
@@ -94,6 +94,17 @@ def test_history_preserves_each_fast_devices_own_age_and_value():
     actual = history_tick({
         "0": load_state(usage=93),
         "1": load_state(usage=0),
-        "2": load_state(usage=34, stamp=18499),
+        "2": load_state(usage=34, stamp=14999),
     }, slow_available=False, slow_stamp=0)
     assert actual == [[93], [0], [None]]
+
+
+@pytest.mark.parametrize("age_ms", [1501, 1509, 2000, 3500, 5000])
+@pytest.mark.parametrize("index", [0, 1, 2])
+def test_history_tolerates_delayed_plasma_timer_without_inventing_a_gap(index, age_ms):
+    # Live reproduction: the history timer ran before the next process result,
+    # 1509 ms after a successful read. The GPU source had never failed.
+    actual = history_tick({str(index): load_state(usage=37, stamp=20000 - age_ms)})
+    expected = [[None], [None], [None]]
+    expected[index] = [37]
+    assert actual == expected

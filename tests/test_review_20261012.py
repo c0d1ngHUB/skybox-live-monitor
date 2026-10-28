@@ -200,7 +200,7 @@ def test_unit_failed_start_executes_container_cleanup(tmp_path):
 
 
 def test_start_recovers_active_unit_with_missing_container(tmp_path):
-    script = Path.home() / ".local/bin/qwen38-start"
+    script = Path(__file__).resolve().parents[1] / "runtime/qwen38-start"
     if not script.is_file():
         pytest.skip("Local Qwen start script required")
     bindir, state = fake_runtime(tmp_path)

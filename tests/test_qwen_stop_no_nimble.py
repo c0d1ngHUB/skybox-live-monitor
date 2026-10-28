@@ -13,11 +13,14 @@ import pytest
 
 
 def test_qwen_stop_does_not_start_check_or_probe_decommissioned_nimble(tmp_path):
-    stop = Path.home() / ".local/bin/qwen38-stop"
+    stop = Path(__file__).resolve().parents[1] / "runtime/qwen38-stop"
     if not stop.is_file():
         pytest.skip("Local Qwen handoff script is required")
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    docker.write_text("#!/bin/sh\nexit 0\n")
+    docker.chmod(0o755)
     calls = tmp_path / "calls.jsonl"
     prefix = (f"#!{sys.executable}\nimport json,sys\nfrom pathlib import Path\n"
               f"with Path({str(calls)!r}).open('a') as f:f.write(json.dumps(sys.argv)+'\\n')\n")

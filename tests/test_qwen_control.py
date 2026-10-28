@@ -123,15 +123,14 @@ def test_missing_script_is_a_visible_error(scripts, monkeypatch):
 
 
 def test_timeout_is_reported_without_claiming_qwen_is_off(scripts, monkeypatch):
-    helper = load_helper()
+    directory, state, calls = scripts
+    (directory / "qwen38-stop").write_text(f"#!{sys.executable}\nimport time\ntime.sleep(2)\n")
+    helper = timed_helper(scripts, monkeypatch)
     monkeypatch.setattr(helper, "qwen_status", lambda: {"state": "running", "detail": ""})
-    def timeout(command, **kwargs):
-        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
-    monkeypatch.setattr(helper.subprocess, "run", timeout)
     result = helper.run_action("stop")
     assert result["ok"] is False
-    assert result["state"] == "running"
-    assert result["error"]
+    assert result["state"] == "unknown"
+    assert "Wiederherstellung" in result["error"]
 
 
 def test_untrusted_action_cannot_become_a_shell_command(scripts, monkeypatch):
@@ -170,3 +169,173 @@ def test_status_cli_emits_json_without_starting_qwen(scripts, tmp_path):
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["state"] == "stopped"
     assert not calls.exists()
+
+
+def timed_helper(scripts, monkeypatch):
+    directory, state, calls = scripts
+    helper = load_helper()
+    monkeypatch.setattr(helper, "CONTROL_TIMEOUT", 0.15)
+    monkeypatch.setattr(helper, "TERMINATE_GRACE", 0.1, raising=False)
+    monkeypatch.setattr(helper, "RECOVERY_TIMEOUT", 0.5, raising=False)
+    monkeypatch.setattr(helper, "qwen_status", lambda: {"state": state.read_text(), "detail": ""})
+    # External systemd/docker verification is isolated; scripts and processes are real.
+    monkeypatch.setattr(helper, "handoff_settled", lambda: state.read_text() == "stopped", raising=False)
+    return helper
+
+
+def test_timed_out_descendant_cannot_finish_after_next_operation(scripts, monkeypatch, tmp_path):
+    """Killing only the script leader lets an old action mutate the next action."""
+    import time
+    directory, state, calls = scripts
+    late = tmp_path / "late"
+    child = ("import signal,time; from pathlib import Path; "
+             "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(.8); "
+             f"Path({str(late)!r}).write_text('old start finished')")
+    (directory / "qwen38-start").write_text(
+        f"#!{sys.executable}\nimport subprocess,time,sys\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "time.sleep(2)\n")
+    helper = timed_helper(scripts, monkeypatch)
+    first = helper.run_action("start")
+    second = helper.run_action("stop")
+    time.sleep(.85)
+    assert not late.exists(), "Timed-out start child survived into the next operation"
+    assert first["ok"] is False
+    assert second["ok"] is True
+    assert calls.read_text().splitlines() == ["stop", "stop"]
+
+
+def test_timeout_reconciliation_keeps_lock_until_stop_finishes(scripts, monkeypatch, tmp_path):
+    """A second caller must not dispatch while rollback is still in flight."""
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+    directory, state, calls = scripts
+    entered = tmp_path / "recovery-entered"
+    (directory / "qwen38-start").write_text(f"#!{sys.executable}\nimport time\ntime.sleep(2)\n")
+    (directory / "qwen38-stop").write_text(
+        f"#!{sys.executable}\nimport time\nfrom pathlib import Path\n"
+        f"Path({str(entered)!r}).touch()\ntime.sleep(.3)\n"
+        f"Path({str(state)!r}).write_text('stopped')\n")
+    helper = timed_helper(scripts, monkeypatch)
+    with ThreadPoolExecutor() as executor:
+        first = executor.submit(helper.run_action, "start")
+        deadline = time.monotonic() + 1.5
+        while not entered.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert entered.exists(), "Timeout did not run the existing stop handoff"
+        second = helper.run_action("start")
+        assert second["ok"] is False
+        assert "bereits" in second["error"]
+        assert first.result(timeout=2)["ok"] is False
+
+
+@pytest.mark.parametrize("stop_body", ["import sys\nsys.exit(7)\n", None])
+def test_failed_cleanup_persists_barrier_and_blocks_next_start_until_reconciled(scripts, monkeypatch, stop_body):
+    """Lock release after uncertain systemd cleanup must not permit another start."""
+    import os
+    directory, state, calls = scripts
+    (directory / "qwen38-start").write_text(f"#!{sys.executable}\nimport time\ntime.sleep(2)\n")
+    (directory / "qwen38-stop").write_text(
+        f"#!{sys.executable}\n{stop_body}" if stop_body else "#!/missing-skybox-stop-interpreter\n")
+    helper = timed_helper(scripts, monkeypatch)
+    first = helper.run_action("start")
+    barrier = Path(os.environ["XDG_RUNTIME_DIR"]) / "skybox-qwen-control.recovery.json"
+    assert barrier.is_file(), "Unsettled operation must survive the controller process"
+    assert first["state"] == "unknown", "Unsettled cleanup must not look safely off"
+    # A fresh helper models another widget request/process after the timeout.
+    fresh = timed_helper(scripts, monkeypatch)
+    second = fresh.run_action("start")
+    assert second["ok"] is False
+    assert "Wiederherstellung" in second["error"]
+    assert not calls.exists()
+    # Successful reconciliation removes the barrier before dispatching the request.
+    (directory / "qwen38-stop").write_text(
+        f"#!{sys.executable}\nfrom pathlib import Path\nPath({str(state)!r}).write_text('stopped')\n")
+    (directory / "qwen38-start").write_text(
+        f"#!{sys.executable}\nfrom pathlib import Path\nPath({str(state)!r}).write_text('running')\n")
+    assert fresh.run_action("start")["ok"] is True
+    assert not barrier.exists()
+
+
+def test_pending_systemd_job_keeps_recovery_barrier(scripts, monkeypatch):
+    """Inactive-looking state is insufficient while a queued start may still run."""
+    import os
+    directory, state, calls = scripts
+    (directory / "qwen38-start").write_text(f"#!{sys.executable}\nimport time\ntime.sleep(2)\n")
+    helper = timed_helper(scripts, monkeypatch)
+    monkeypatch.setattr(helper, "handoff_settled", lambda: False)
+    first = helper.run_action("start")
+    second = helper.run_action("start")
+    assert first["ok"] is False and second["ok"] is False
+    assert first["state"] == "unknown"
+    assert (Path(os.environ["XDG_RUNTIME_DIR"]) / "skybox-qwen-control.recovery.json").exists()
+
+
+@pytest.mark.parametrize("job,active,container,expected", [
+    ("", "inactive", "", True),
+    ("0", "failed", "", True),
+    ("0", "inactive", "created", False),
+    ("0", "inactive", "exited", False),
+    ("73", "inactive", "", False),
+    ("0", "activating", "", False),
+    ("0", "inactive", "running", False),
+    ("0", "inactive", None, False),
+    (None, "inactive", "", False),
+])
+def test_reconciliation_requires_settled_unit_job_and_container(monkeypatch, job, active, container, expected):
+    helper = load_helper()
+    def systemctl(command, **kwargs):
+        assert command[:4] == ["systemctl", "--user", "show", "qwen38-ninfer.service"]
+        fields = f"LoadState=loaded\nActiveState={active}\n"
+        if job is not None:
+            fields += f"Job={job}\n"
+        return subprocess.CompletedProcess(command, 0, fields, "")
+    monkeypatch.setattr(helper.subprocess, "run", systemctl)
+    monkeypatch.setattr(helper, "container_state", lambda: container)
+    assert helper.handoff_settled() is expected
+
+
+def test_status_reports_recovery_barrier_read_only(scripts, monkeypatch):
+    import os
+    directory, state, calls = scripts
+    barrier = Path(os.environ["XDG_RUNTIME_DIR"]) / "skybox-qwen-control.recovery.json"
+    content = '{"processes_settled":true}'
+    barrier.write_text(content)
+    helper = load_helper()
+    monkeypatch.setattr(helper.subprocess, "run", lambda *a, **kw:
+                        subprocess.CompletedProcess(a, 0, "LoadState=loaded\nActiveState=inactive\nSubState=dead\n", ""))
+    status = helper.qwen_status()
+    assert status["state"] == "failed"
+    assert "Wiederherstellung" in status["detail"]
+    assert barrier.read_text() == content
+    assert not calls.exists()
+
+
+@pytest.mark.parametrize("content", ['[]', '{"processes_settled":false}', 'broken json'])
+def test_unidentified_or_invalid_barrier_refuses_action_without_dispatch(scripts, monkeypatch, content):
+    import os
+    directory, state, calls = scripts
+    barrier = Path(os.environ["XDG_RUNTIME_DIR"]) / "skybox-qwen-control.recovery.json"
+    barrier.write_text(content)
+    helper = timed_helper(scripts, monkeypatch)
+    result = helper.run_action("start")
+    assert result["ok"] is False
+    assert result["state"] == "unknown"
+    assert "Wiederherstellung" in result["error"]
+    assert barrier.read_text() == content
+    assert not calls.exists()
+
+
+def test_failed_exec_does_not_leave_unrecoverable_barrier(scripts, monkeypatch):
+    import os
+    directory, state, calls = scripts
+    script = directory / "qwen38-start"
+    script.write_text('#!/missing-skybox-test-interpreter\n')
+    helper = timed_helper(scripts, monkeypatch)
+    result = helper.run_action("start")
+    assert result["ok"] is False
+    barrier = Path(os.environ["XDG_RUNTIME_DIR"]) / "skybox-qwen-control.recovery.json"
+    assert not barrier.exists(), "Failed exec never launched an operation to recover"
+    assert "ausgeführt" in result["error"]
+    script.write_text(f"#!{sys.executable}\nfrom pathlib import Path\nPath({str(state)!r}).write_text('running')\n")
+    assert helper.run_action("start")["ok"] is True

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Stop Qwen3.8 (NInfer engine) and hand the Blackwell back to the Hindsight
+# GPT-OSS backend.
+#
+# Order matters. The priority gateway remains running: Hindsight reaches GPT-OSS
+# exclusively through its :11438 listener. Once Qwen is stopped, the gateway
+# detects its closed backend, releases the Qwen reservation and routes Hindsight
+# to its restored Ollama service.
+#
+# The Docker container is bound to the unit: ExecStop runs `docker stop`, and
+# --rm removes it. Warm-up, when configured, is owned by each unit's
+# ExecStartPost. hindsight-ollama is Type=simple and may report active before
+# its HTTP socket is listening; the probe below retries that bind race. Nimble
+# is no longer used.
+set -uo pipefail
+
+if ! systemctl --user stop qwen38-ninfer.service; then
+  echo "Qwen stop did not settle; Hindsight will not be reloaded onto a possibly occupied GPU." >&2
+  exit 1
+fi
+
+# ExecStop/ExecStopPost deliberately ignore Docker failures in the unit. Verify
+# actual absence before restoring another model to the same GPU.
+if ! remaining_container=$(docker container ls --all --filter 'name=^/qwen38-ninfer$' --format '{{.State}}'); then
+  echo "Qwen container cleanup cannot be verified; Hindsight will not be reloaded." >&2
+  exit 1
+fi
+if [[ -n "$remaining_container" ]]; then
+  echo "Qwen container is still present after stop; Hindsight will not be reloaded." >&2
+  exit 1
+fi
+
+# Restore only Hindsight; never revive the decommissioned Nimble service.
+if ! systemctl --user start hindsight-ollama.service; then
+  echo "Hindsight backend could not be restored after Qwen stop." >&2
+  exit 1
+fi
+
+rc=0
+# This is a handback: Qwen is down while the priority gateway and the Hindsight
+# Ollama backend are expected to be up.
+for unit in qwen38-ninfer.service; do
+  state=$(systemctl --user is-active "$unit")
+  printf '%-26s %s\n' "$unit" "$state"
+  [[ "$state" == inactive ]] || rc=1
+done
+state=$(systemctl --user is-active qwen38-gateway.service)
+printf '%-26s %s\n' qwen38-gateway.service "$state"
+[[ "$state" == active ]] || rc=1
+for unit in hindsight-ollama.service; do
+  state=$(systemctl --user is-active "$unit")
+  printf '%-26s %s\n' "$unit" "$state"
+  [[ "$state" == active ]] || rc=1
+done
+
+for port in 11439; do
+  curl -fsS --max-time 10 --retry 10 --retry-delay 1 --retry-connrefused --retry-max-time 30 "http://127.0.0.1:${port}/api/ps" 2>/dev/null | python3 -c '
+import json, sys
+for model in json.load(sys.stdin)["models"]:
+    size, vram = model["size"], model["size_vram"]
+    where = "full GPU" if size == vram else "SPLIT vram=%d" % vram
+    print("  %-12s %d MiB  %s" % (model["name"], size // 1048576, where))
+' || rc=1
+done
+
+exit "$rc"

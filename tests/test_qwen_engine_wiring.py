@@ -58,7 +58,7 @@ def _commands(calls: Path) -> list[list[str]]:
 
 
 def test_qwen38_start_targets_the_ninfer_unit(tmp_path):
-    start = Path.home() / ".local/bin/qwen38-start"
+    start = Path(__file__).resolve().parents[1] / "runtime/qwen38-start"
     if not start.is_file():
         pytest.skip("Local Qwen start script is required")
     fake_bin, calls = _write_fake(tmp_path, ninfer_active=True)
@@ -70,7 +70,7 @@ def test_qwen38_start_targets_the_ninfer_unit(tmp_path):
 
 
 def test_qwen38_stop_targets_the_ninfer_unit(tmp_path):
-    stop = Path.home() / ".local/bin/qwen38-stop"
+    stop = Path(__file__).resolve().parents[1] / "runtime/qwen38-stop"
     if not stop.is_file():
         pytest.skip("Local Qwen stop script is required")
     fake_bin, calls = _write_fake(tmp_path, ninfer_active=False)

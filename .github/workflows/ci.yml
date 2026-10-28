@@ -21,17 +21,20 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates git python3 python3-pytest nodejs \
+            ca-certificates git python3 python3-pytest python3-dbus python3-gi nodejs dbus-daemon \
             qt6-declarative-dev-tools qml6-module-qttest \
             qml6-module-qtquick qml6-module-qtquick-window \
             qml6-module-qtquick-layouts qml6-module-qtqml-workerscript \
-            plasma-desktoptheme plasma-workspace qml6-module-org-kde-plasma-plasma5support
+            plasma-desktoptheme plasma-workspace qml6-module-org-kde-plasma-plasma5support \
+            qml6-module-org-kde-ksysguard
           useradd --create-home skybox-test
       - uses: actions/checkout@v4
       - name: Validate metadata
         run: python3 -m json.tool metadata.json >/dev/null
       - name: Check JavaScript syntax
         run: node --check contents/code/monitor_logic.js
+      - name: Check runtime shell syntax
+        run: bash -n runtime/qwen38-start runtime/qwen38-stop
       - name: Run Python and required QML regression tests
         run: runuser -u skybox-test -- python3 -m pytest -q -p no:cacheprovider
       - name: Reject unsafe QML layout positioning
