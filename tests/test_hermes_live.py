@@ -139,3 +139,38 @@ def test_database_is_opened_read_only(tmp_path):
     run(tmp_path, db)
     assert db.read_bytes() == before
     assert "mode=ro" in SCRIPT.read_text()
+
+
+def test_config_is_read_without_pyyaml(tmp_path):
+    """The CI image ships a bare python3 without PyYAML; the collector must not depend on it."""
+    import importlib.util, sys
+    spec = importlib.util.spec_from_file_location("hermes_live_noyaml", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("""# comment
+model:
+  default: primary-model
+  provider: "primary-provider"  # inline
+  aliases:
+    x:
+      provider: not-me
+fallback_providers:
+  - provider: cloud-fallback
+    model: fb-1
+  - provider: 'second'
+    model: fb-2
+toolsets:
+  - provider: also-not-me
+""")
+    real = sys.modules.get("yaml")
+    sys.modules["yaml"] = None  # makes `import yaml` raise ImportError
+    try:
+        assert module.fallback_providers(cfg) == ("primary-provider", {"cloud-fallback", "second"})
+        cfg.write_text("nothing: here\n")
+        assert module.fallback_providers(cfg) is None
+    finally:
+        if real is not None:
+            sys.modules["yaml"] = real
+        else:
+            sys.modules.pop("yaml", None)

@@ -20,14 +20,47 @@ TAIL_BYTES = 4 * 1024 * 1024
 LOG_LINE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ ")
 
 
+def _scalar(text: str) -> str:
+    text = text.split(" #", 1)[0].strip()
+    return text[1:-1] if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'" else text
+
+
+def parse_providers(text: str):
+    """Dependency-free reader for the two config keys we need (bare python3 has no PyYAML)."""
+    primary = None
+    fallbacks = set()
+    section = None
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        line = raw.strip()
+        if indent == 0:
+            section = line.rstrip(":") if line.endswith(":") else None
+            continue
+        if section == "model" and indent == 2 and line.startswith("provider:"):
+            primary = _scalar(line.split(":", 1)[1])
+        elif section == "fallback_providers":
+            item = line[2:].strip() if line.startswith("- ") else line
+            if item.startswith("provider:"):
+                fallbacks.add(_scalar(item.split(":", 1)[1]))
+    return (primary, fallbacks) if primary else None
+
+
 def fallback_providers(config: Path):
     """Return (primary_provider, {fallback providers}) or None when unknown."""
     try:
+        text = config.read_text()
+    except OSError:
+        return None
+    try:
         import yaml
-        data = yaml.safe_load(config.read_text())
+        data = yaml.safe_load(text)
         primary = data["model"]["provider"]
         fallbacks = {str(item["provider"]) for item in data.get("fallback_providers") or []}
         return str(primary), fallbacks
+    except ImportError:
+        return parse_providers(text)
     except Exception:
         return None
 
