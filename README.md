@@ -32,6 +32,13 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   poll (not the separately polled services, disk, or other system sensors)
 - Disk usage in `df` semantics, including the filesystem reserve
 - NVIDIA VRAM telemetry via `nvidia-smi`
+- Hermes live panel (replaces the former Blackwell health panel): running turns with
+  duration, workers/delegations, age/source of the last activity and the active model,
+  read-only from `~/.hermes/state.db`, `config.yaml` and `logs/errors.log` (no tokens, no
+  model call). Warning indicator (yellow border): a turn without activity for 5 min
+  (**HÄNGT?**), main-model calls on a configured fallback provider in the last 24 h
+  (**FALLBACK 24h**), or provider limit errors (**429 24h**). Unreadable sources show
+  `?`/`UNBEKANNT`, never zero.
 - Longest completed Hermes run across the default and named profiles;
   assistant tool-call preambles and unfinished turns do not count as completion
   One unreadable profile does not discard other readings: a partial maximum is

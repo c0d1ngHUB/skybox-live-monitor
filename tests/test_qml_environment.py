@@ -9,7 +9,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def health_test_module():
-    spec = importlib.util.spec_from_file_location("health_qml_test", ROOT / "tests/test_blackwell_health_qml.py")
+    spec = importlib.util.spec_from_file_location("health_qml_test", ROOT / "tests/test_hermes_live_qml.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -29,7 +29,7 @@ def test_missing_qml_runner_is_explicit(monkeypatch, tmp_path, required):
 
     monkeypatch.setattr(module.subprocess, "run", missing)
     with pytest.raises(pytest.fail.Exception if required else pytest.skip.Exception):
-        module.test_health_widget_click_staleness_nulls_and_events(tmp_path)
+        module.test_hermes_live_states_staleness_and_warning_indicator(tmp_path)
 
 
 @pytest.mark.parametrize("required", [False, True])
@@ -38,7 +38,7 @@ def test_missing_qml_imports_is_explicit(monkeypatch, tmp_path, required):
     monkeypatch.setenv("SKYBOX_REQUIRE_QML", "1" if required else "0")
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, '', 'module "org.kde.plasma.core" is not installed'))
     with pytest.raises(pytest.fail.Exception if required else pytest.skip.Exception):
-        module.test_health_widget_click_staleness_nulls_and_events(tmp_path)
+        module.test_hermes_live_states_staleness_and_warning_indicator(tmp_path)
 
 
 @pytest.mark.parametrize("required", [False, True])
@@ -47,7 +47,7 @@ def test_zero_discovered_qml_tests_cannot_pass(monkeypatch, tmp_path, required):
     monkeypatch.setenv("SKYBOX_REQUIRE_QML", "1" if required else "0")
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, '0 passed, 0 failed', ''))
     with pytest.raises(pytest.fail.Exception, match='did not execute'):
-        module.test_health_widget_click_staleness_nulls_and_events(tmp_path)
+        module.test_hermes_live_states_staleness_and_warning_indicator(tmp_path)
 
 
 def test_ci_installs_qt6_plasma_before_required_regressions():

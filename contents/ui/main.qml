@@ -1144,7 +1144,7 @@ PlasmoidItem {
                 }
             }
 
-            BlackwellHealth {
+            HermesLive {
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
                 Layout.minimumHeight: implicitHeight
