@@ -105,6 +105,62 @@ Item {
    verify(heading.text.indexOf("UNBEKANNT") >= 0, heading.text)
    verify(h.detailText().indexOf("undefined") < 0)
   }
+  function details(t) {
+   return {stamp:t,
+    tokens:{available:true,partial:false,failed_profiles:[],total:134000000,output:800000,cache_hit_pct:95,cost_usd:92.2,
+      models:[{model:"claude-opus-5-5",total:128000000,input:1,output:2,cache_read:3,cache_write:4,sessions:28,cost_usd:90.4},
+              {model:"fb-1",total:6000000,input:1,output:2,cache_read:3,cache_write:4,sessions:2,cost_usd:1.8}]},
+    cron:{available:true,enabled:8,expected:8,baseline_new:false,missing:[],disabled:[],next_run_at:t+600,next_name:"job",
+      failed_24h:0,failed_names:[],expected_file:"/x/expected.json"},
+    hindsight:{available:true,bank:"hermes",retains_60m:12,retains_capped:false,consolidation_age_s:583,last_write_age_s:30,
+      pending_consolidation:16,failed_consolidation:0,failed_operations:2,warn:false}}
+  }
+  function test_dropdown() {
+   var t = Date.now() / 1000
+   h.nowMs = t * 1000
+   h.payload = base(t)
+   h.expanded = false
+   var collapsed = h.implicitHeight
+   var toggle = findChild(h, "hermesToggle")
+   // No details yet: the closed toggle warns instead of hiding an unknown state.
+   compare(h.detailsWarn, true)
+   verify(toggle.color == h.warning)
+   verify(toggle.text.indexOf("▸") >= 0, toggle.text)
+   h.details = details(t)
+   compare(h.detailsWarn, false)
+   mouseClick(findChild(h, "hermesToggleArea"), 20, 20)
+   compare(h.expanded, true)
+   verify(h.implicitHeight > collapsed)
+   verify(toggle.text.indexOf("▾") >= 0, toggle.text)
+   var tokens = findChild(h, "hermesTokens"), cron = findChild(h, "hermesCron"), hs = findChild(h, "hermesHindsight")
+   verify(tokens.text.indexOf("134 M") >= 0 && tokens.text.indexOf("Cache 95%") >= 0 && tokens.text.indexOf("opus-5-5 96%") >= 0, tokens.text)
+   verify(cron.text.indexOf("CRON · 8/8") >= 0 && cron.text.indexOf("Fehler 24h: 0") >= 0, cron.text)
+   verify(hs.text.indexOf("Retains 60m: 12") >= 0 && hs.text.indexOf("9 min 43 s") >= 0 && hs.text.indexOf("offen 16") >= 0, hs.text)
+   // A job missing after an update turns the cron row and the toggle yellow.
+   var d = details(t); d.cron.missing = ["job c"]; d.cron.enabled = 7
+   h.details = d
+   compare(h.cronTone(), "warn"); compare(h.detailsWarn, true)
+   verify(cron.text.indexOf("7/8") >= 0 && cron.text.indexOf("FEHLT 1") >= 0, cron.text)
+   verify(h.cronDetail().indexOf("job c") >= 0)
+   // One broken section stays local and unknown, never a zero.
+   d = details(t); d.hindsight = {available:false, error:"api_unreachable"}; d.cron.failed_24h = null
+   h.details = d
+   verify(hs.text.indexOf("UNBEKANNT") >= 0, hs.text)
+   compare(h.cronTone(), "unknown")
+   verify(cron.text.indexOf("Fehler 24h: ?") >= 0, cron.text)
+   verify(tokens.text.indexOf("134 M") >= 0, tokens.text)
+   d = details(t); d.hindsight.retains_60m = null
+   h.details = d
+   verify(hs.text.indexOf(">500") >= 0, hs.text)
+   // Stale details become unknown.
+   h.details = details(t - 200)
+   verify(tokens.text.indexOf("UNBEKANNT") >= 0, tokens.text)
+   var all = h.tokensDetail() + h.cronDetail() + h.hindsightDetail()
+   verify(all.indexOf("undefined") < 0 && all.indexOf("%%") < 0, all)
+   mouseClick(findChild(h, "hermesToggleArea"), 20, 20)
+   compare(h.expanded, false); compare(h.implicitHeight, collapsed)
+   h.payload = null; h.details = null
+  }
  }
 }
 '''
@@ -113,4 +169,5 @@ Item {
         env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'}, text=True, capture_output=True, timeout=25)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'HermesLive::test_hermes()' in result.stdout, result.stdout + result.stderr
+    assert 'HermesLive::test_dropdown()' in result.stdout, result.stdout + result.stderr
     assert 'ReferenceError' not in result.stderr and 'TypeError' not in result.stderr
