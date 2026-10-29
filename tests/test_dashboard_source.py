@@ -78,7 +78,6 @@ def test_gpu_cards_separate_full_telemetry_failure_from_process_failure():
     gpu_cards = text[text.index('{kind:"gpu", label:"GPU 0'):text.index('{kind:"cpu"')]
     assert 'processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable' in gpu_cards
     assert 'processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable' in gpu_cards
-    assert 'processUnavailable:!root.gpu2Available || root.gpuProcessUnavailable' in gpu_cards
     assert 'gpuTelemetryUnavailable ||' not in gpu_cards
 
 
@@ -94,20 +93,17 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     assert 'function compactProcessValue(metricLabel, value)' in text
     assert 'detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE"' in text
     assert 'detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE"' in text
-    assert 'detail:root.gpu2Available ? Math.round(root.gpu2Temp) + "°C" : "UNAVAILABLE"' in text
     assert 'powerText:root.gpu0Available ? root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts) : ""' in text
     assert 'powerText:root.gpu1Available ? root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts) : ""' in text
-    assert 'powerText:root.gpu2Available ? root.gpuPowerText(root.gpu2PowerDrawWatts, root.gpu2PowerLimitWatts) : ""' in text
     assert 'mainText: cardData.powerText || ""' in text
     assert 'text: (cardData.powerText || "").replace("POWER ", "")' in text
     assert 'vramFill:root.gpu0Available ? root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) : 0' in text
     assert 'vramFill:root.gpu1Available ? root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) : 0' in text
-    assert 'vramFill:root.gpu2Available ? root.vramPercent(root.gpu2VramUsedMiB, root.gpu2VramTotalMiB) : 0' in text
     assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)' in text
     assert 'gpuFill:' not in text
     assert 'id: gpuTelemetrySource' in text
     assert 'gpu_telemetry.py' in text
-    assert 'gpu0ProcessCount' in text and 'gpu1ProcessCount' in text and 'gpu2ProcessCount' in text
+    assert 'gpu0ProcessCount' in text and 'gpu1ProcessCount' in text
 
 
 def test_cpu_card_shows_top_four_processes_in_its_detail_area():
@@ -142,14 +138,12 @@ def test_gpu_card_shows_top_four_processes_but_counts_all_workloads():
     helper = GPU_HELPER.read_text()
     assert 'property var topGpu0Processes: []' in text
     assert 'property var topGpu1Processes: []' in text
-    assert 'property var topGpu2Processes: []' in text
     assert 'gpu_uuid,pid,process_name,used_memory' in helper
     assert 'process_count' in helper
     assert 'processes[:4]' in helper
     assert 'service_name_for_pid' in helper
     assert 'processes:root.topGpu0Processes' in text
     assert 'processes:root.topGpu1Processes' in text
-    assert 'processes:root.topGpu2Processes' in text
     assert 'onTriggered: gpuTelemetrySource.connectSource(gpuTelemetrySource.command)' in text
 
 
@@ -177,11 +171,11 @@ def _delegate_geometry(cards):
     }
 
 
-def test_cpu_and_ram_fill_the_lower_row_without_moving_the_three_gpu_cards():
-    cards = source().split("// --- Three-GPU row", 1)[1].split("// --- NETWORK section", 1)[0]
+def test_cpu_and_ram_fill_the_lower_row_without_moving_the_two_gpu_cards():
+    cards = source().split("// --- Two-GPU row", 1)[1].split("// --- NETWORK section", 1)[0]
     geometry = _card_geometry(cards)
     delegate = cards[cards.index("delegate: Rectangle {"):cards.index("id: metricKpi")]
-    assert geometry["gpuColumns"] == 3
+    assert geometry["gpuColumns"] == 2
     assert geometry["lowerColumns"] == 2
     assert len(re.findall(r'\{kind:"gpu"', cards)) == geometry["gpuColumns"]
     assert len(re.findall(r'\{kind:"(?:cpu|ram)"', cards)) == geometry["lowerColumns"]
@@ -197,7 +191,7 @@ def test_cpu_and_ram_fill_the_lower_row_without_moving_the_three_gpu_cards():
         lower_width = (width - (geometry["lowerColumns"] - 1) * gap) / geometry["lowerColumns"]
         assert gpu_width * geometry["gpuColumns"] + gap * (geometry["gpuColumns"] - 1) == width
         assert lower_width * geometry["lowerColumns"] + gap * (geometry["lowerColumns"] - 1) == width
-        assert lower_width > gpu_width
+        assert lower_width >= gpu_width
 
 
 def _coupled_process_row_count(text):
@@ -244,11 +238,11 @@ def test_process_cards_keep_their_height_while_showing_four_rows():
     notice a card resize, a taller row or a fifth row.
     """
     text = source()
-    cards = text[text.index("// --- Three-GPU row"):text.index("// --- NETWORK section")]
+    cards = text[text.index("// --- Two-GPU row"):text.index("// --- NETWORK section")]
     grid = _card_geometry(cards)
     delegate = _delegate_geometry(cards)
 
-    # The GPUs are the reason the first row is three wide: they must fill it
+    # The GPUs are the reason the first row is two wide: they must fill it
     # exactly, without leaving a slot in the second row.
     assert len(re.findall(r'\{kind:"gpu"', cards)) == grid["gpuColumns"], (
         "the GPU cards do not fill the first row exactly"
@@ -428,55 +422,54 @@ def test_system_and_ai_service_rows_place_related_status_together():
 
 
 
-def test_three_gpu_cards_share_one_row_and_the_process_cards_one_more():
-    """All three GPU cards sit side by side; CPU and RAM keep the second row.
+def test_two_gpu_cards_share_the_full_width_and_cpu_ram_the_second_row():
+    """Both GPU cards share the full dashboard width; CPU and RAM keep the second row.
 
     The order determines which delegates use the upper and lower geometry.
     """
     text = source()
-    cards = text[text.index("// --- Three-GPU row"):text.index("// --- NETWORK section")]
+    cards = text[text.index("// --- Two-GPU row"):text.index("// --- NETWORK section")]
     geometry = _card_geometry(cards)
-    assert geometry["gpuColumns"] == 3
+    assert geometry["gpuColumns"] == 2
     assert geometry["lowerColumns"] == 2
-    assert len(re.findall(r'\{kind:"', cards)) == 5
-    # GPU 0/1/2 must be the first three cells, in that order, followed by CPU/RAM.
+    assert len(re.findall(r'\{kind:"', cards)) == 4
+    # GPU 0/1 must be the first two cells, in that order, followed by CPU/RAM.
     order = re.findall(r'\{kind:"(\w+)"', cards)
-    assert order == ["gpu", "gpu", "gpu", "cpu", "ram"]
+    assert order == ["gpu", "gpu", "cpu", "ram"]
 
 
 def test_each_gpu_card_has_its_own_series_color_and_legend_name():
     text = source()
-    cards = text[text.index("// --- Three-GPU row"):text.index("// --- NETWORK section")]
-    for index, color in ((0, "root.violet"), (1, "root.cyan"), (2, "root.lime")):
+    cards = text[text.index("// --- Two-GPU row"):text.index("// --- NETWORK section")]
+    for index, color in ((0, "root.violet"), (1, "root.cyan")):
         assert f'label:"GPU {index} · " + root.gpu{index}Name' in cards
         assert f'color:{color}' in cards
-    # Three distinguishable hues: no GPU may reuse another's series colour.
+    # No GPU may reuse another's series colour.
     assert cards.count("color:root.violet") == 1
     assert cards.count("color:root.cyan") == 1
-    assert cards.count("color:root.lime") == 1
-    assert 'property color lime:' in text
+    assert 'gpu2' not in text.lower() and 'root.lime' not in text
+    assert 'topGpu2' not in text
 
 
 def test_gpu_telemetry_maps_cards_by_gpu_index_not_by_array_position():
     """A missing card must empty its own card, never shift the others.
 
     nvidia-smi numbers the GPUs itself and omits absent ones, so positional
-    assignment would render GPU 2 into the GPU 1 card.
+    assignment would render GPU 1 into the GPU 0 card.
     """
     text = source()
     gpu_source = text[text.index("id: gpuTelemetrySource"):text.index("id: topCpuSource")]
     assert 'byIndex[String(Number(payload.gpus[i].index))] = payload.gpus[i]' in gpu_source
     assert 'root.applyGpuTelemetry(byIndex["0"] || null, 0)' in gpu_source
     assert 'root.applyGpuTelemetry(byIndex["1"] || null, 1)' in gpu_source
-    assert 'root.applyGpuTelemetry(byIndex["2"] || null, 2)' in gpu_source
-    assert 'root.applyGpuTelemetry(null, 2)' in gpu_source
+    assert 'applyGpuTelemetry(byIndex["2"]' not in gpu_source
     assert 'payload.gpus[0]' not in gpu_source
 
 
 def test_narrow_cards_fit_their_key_figures_without_cutting_them(self=None):
     """Shrinking the cards from ~420 to ~274 px must not cut the KPI column.
 
-    Three GPU cards sit in one row, so every KPI figure has to survive a narrower
+    Two GPU cards share one row, so every KPI figure has to survive a narrower
     column. Each shortened form keeps its full value reachable in a tooltip.
     """
     text = source()
@@ -503,7 +496,7 @@ def test_gpu_card_uses_primary_gpu_value_and_one_unambiguous_vram_bar():
     text = source()
     assert 'property color orange: "#FF9F43"' in text
     assert 'color: (cardData.vramFill || 0) >= 95 ? root.critical : ((cardData.vramFill || 0) >= 85 ? root.warning : root.cyan)' in text
-    assert len(re.findall(r'vramFill:root.gpu[012]Available \? root.vramPercent\(', text)) == 3
+    assert len(re.findall(r'vramFill:root.gpu[012]Available \? root.vramPercent\(', text)) == 2
     assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)' in text
     assert 'Math.max(0, Math.min(1, (cardData.vramFill || 0) / 100))' in text
     assert '(cardData.vramFill || 0) >= 95 ? root.critical : ((cardData.vramFill || 0) >= 85 ? root.warning : root.cyan)' in text
@@ -633,11 +626,11 @@ def test_status_cards_use_symbols_and_quiet_healthy_borders():
     assert 'function openAiOauthBorderColor()' in text
 
 
-def test_system_load_graph_plots_all_three_gpus_without_cpu_or_motion():
+def test_system_load_graph_plots_both_gpus_without_cpu_or_motion():
     text = source()
     # Legend names come from the live telemetry, never from literals: a hardcoded
     # "RTX PRO 4000" kept claiming that GPU after nvidia-smi went away.
-    assert 'root.gpu0Name' in text and 'root.gpu1Name' in text and 'root.gpu2Name' in text
+    assert 'root.gpu0Name' in text and 'root.gpu1Name' in text
     assert 'RTX PRO 4000' not in text
     assert 'RTX 3060 Ti' not in text
     assert 'UNAVAILABLE")' in text
@@ -645,7 +638,6 @@ def test_system_load_graph_plots_all_three_gpus_without_cpu_or_motion():
     assert 'plot(root.cpuHistory' not in text
     assert 'plot(root.gpu0History, root.violet' in text
     assert 'plot(root.gpu1History, root.cyan' in text
-    assert 'plot(root.gpu2History, root.lime' in text
     assert 'var plotHeight = Math.max(1, height - 4)' in text
     assert 'height - plotTop - (root.clamp(data[j]) / 100) * plotHeight' in text
     assert 'NumberAnimation' not in text
@@ -655,12 +647,10 @@ def test_system_load_chart_has_live_values_five_ticks_and_non_color_line_styles(
     text = source()
     assert 'Math.round(root.gpu0Usage) + "%"' in text
     assert 'Math.round(root.gpu1Usage) + "%"' in text
-    assert 'Math.round(root.gpu2Usage) + "%"' in text
     assert 'for (var i = 0; i < 5; i++)' in text
     for label in ('"100%"', '"75%"', '"50%"', '"25%"', '"0%"'):
         assert f'ctx.fillText({label}' in text
     assert 'ctx.setLineDash(dashed ? [8, 5] : [])' in text
-    assert 'plot(root.gpu2History, root.lime, "rgba(140,233,154,0.07)", false)' in text
 
 
 def test_elided_model_process_and_system_texts_expose_full_tooltips():
@@ -722,8 +712,8 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'QWEN' not in text
     assert 'localLlm' not in text
     assert 'POWER ' in text
-    assert 'root.gpu0PowerDrawWatts' in text and 'root.gpu1PowerDrawWatts' in text and 'root.gpu2PowerDrawWatts' in text
-    assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text and 'root.gpu2PowerLimitWatts' in text
+    assert 'root.gpu0PowerDrawWatts' in text and 'root.gpu1PowerDrawWatts' in text
+    assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text
     assert 'elide: Text.ElideRight' in text
     assert 'height: 44' in text
     assert 'Layout.preferredHeight: 178' in text
@@ -840,9 +830,9 @@ def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():
     text = source()
     assert 'function gpuTempColor(value, normalColor)' in text
     gpu_cards = text[text.index('{kind:"gpu", label:"GPU 0'):text.index('{kind:"cpu"')]
-    assert 'root.gpu0Temp >= 90' in gpu_cards and 'root.gpu1Temp >= 90' in gpu_cards and 'root.gpu2Temp >= 90' in gpu_cards
-    assert 'root.gpu0Temp >= 85' in gpu_cards and 'root.gpu1Temp >= 85' in gpu_cards and 'root.gpu2Temp >= 85' in gpu_cards
-    assert 'root.gpu0Temp >= 75' not in gpu_cards and 'root.gpu1Temp >= 75' not in gpu_cards and 'root.gpu2Temp >= 75' not in gpu_cards
+    assert 'root.gpu0Temp >= 90' in gpu_cards and 'root.gpu1Temp >= 90' in gpu_cards
+    assert 'root.gpu0Temp >= 85' in gpu_cards and 'root.gpu1Temp >= 85' in gpu_cards
+    assert 'root.gpu0Temp >= 75' not in gpu_cards and 'root.gpu1Temp >= 75' not in gpu_cards
 
 
 def test_dual_gpu_helper_is_local_and_maps_processes_by_uuid():

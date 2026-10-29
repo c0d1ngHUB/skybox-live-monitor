@@ -59,8 +59,8 @@ console.log(JSON.stringify(processes));
 
 def test_each_gpu_vram_bar_tooltip_receives_live_used_and_total_readings():
     source = QML.read_text()
-    cards = source.split('// --- Three-GPU row', 1)[1].split('x: index', 1)[0]
-    for index in range(3):
+    cards = source.split('// --- Two-GPU row', 1)[1].split('x: index', 1)[0]
+    for index in range(2):
         row = next(line for line in cards.splitlines() if '{kind:"gpu", label:"GPU ' + str(index) in line)
         assert f'vramUsedMiB:root.gpu{index}VramUsedMiB' in row
         assert f'vramTotalMiB:root.gpu{index}VramTotalMiB' in row

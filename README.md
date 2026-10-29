@@ -9,9 +9,9 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 - CPU temperature display (like GPU card — no percentage, no progress bar)
 - CPU and RAM cards label their thread count, so a per-process 52% next to an
   aggregate 4% CPU reading is unambiguous
-- Independent telemetry for every NVIDIA GPU (0, 1, 2): utilization, temperature,
+- Independent telemetry for NVIDIA GPU 0 and GPU 1: utilization, temperature,
   VRAM, power and per-GPU compute processes (up to four largest consumers). The
-  three GPU cards sit side by side in one row, with the live GPU model name and
+  two GPU cards share the full dashboard width in one row, with the live GPU model name and
   used VRAM in decimal GB always visible (the bar still shows percent filled;
   hover for exact MiB and total capacity). CPU and RAM share the row below
 - Compact CPU and RAM process summaries (up to four largest consumers)

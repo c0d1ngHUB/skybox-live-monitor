@@ -93,12 +93,12 @@ var buffer='',source='';function disconnectSource(){};
 function handle(data){
 """ + body + """
 }
-handle({'stdout':'2, GPU-c, 94\\n0, GPU-a, 0','exit code':0});
-const valid=[root.gpuLoadStates['0'].usage,root.gpuLoadStates['1'].available,root.gpuLoadStates['2'].usage];
+handle({'stdout':'1, GPU-c, 94\\n0, GPU-a, 0','exit code':0});
+const valid=[root.gpuLoadStates['0'].usage,root.gpuLoadStates['1'].usage,Object.keys(root.gpuLoadStates).length];
 handle({'stdout':'','exit code':1});
-console.log(JSON.stringify([valid,[0,1,2].map(i=>root.gpuLoadStates[String(i)].available)]));
+console.log(JSON.stringify([valid,[0,1].map(i=>root.gpuLoadStates[String(i)].available)]));
 """)
-    assert actual == [[0, False, 94], [False, False, False]]
+    assert actual == [[0, 94, 2], [False, False]]
 
 
 def test_qml_role_binding_preserves_exact_vram_value():
@@ -124,7 +124,7 @@ def test_qml_gpu_load_is_fast_but_process_poll_stays_two_seconds():
 
 def test_card_height_fits_four_processes_peak_and_hindsight_role():
     import re
-    block = QML.read_text().split("// --- Three-GPU row", 1)[1]
+    block = QML.read_text().split("// --- Two-GPU row", 1)[1]
     height_match = re.search(r"Layout.preferredHeight: (\d+)", block)
     spacing_match = re.search(r"cardSpacing: (\d+)", block)
     assert height_match and spacing_match

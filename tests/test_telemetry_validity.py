@@ -20,7 +20,7 @@ def node(script):
     return json.loads(subprocess.check_output(['node', '-e', prelude + script], text=True))
 
 
-@pytest.mark.parametrize('index', [0, 1, 2])
+@pytest.mark.parametrize('index', [0, 1])
 @pytest.mark.parametrize('power,expected', [(None, 'POWER --/115 W'), (0, 'POWER 0/115 W'), (12.6, 'POWER 13/115 W')])
 def test_gpu_power_missing_does_not_invent_zero_or_hide_other_metrics(index, power, expected):
     script = 'const root={gpuProcessRows:()=>[]};\n' + qml_function('applyGpuTelemetry') + '\n' + qml_function('gpuPowerText')
@@ -34,25 +34,25 @@ def test_gpu_power_missing_does_not_invent_zero_or_hide_other_metrics(index, pow
 def history_ticks(times):
     source = QML.read_text()
     body = 'root.telemetryNowMs = Date.now()' + source.split('root.telemetryNowMs = Date.now()', 1)[1].split('computeGraph.requestPaint()', 1)[0]
-    script = '''const root={cpu:20,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpu2History:[],downHistory:[],upHistory:[],historySeconds:120,historyLastTickMs:0,lastServiceTelemetryMs:0,networkAvailable:true,down:0,up:40};
+    script = '''const root={cpu:20,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],downHistory:[],upHistory:[],historySeconds:120,historyLastTickMs:0,lastServiceTelemetryMs:0,networkAvailable:true,down:0,up:40};
 ''' + qml_function('push') + '\nroot.push=push;\n'
-    script += f'for(const now of {json.dumps(times)}){{Date.now=()=>now;root.lastNetworkTelemetryMs=now;root.gpuLoadStates={{"0":{{available:true,usage:20,stampMs:now}},"1":{{available:true,usage:0,stampMs:now}},"2":{{available:true,usage:30,stampMs:now-5001}}}};\n' + body + '\n}\nconsole.log(JSON.stringify([root.gpu0History,root.gpu1History,root.gpu2History,root.downHistory,root.upHistory]));'
+    script += f'for(const now of {json.dumps(times)}){{Date.now=()=>now;root.lastNetworkTelemetryMs=now;root.gpuLoadStates={{"0":{{available:true,usage:20,stampMs:now}},"1":{{available:true,usage:0,stampMs:now}}}};\n' + body + '\n}\nconsole.log(JSON.stringify([root.gpu0History,root.gpu1History,root.downHistory,root.upHistory]));'
     return node(script)
 
 
 def test_history_inserts_unobserved_one_second_slots_and_preserves_zero():
     assert history_ticks([10000, 11050, 14000]) == [
         [20, 20, None, None, 20], [0, 0, None, None, 0],
-        [None, None, None, None, None], [0, 0, None, None, 0], [40, 40, None, None, 40]]
+        [0, 0, None, None, 0], [40, 40, None, None, 40]]
 
 
 def test_ten_minute_pause_keeps_only_last_two_minutes_and_current_sample():
     histories = history_ticks([10000, 610000])
-    assert histories == [[None] * 119 + [v] for v in [20, 0, None, 0, 40]]
+    assert histories == [[None] * 119 + [v] for v in [20, 0, 0, 40]]
 
 
 def test_history_clock_reversal_discards_future_slots_and_resumes_normally():
-    assert history_ticks([10000, 11000, 2000, 3000]) == [[20, 20], [0, 0], [None, None], [0, 0], [40, 40]]
+    assert history_ticks([10000, 11000, 2000, 3000]) == [[20, 20], [0, 0], [0, 0], [40, 40]]
 
 
 def test_history_bucket_alignment_does_not_accumulate_timer_drift():

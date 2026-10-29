@@ -21,7 +21,7 @@ def test_live_card_updates_preserve_hover_and_visible_details(tmp_path):
     properties = '    property real cpu:' + properties
     properties = properties.replace('    preferredRepresentation: fullRepresentation', '')
     properties = properties.replace('    Plasmoid.backgroundHints: PlasmaCore.Types.NoBackground', '')
-    cards = source.split('// --- Three-GPU row', 1)[1].split('// --- NETWORK section', 1)[0]
+    cards = source.split('// --- Two-GPU row', 1)[1].split('// --- NETWORK section', 1)[0]
     cards = cards[cards.index('            Item {'):]
     cards = cards.replace('Item {', 'Item { id: metricCards; width:860; height:342;', 1)
     cards = cards.replace('delegate: Rectangle {', '''delegate: Rectangle {
@@ -51,17 +51,16 @@ Item {
         onTriggered: {
             tick++; root.telemetryNowMs=Date.now()
             root.applyGpuLoads({"0":{uuid:"GPU-a",usage:tick*13%100},
-                "1":{uuid:"GPU-b",usage:0},"2":{uuid:"GPU-c",usage:0}},Date.now())
+                "1":{uuid:"GPU-b",usage:0}},Date.now())
         }
     }
     TestCase {
         name:"SkyboxCardInteraction"; when:windowShown
         function initTestCase() {
-            root.gpu0Available=true;root.gpu1Available=true;root.gpu2Available=true
+            root.gpu0Available=true;root.gpu1Available=true
             root.gpu0Temp=30;root.gpu0VramTotalMiB=8192;root.gpu0VramUsedMiB=4096
             root.ramUsedBytes=15000000000;root.ramTotalBytes=32000000000
-            root.applyGpuLoads({"0":{uuid:"GPU-a",usage:0},"1":{uuid:"GPU-b",usage:0},
-                "2":{uuid:"GPU-c",usage:0}},Date.now())
+            root.applyGpuLoads({"0":{uuid:"GPU-a",usage:0},"1":{uuid:"GPU-b",usage:0}},Date.now())
             wait(100)
         }
         function cleanup() { fast.stop(); mouseMove(root,859,341); wait(100) }
@@ -77,7 +76,7 @@ Item {
             compare(findChild(card,"usageValue").text,Math.round(root.gpu0Usage)+"%")
         }
         function test_ram_precision_is_available_over_visible_line() {
-            var card=findChild(metricCards,"card4"),tip=findChild(card,"ramTip")
+            var card=findChild(metricCards,"card3"),tip=findChild(card,"ramTip")
             verify(tip!==null); verify(tip.height>=13,"RAM hover target must cover a text line")
             mouseMove(tip,tip.width/2,tip.height/2); wait(1200)
             verify(tip.containsMouse)
@@ -87,7 +86,7 @@ Item {
             var entry={short_name:"Synthetic GPU",temperature_c:40,
                 memory_used_mib:12000,memory_total_mib:24000,
                 power_draw_w:100,power_limit_w:115,process_count:0,processes:[]}
-            for(var index=0;index<3;index++) {
+            for(var index=0;index<2;index++) {
                 var card=findChild(metricCards,"card"+index)
                 var fill=findChild(card,"vramFill"),power=findChild(card,"powerTip")
                 root.applyGpuTelemetry(entry,index); wait(20)
@@ -111,7 +110,7 @@ Item {
             root.recordSystemSensor("ram","unavailable",true)
             root.recordSystemSensor("cpuTemp",null,true)
             wait(20)
-            var cpu=findChild(metricCards,"card3"),ram=findChild(metricCards,"card4")
+            var cpu=findChild(metricCards,"card2"),ram=findChild(metricCards,"card3")
             compare(findChild(cpu,"usageValue").text,"--")
             compare(findChild(ram,"usageValue").text,"--")
             compare(cpu.cardData.detail,"--°C")
@@ -127,7 +126,7 @@ Item {
         function test_missing_gpu_watts_keeps_vram_temperature_and_valid_zero() {
             var entry={short_name:"Test",temperature_c:40,memory_used_mib:200,
                 memory_total_mib:1000,power_draw_w:null,power_limit_w:115,process_count:0,processes:[]}
-            for(var index=0;index<3;index++) {
+            for(var index=0;index<2;index++) {
                 var card=findChild(metricCards,"card"+index)
                 root.applyGpuTelemetry(entry,index);wait(20)
                 compare(findChild(card,"powerTip").mainText,"POWER --/115 W")

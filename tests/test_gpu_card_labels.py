@@ -32,8 +32,8 @@ console.log(JSON.stringify([
 
 def test_model_name_is_visible_in_every_gpu_card_process_column():
     source = QML.read_text()
-    cards = source.split("// --- Three-GPU row", 1)[1].split("x: index", 1)[0]
-    for index in range(3):
+    cards = source.split("// --- Two-GPU row", 1)[1].split("x: index", 1)[0]
+    for index in range(2):
         row = next(line for line in cards.splitlines() if '{kind:"gpu", label:"GPU ' + str(index) in line)
         assert f"gpuName:root.gpu{index}Name" in row
     assert 'metricKind === "gpu" ? cardData.gpuName : "TOP · RAM"' in source

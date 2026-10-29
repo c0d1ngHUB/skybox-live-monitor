@@ -24,7 +24,7 @@ def history_tick(states, slow_available=True, slow_stamp=19900):
 Date.now = () => 20000;
 const root = {
     cpu: 0, ram: 0, cpuHistory: [], ramHistory: [],
-    gpu0History: [], gpu1History: [], gpu2History: [],
+    gpu0History: [], gpu1History: [],
     downHistory: [], upHistory: [], down: 0, up: 0,
     networkAvailable: false, lastNetworkTelemetryMs: 0,
     lastServiceTelemetryMs: 19900, historySeconds: 120,
@@ -32,7 +32,7 @@ const root = {
 };
 """ + f"root.gpuLoadStates={json.dumps(states)};\n" + f"""
 root.lastGpuTelemetryMs = {slow_stamp};
-for (let i = 0; i < 3; i++) {{
+for (let i = 0; i < 2; i++) {{
     root['gpu' + i + 'Available'] = {json.dumps(slow_available)};
     Object.defineProperty(root, 'gpu' + i + 'Usage', {{
         get: () => root.gpuLoadStates[String(i)] ? root.gpuLoadStates[String(i)].usage : 0
@@ -42,7 +42,7 @@ for (let i = 0; i < 3; i++) {{
 root.push = push;
 root.gpuLoadAvailable = gpuLoadAvailable;
 """ + body + """
-console.log(JSON.stringify([root.gpu0History, root.gpu1History, root.gpu2History]));
+console.log(JSON.stringify([root.gpu0History, root.gpu1History]));
 """
     result = subprocess.run(
         ["node", "-e", script], text=True, capture_output=True, check=True
@@ -60,7 +60,7 @@ def load_state(usage=93, stamp=19900, available=True):
     }
 
 
-@pytest.mark.parametrize("index", [0, 1, 2])
+@pytest.mark.parametrize("index", [0, 1])
 @pytest.mark.parametrize("slow_available,slow_stamp", [
     (False, 19900),  # Failed slow snapshot must not erase a fresh fast sample.
     (True, 4000),   # Nor may a slow snapshot older than its 15-second budget.
@@ -69,7 +69,7 @@ def load_state(usage=93, stamp=19900, available=True):
 ])
 def test_fresh_gpu_history_is_independent_of_slow_snapshot(index, slow_available, slow_stamp):
     actual = history_tick({str(index): load_state()}, slow_available, slow_stamp)
-    expected: list[list[int | None]] = [[None], [None], [None]]
+    expected: list[list[int | None]] = [[None], [None]]
     expected[index] = [93]
     assert actual == expected
 
@@ -82,10 +82,10 @@ def test_fresh_gpu_history_is_independent_of_slow_snapshot(index, slow_available
     (load_state(available=False), None),
     (None, None),
 ])
-@pytest.mark.parametrize("index", [0, 1, 2])
+@pytest.mark.parametrize("index", [0, 1])
 def test_history_keeps_real_zero_but_not_failed_stale_or_missing_fast_load(index, state, expected):
     actual = history_tick({str(index): state} if state is not None else {})
-    want = [[None], [None], [None]]
+    want = [[None], [None]]
     want[index] = [expected]
     assert actual == want
 
@@ -94,17 +94,16 @@ def test_history_preserves_each_fast_devices_own_age_and_value():
     actual = history_tick({
         "0": load_state(usage=93),
         "1": load_state(usage=0),
-        "2": load_state(usage=34, stamp=14999),
     }, slow_available=False, slow_stamp=0)
-    assert actual == [[93], [0], [None]]
+    assert actual == [[93], [0]]
 
 
 @pytest.mark.parametrize("age_ms", [1501, 1509, 2000, 3500, 5000])
-@pytest.mark.parametrize("index", [0, 1, 2])
+@pytest.mark.parametrize("index", [0, 1])
 def test_history_tolerates_delayed_plasma_timer_without_inventing_a_gap(index, age_ms):
     # Live reproduction: the history timer ran before the next process result,
     # 1509 ms after a successful read. The GPU source had never failed.
     actual = history_tick({str(index): load_state(usage=37, stamp=20000 - age_ms)})
-    expected = [[None], [None], [None]]
+    expected = [[None], [None]]
     expected[index] = [37]
     assert actual == expected

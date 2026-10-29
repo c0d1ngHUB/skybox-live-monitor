@@ -125,7 +125,7 @@ def test_history_timer_records_missing_samples():
     body = source.split('root.telemetryNowMs = Date.now()',1)[1].split('computeGraph.requestPaint()',1)[0]
     script = LOGIC.read_text()+'''
 var MonitorLogic={telemetrySample:telemetrySample,gpuLoadSample:gpuLoadSample};
-var root={cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpu2History:[],downHistory:[],upHistory:[],gpu0Usage:87,gpu1Usage:0,gpu2Usage:10,gpu0Available:false,gpu1Available:true,gpu2Available:true,networkAvailable:false,down:12000000,up:100000,lastGpuTelemetryMs:Date.now(),lastNetworkTelemetryMs:Date.now(),telemetryNowMs:Date.now(),lastServiceTelemetryMs:Date.now()};
+var root={cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],downHistory:[],upHistory:[],gpu0Usage:87,gpu1Usage:0,gpu0Available:false,gpu1Available:true,networkAvailable:false,down:12000000,up:100000,lastGpuTelemetryMs:Date.now(),lastNetworkTelemetryMs:Date.now(),telemetryNowMs:Date.now(),lastServiceTelemetryMs:Date.now()};
 root.gpuLoadStates={};root.push=function(h,v){return h.concat([v]);};root.resetServices=function(){};
 ''' + body + '\nconsole.log(JSON.stringify({gpu:root.gpu0History,network:root.downHistory}));'
     assert node(script) == {'gpu':[None],'network':[None]}
@@ -169,7 +169,7 @@ def test_stalled_service_poll_expires_without_expiring_fresh_services(age, expec
     body = 'root.telemetryNowMs = Date.now()'+source.split('root.telemetryNowMs = Date.now()',1)[1].split('computeGraph.requestPaint()',1)[0]
     script = LOGIC.read_text()+'''
 var MonitorLogic={telemetrySample:telemetrySample,gpuLoadSample:gpuLoadSample};
-var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3,cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpu2History:[],gpuLoadStates:{},downHistory:[],upHistory:[],lastServiceTelemetryMs:Date.now()-61000};
+var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3,cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpuLoadStates:{},downHistory:[],upHistory:[],lastServiceTelemetryMs:Date.now()-61000};
 root.push=function(h,v){return h.concat([v]);};
 ''' .replace('Date.now()-61000','Date.now()-'+str(age)) + qml_function('resetServices')+';root.resetServices=resetServices;'+body+';console.log(JSON.stringify([root.hermesGatewayState,root.hindsightState]));'
     assert node(script) == expected
