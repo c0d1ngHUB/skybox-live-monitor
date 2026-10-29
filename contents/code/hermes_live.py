@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Read-only Hermes live status: running turns/workers, last activity, model, fallbacks.
 
-Only the local SQLite state database (mode=ro), config.yaml and errors.log are read.
+Only the local SQLite state databases (mode=ro), config.yaml and errors.log(.1) of the
+default and every named profile are read.
 No model, Hermes API or network is touched, so polling consumes no tokens.
 Unknown sources are reported as null, never as zero.
 """
@@ -65,23 +66,36 @@ def fallback_providers(config: Path):
         return None
 
 
+def _tail(log: Path):
+    size = log.stat().st_size
+    with log.open("rb") as handle:
+        if size > TAIL_BYTES:
+            handle.seek(size - TAIL_BYTES)
+        return handle.read().decode("utf-8", "replace")
+
+
 def count_429(log: Path, since: str):
-    """Count distinct 429 error events (log header lines) since the given timestamp."""
+    """Count distinct 429 error events since the timestamp, including the rotated log.
+
+    Hermes rotates errors.log by size, so a 24 h window can straddle errors.log.1.
+    A missing current log is unknown; a missing rotated log just means no rotation yet.
+    """
     try:
-        size = log.stat().st_size
-        with log.open("rb") as handle:
-            if size > TAIL_BYTES:
-                handle.seek(size - TAIL_BYTES)
-            text = handle.read().decode("utf-8", "replace")
+        texts = [_tail(log)]
     except OSError:
         return None
+    try:
+        texts.append(_tail(log.with_name(log.name + ".1")))
+    except OSError:
+        pass
     seconds = set()
-    for line in text.splitlines():
-        match = LOG_LINE.match(line)
-        if not match or match[1] < since:
-            continue
-        if " ERROR " in line and "Streaming failed before delivery" in line and "status 429" in line:
-            seconds.add(match[1])
+    for text in texts:
+        for line in text.splitlines():
+            match = LOG_LINE.match(line)
+            if not match or match[1] < since:
+                continue
+            if " ERROR " in line and "Streaming failed before delivery" in line and "status 429" in line:
+                seconds.add(match[1])
     return len(seconds)
 
 
@@ -95,7 +109,9 @@ def collect(db: Path, config: Path, errors_log: Path, now: float, errors_since: 
         return payload
     try:
         leases = con.execute(
-            "SELECT acquired_at FROM session_turn_leases WHERE expires_at > ?", (now,)).fetchall()
+            "SELECT l.acquired_at, MAX(l.acquired_at, COALESCE(s.last_activity_at, l.acquired_at)) "
+            "FROM session_turn_leases l LEFT JOIN sessions s ON s.id = l.conversation_id "
+            "WHERE l.expires_at > ?", (now,)).fetchall()
         workers = con.execute(
             "SELECT COUNT(*) FROM worker_executions WHERE status NOT IN ('terminal','completed','failed','cancelled')"
         ).fetchone()[0]
@@ -119,7 +135,8 @@ def collect(db: Path, config: Path, errors_log: Path, now: float, errors_since: 
     running = len(leases)
     longest = round(now - min(row[0] for row in leases)) if leases else 0
     age = max(0, round(now - last[2])) if last else None
-    stalled = bool(running and (age is None or age > STALL_AFTER_S))
+    # A turn is stuck when *its own* session shows no activity, regardless of other sessions.
+    stalled = any(now - row[1] > STALL_AFTER_S for row in leases)
 
     providers = fallback_providers(config)
     if providers is None:
@@ -137,6 +154,7 @@ def collect(db: Path, config: Path, errors_log: Path, now: float, errors_since: 
     payload.update({
         "available": True,
         "tone": "warn" if warn else "ok",
+        "_last_at": last[2] if last else None,
         "running_turns": running,
         "longest_turn_s": longest,
         "workers": workers,
@@ -154,10 +172,66 @@ def collect(db: Path, config: Path, errors_log: Path, now: float, errors_since: 
     return payload
 
 
+def discover_profiles(root: Path):
+    """Default profile plus every named profile that has a state database."""
+    found = [("default", root)]
+    try:
+        named = sorted(p for p in (root / "profiles").iterdir() if p.is_dir())
+    except OSError:
+        named = []
+    found += [(p.name, p) for p in named if (p / "state.db").exists()]
+    return found
+
+
+def collect_all(root: Path, now: float, errors_since: str) -> dict:
+    results, failed = [], []
+    for name, home in discover_profiles(root):
+        item = collect(home / "state.db", home / "config.yaml", home / "logs" / "errors.log", now, errors_since)
+        if item.get("available"):
+            results.append((name, item))
+        else:
+            failed.append(name)
+    if not results:
+        return {"available": False, "tone": "unknown", "stamp": now,
+                "error": "database_unavailable", "failed_profiles": failed}
+
+    def total(key):
+        values = [item[key] for _, item in results]
+        return None if any(v is None for v in values) else sum(values)
+
+    latest_name, latest = max(results, key=lambda r: r[1]["_last_at"] or float("-inf"))
+    has_last = latest["_last_at"] is not None
+    payload = {
+        "available": True,
+        "stamp": now,
+        "profiles": [name for name, _ in results],
+        "partial": bool(failed),
+        "failed_profiles": failed,
+        "running_turns": total("running_turns"),
+        "longest_turn_s": max(item["longest_turn_s"] for _, item in results),
+        "workers": total("workers"),
+        "delegations": total("delegations"),
+        "last_activity_age_s": latest["last_activity_age_s"],
+        "last_source": latest["last_source"],
+        "last_profile": latest_name if has_last else None,
+        "last_description": latest["last_description"],
+        "model": latest["model"],
+        "stalled": any(item["stalled"] for _, item in results),
+        "fallback_24h": total("fallback_24h"),
+        "fallback_calls_24h": total("fallback_calls_24h"),
+        "fallback_models": sorted({m for _, item in results for m in item["fallback_models"]}),
+        "limit_429_24h": total("limit_429_24h"),
+    }
+    warn = bool(failed) or any(item["tone"] != "ok" for _, item in results)
+    payload["tone"] = "warn" if warn else "ok"
+    return payload
+
+
 def main() -> None:
     home = Path.home() / ".hermes"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", default=str(home / "state.db"))
+    parser.add_argument("--root", default=None, help="Hermes home; aggregates default + named profiles")
+    parser.add_argument("--db", default=None, help="single-profile mode (tests)")
     parser.add_argument("--config", default=str(home / "config.yaml"))
     parser.add_argument("--errors-log", default=str(home / "logs" / "errors.log"))
     parser.add_argument("--now", type=float, default=None)
@@ -165,8 +239,12 @@ def main() -> None:
     args = parser.parse_args()
     now = args.now if args.now is not None else time.time()
     since = args.errors_since or datetime.fromtimestamp(now - 86400).strftime("%Y-%m-%d %H:%M:%S")
-    result = collect(Path(args.db).expanduser(), Path(args.config).expanduser(),
-                     Path(args.errors_log).expanduser(), now, since)
+    if args.db is not None:
+        result = collect(Path(args.db).expanduser(), Path(args.config).expanduser(),
+                         Path(args.errors_log).expanduser(), now, since)
+    else:
+        result = collect_all(Path(args.root).expanduser() if args.root else home, now, since)
+    result.pop("_last_at", None)
     print(json.dumps(result, separators=(",", ":")))
 
 

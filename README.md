@@ -34,9 +34,9 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 - NVIDIA VRAM telemetry via `nvidia-smi`
 - Hermes live panel (replaces the former Blackwell health panel): running turns with
   duration, workers/delegations, age/source of the last activity and the active model,
-  read-only from `~/.hermes/state.db`, `config.yaml` and `logs/errors.log` (no tokens, no
-  model call). Warning indicator (yellow border): a turn without activity for 5 min
-  (**HÄNGT?**), main-model calls on a configured fallback provider in the last 24 h
+  read-only from `state.db`, `config.yaml` and `logs/errors.log(.1)` of the default and every
+  named profile (no tokens, no model call). Warning indicator (yellow border): a turn whose
+  own session shows no activity for 5 min (**HÄNGT?**), an unreadable profile (**TEILWEISE**), main-model calls on a configured fallback provider in the last 24 h
   (**FALLBACK 24h**), or provider limit errors (**429 24h**). Unreadable sources show
   `?`/`UNBEKANNT`, never zero.
 - Longest completed Hermes run across the default and named profiles;

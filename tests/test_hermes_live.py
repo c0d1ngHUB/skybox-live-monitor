@@ -174,3 +174,83 @@ toolsets:
             sys.modules["yaml"] = real
         else:
             sys.modules.pop("yaml", None)
+
+
+def run_root(tmp_path, root, extra=()):
+    out = subprocess.run(
+        ["python3", "-I", str(SCRIPT), "--root", str(root), "--now", str(NOW), *extra],
+        text=True, capture_output=True, check=True)
+    return json.loads(out.stdout)
+
+
+def make_profile(home: Path, config=CONFIG, errors="", errors_old=None):
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "logs").mkdir(exist_ok=True)
+    (home / "config.yaml").write_text(config)
+    (home / "logs" / "errors.log").write_text(errors)
+    if errors_old is not None:
+        (home / "logs" / "errors.log.1").write_text(errors_old)
+    return make_db(home / "state.db")
+
+
+def test_stuck_turn_is_flagged_even_while_another_session_is_active(tmp_path):
+    db = tmp_path / "state.db"
+    c = make_db(db)
+    c.execute("INSERT INTO sessions VALUES ('tg','telegram','m',?,NULL,?,'tool',NULL)", (NOW - 1300, NOW - 1200))
+    c.execute("INSERT INTO session_turn_leases VALUES ('tg','h',?,?)", (NOW - 1250, NOW + 200))
+    c.execute("INSERT INTO sessions VALUES ('cr','cron','m',?,NULL,?,'x',NULL)", (NOW - 10, NOW - 3))
+    c.commit()
+    p = run(tmp_path, db)
+    assert p["stalled"] is True and p["tone"] == "warn"
+    assert p["last_source"] == "cron"
+
+
+def test_active_turn_uses_its_own_session_activity(tmp_path):
+    db = tmp_path / "state.db"
+    c = make_db(db)
+    c.execute("INSERT INTO sessions VALUES ('tg','telegram','m',?,NULL,?,'tool',NULL)", (NOW - 1300, NOW - 4))
+    c.execute("INSERT INTO session_turn_leases VALUES ('tg','h',?,?)", (NOW - 1250, NOW + 200))
+    c.execute("INSERT INTO sessions VALUES ('old','cron','m',?,?,?,'x',NULL)", (NOW - 5000, NOW - 4000, NOW - 4000))
+    c.commit()
+    p = run(tmp_path, db)
+    assert p["stalled"] is False and p["tone"] == "ok"
+
+
+def test_429_from_rotated_log_inside_window_is_still_counted(tmp_path):
+    root = tmp_path / "hermes"
+    old = "1970-01-12 08:00:00,000 ERROR [x] agent.chat_completion_helpers: Streaming failed before delivery: status 429 a\n"
+    new = "1970-01-12 12:00:00,000 ERROR [x] agent.chat_completion_helpers: Streaming failed before delivery: status 429 b\n"
+    make_profile(root, errors=new, errors_old=old).commit()
+    p = run_root(tmp_path, root, ("--errors-since", "1970-01-12 00:00:00"))
+    assert p["limit_429_24h"] == 2
+
+
+def test_all_profiles_are_aggregated(tmp_path):
+    root = tmp_path / "hermes"
+    c = make_profile(root)
+    c.execute("INSERT INTO sessions VALUES ('a','telegram','primary-model',1,2,?,'',NULL)", (NOW - 30,))
+    c.commit()
+    other_cfg = "model:\n  provider: other-primary\nfallback_providers:\n  - provider: other-fb\n"
+    e = make_profile(root / "profiles" / "elisabeth", config=other_cfg,
+                     errors="1970-01-12 12:00:00,000 ERROR [y] agent.chat_completion_helpers: Streaming failed before delivery: status 429\n")
+    e.execute("INSERT INTO sessions VALUES ('b','telegram','eli-model',?,NULL,?,'',NULL)", (NOW - 60, NOW - 5))
+    e.execute("INSERT INTO session_turn_leases VALUES ('b','h',?,?)", (NOW - 50, NOW + 100))
+    e.execute("INSERT INTO session_model_usage VALUES ('b','fb','other-fb','',4,?)", (NOW - 100,))
+    e.commit()
+    (root / "profiles" / "coordinator").mkdir()  # profile without state.db: unused, not a failure
+    p = run_root(tmp_path, root, ("--errors-since", "1970-01-12 00:00:00"))
+    assert p["available"] is True and p["partial"] is False
+    assert p["running_turns"] == 1 and p["fallback_24h"] == 1 and p["limit_429_24h"] == 1
+    assert p["last_source"] == "telegram" and p["last_profile"] == "elisabeth" and p["model"] == "eli-model"
+    assert p["profiles"] == ["default", "elisabeth"] and p["tone"] == "warn"
+
+
+def test_unreadable_profile_marks_partial_and_warns(tmp_path):
+    root = tmp_path / "hermes"
+    make_profile(root).commit()
+    bad = root / "profiles" / "broken"
+    bad.mkdir(parents=True)
+    (bad / "state.db").write_text("not a database")
+    p = run_root(tmp_path, root)
+    assert p["available"] is True and p["partial"] is True
+    assert p["failed_profiles"] == ["broken"] and p["tone"] == "warn"

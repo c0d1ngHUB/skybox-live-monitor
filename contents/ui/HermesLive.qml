@@ -39,13 +39,16 @@ Rectangle {
         if (payload.workers > 0) text += " · " + payload.workers + " WORKER"
         if (payload.delegations > 0) text += " · " + payload.delegations + " DELEGATION"
         if (payload.stalled === true) text += " · HÄNGT?"
+        if (payload.partial === true) text += " · TEILWEISE"
         return text
     }
     function summaryText() {
         if (!fresh) return "Keine frische Messung · Quelle nicht lesbar oder veraltet"
         var last = payload.last_activity_age_s === null || payload.last_activity_age_s === undefined
             ? "?" : duration(payload.last_activity_age_s)
-        return "Zuletzt " + last + (payload.last_source ? " (" + payload.last_source + ")" : "")
+        var origin = payload.last_source || ""
+        if (payload.last_profile && payload.last_profile !== "default") origin += (origin ? "/" : "") + payload.last_profile
+        return "Zuletzt " + last + (origin ? " (" + origin + ")" : "")
             + " · " + (payload.model || "Modell ?")
             + " · FALLBACK 24h: " + count(payload.fallback_24h)
             + " · 429 24h: " + count(payload.limit_429_24h)
@@ -53,13 +56,16 @@ Rectangle {
     function detailText() {
         if (!fresh) return "Hermes-Status UNBEKANNT: state.db nicht lesbar oder Messung älter als 25 s."
         var models = payload.fallback_models && payload.fallback_models.length ? payload.fallback_models.join(", ") : "keine"
-        return ["Nur lesend aus ~/.hermes/state.db, config.yaml und errors.log · kein Modellaufruf, keine Tokens.",
+        var profiles = payload.profiles && payload.profiles.length ? payload.profiles.join(", ") : "default"
+        var failed = payload.failed_profiles && payload.failed_profiles.length ? " · NICHT LESBAR: " + payload.failed_profiles.join(", ") : ""
+        return ["Nur lesend aus state.db, config.yaml und errors.log(.1) je Profil · kein Modellaufruf, keine Tokens.",
+            "Profile: " + profiles + failed,
             "Aktive Turns: " + count(payload.running_turns) + " · längster " + duration(payload.longest_turn_s),
             "Worker: " + count(payload.workers) + " · Delegationen: " + count(payload.delegations),
             "Letzte Aktivität: " + (payload.last_description || "?"),
             "Fallback-Sessions 24h: " + count(payload.fallback_24h) + " (Aufrufe " + count(payload.fallback_calls_24h) + ") · Modelle: " + models,
             "Provider-Limit (429) 24h: " + count(payload.limit_429_24h),
-            "Hängt? = Turn läuft, aber seit über 5 min keine Aktivität."].join("\n")
+            "Hängt? = ein Turn läuft, aber seine eigene Session zeigt seit über 5 min keine Aktivität."].join("\n")
     }
 
     Text {

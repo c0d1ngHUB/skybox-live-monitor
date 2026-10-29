@@ -87,6 +87,17 @@ Item {
    p = base(t); p.fallback_24h = null; p.limit_429_24h = null; p.tone = "warn"
    h.payload = p
    verify(summary.text.indexOf("FALLBACK 24h: ?") >= 0 && summary.text.indexOf("429 24h: ?") >= 0, summary.text)
+   // Partial measurement (one profile unreadable) is shown and warns.
+   p = base(t); p.partial = true; p.failed_profiles = ["broken"]; p.profiles = ["default"]; p.tone = "warn"
+   h.payload = p
+   compare(h.warn, true)
+   verify(heading.text.indexOf("TEILWEISE") >= 0, heading.text)
+   verify(h.detailText().indexOf("broken") >= 0)
+   // Activity from a named profile names that profile.
+   p = base(t); p.last_profile = "elisabeth"; p.profiles = ["default", "elisabeth"]
+   h.payload = p
+   verify(summary.text.indexOf("telegram/elisabeth") >= 0, summary.text)
+   verify(h.detailText().indexOf("default, elisabeth") >= 0)
    // Stale data becomes unknown.
    h.payload = base(t)
    h.nowMs = (t + 40) * 1000
