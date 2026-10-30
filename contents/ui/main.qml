@@ -892,6 +892,17 @@ PlasmoidItem {
                 critical: root.critical
             }
 
+            ClaudeUsage {
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                Layout.minimumHeight: implicitHeight
+                ink: root.ink
+                muted: root.muted
+                accent: root.cyan
+                warning: root.warning
+                critical: root.critical
+            }
+
             // --- Two-GPU row followed by two full-width CPU/RAM cards ---
             Item {
                 Layout.fillWidth: true

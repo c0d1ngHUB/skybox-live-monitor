@@ -32,7 +32,7 @@ def command_expressions():
 
 def test_request_counter_commands_rotate_through_a_bounded_set():
     rows = [row for row in command_expressions() if 'requestId' in row[1]]
-    assert {name for name, _ in rows} >= {'HermesLive.qml', 'QwenControl.qml'}, rows
+    assert {name for name, _ in rows} >= {'HermesLive.qml', 'QwenControl.qml', 'ClaudeUsage.qml'}, rows
     for component, expression in rows:
         js = f'''
 const MonitorLogic={{shellQuote:s=>"'"+s+"'"}};

@@ -39,6 +39,11 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   own session shows no activity for 5 min (**HÄNGT?**), an unreadable profile (**TEILWEISE**), main-model calls on a configured fallback provider in the last 24 h
   (**FALLBACK 24h**), or provider limit errors (**429 24h**). Unreadable sources show
   `?`/`UNBEKANNT`, never zero.
+- Claude plan usage row (**CLAUDE MAX**) below the Hermes panel: 5-hour session and
+  weekly limit in percent with bar and local reset time, the same numbers as the
+  "Plan usage limits" page on claude.ai. Polled every 10 min; yellow from 75 %, red
+  from 90 % or when the API reports a non-normal severity. The tooltip adds the
+  per-model weekly limits, the weekly share per surface and the extra-usage state.
 - Longest completed Hermes run across the default and named profiles;
   assistant tool-call preambles and unfinished turns do not count as completion
   One unreadable profile does not discard other readings: a partial maximum is
@@ -128,6 +133,7 @@ The hardware panels work independently of the AI integrations. Missing tools or 
 | [hermes_max_think.py](contents/code/hermes_max_think.py) | Local SQLite history under `~/.hermes`, including named profiles; standalone `--root` / `--db` overrides |
 | [hermes_openai_keys.py](contents/code/hermes_openai_keys.py) | `hermes auth list` via PATH or `~/.local/bin/hermes`; inherits `HERMES_HOME`; `HERMES_MONITOR_PROFILE` explicitly selects a named profile |
 | [ai_services_status.py](contents/code/ai_services_status.py) | User unit `hermes-gateway.service`, fixed `http://127.0.0.1:9177/health`, and aggregate OAuth counts |
+| [claude_usage.py](contents/code/claude_usage.py) | Read-only `GET https://api.anthropic.com/api/oauth/usage` (undocumented) with the Claude Code OAuth access token from `~/.claude/.credentials.json`. The token is never refreshed (that would rotate the refresh token and log out Claude Code); an expired token shows `Token abgelaufen` until Claude Code refreshes it. No model call, no usage cost |
 | [hindsight_observation_health.py](contents/code/hindsight_observation_health.py) | `HINDSIGHT_API_URL` (default `http://127.0.0.1:9177`) and `HINDSIGHT_HEALTH_BANK` (default `hermes`) |
 
 Environment overrides must be visible to the Plasma shell process, not just a terminal running a helper. `HINDSIGHT_API_URL` affects observation health only; the service status helper retains its fixed loopback endpoint. Overriding the API URL can cause remote HTTP requests. The observation helper reads paginated memory and scope data without invoking an LLM, and its migration timestamp/baselines are specific to the original `hermes` bank; reassess them for another installation.
