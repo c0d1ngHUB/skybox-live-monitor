@@ -39,8 +39,13 @@ Item {
         stdoutBuffer = ""
         stderrBuffer = ""
         // Quote the resolved path; neither action nor request ID is user input.
+        // The ID rotates through 4 slots: Plasma5Support keeps one property per
+        // source name ever connected and rebuilds its meta-object for each new
+        // one, so an unbounded per-command name would grow without limit (see
+        // HermesLive.qml). Consecutive commands still differ, so a late result
+        // of the previous command never matches activeCommand.
         var quotedPath = "'" + helperPath.replace(/'/g, "'\\''") + "'"
-        activeCommand = "python3 " + quotedPath + " " + operation + " --request-id " + requestId
+        activeCommand = "python3 " + quotedPath + " " + operation + " --request-id " + (requestId % 4)
         executable.connectSource(activeCommand)
     }
 

@@ -249,6 +249,12 @@ Rectangle {
             }
         }
     }
+    // Source names rotate through 4 slots: Plasma5Support keeps one property per
+    // source name ever connected in EVERY executable DataSource and rebuilds the
+    // meta-object for each new one, so an unbounded per-poll name stalled the
+    // plasmashell main thread for seconds after a few hours. requestId still
+    // advances on every request/abandon, so a late result of an abandoned slot
+    // never matches the current command.
     PlasmaSupport.DataSource {
         id: source
         engine: "executable"
@@ -258,7 +264,7 @@ Rectangle {
         property double startedMs: 0
         property string buffer: ""
         property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/hermes_live.py"))
-        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + " # skybox-request-" + requestId
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + " # skybox-request-" + (requestId % 4)
         onNewData: function(name, data) {
             if (name !== command) return
             buffer += data["stdout"] || ""
@@ -278,7 +284,7 @@ Rectangle {
         property double startedMs: 0
         property string buffer: ""
         property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/hermes_details.py"))
-        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + " # skybox-request-" + requestId
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + " # skybox-request-" + (requestId % 4)
         onNewData: function(name, data) {
             if (name !== command) return
             buffer += data["stdout"] || ""
