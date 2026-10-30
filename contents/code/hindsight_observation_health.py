@@ -335,6 +335,13 @@ def summarize(items: list[dict], now: datetime | None = None) -> dict:
     merged = sum(1 for entry in observations if int(entry.get("proof_count") or 0) >= 2)
 
     orphans = len(orphan_entries)
+    # Condensation row: share of raw facts that sit in at least one observation
+    # and the mean number of proofs per observation. None without a population.
+    referenced_pct = _pct(len(raw_facts) - orphans, len(raw_facts))
+    avg_proofs = (
+        round(sum(int(entry.get("proof_count") or 0) for entry in observations) / total, 2)
+        if total else None
+    )
 
     # Split the orphans by why they are unreferenced. Hindsight >= 0.10 merges
     # a losing fact's content into the surviving observation WITHOUT keeping
@@ -404,6 +411,8 @@ def summarize(items: list[dict], now: datetime | None = None) -> dict:
         "single_proof_pct": _pct(single, total),
         "merged": merged,
         "merge_pct": _pct(merged, total),
+        "referenced_pct": referenced_pct,
+        "avg_proofs": avg_proofs,
         "orphans": orphans,
         "orphan_backlog": orphan_backlog,
         "orphan_consolidated": orphan_consolidated,

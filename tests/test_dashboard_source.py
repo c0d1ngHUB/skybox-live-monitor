@@ -719,111 +719,36 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'Layout.preferredHeight: 178' in text
     assert 'Layout.minimumHeight: 174' in text
     assert 'id: openAiOauthCard' in text
-    assert 'id: obsHealthCard' in text
-    assert 'root.obsHealthLabel()' in text
-    assert 'root.obsHealthTone()' in text
+    # The HINDSIGHT OBS row was removed on request; VERDICHTUNG replaces it.
+    assert 'id: obsHealthCard' not in text
+    assert 'text: "HINDSIGHT OBS"' not in text
+    assert 'id: obsCondenseCard' in text
 
 
-def test_obs_card_leads_with_the_merging_health_of_the_current_bank():
+def test_obs_row_keeps_only_the_condensation_wiring():
     text = source()
-    # The bank was rebuilt on 2026-10-02, so the card leads with the metrics that
-    # survive a rebuild: how much consolidation merges, backlog and scope split.
-    assert '"MERGE " + root.fmtPct0(root.obsMergePct)' in text
-    assert '"BACKLOG " + root.obsInt(root.obsOrphanBacklog)' in text
-    assert '" · SCOPE " + root.obsInt(root.obsScopeTotal)' in text
-    assert 'LAG " + root.fmtLagHours(root.obsLagHours)' in text
-    # The scope count alone says nothing about how the bank is really split, so
-    # the bar also carries the tag drift (scopes that only wrap an existing tag
-    # set) and the share of observations sitting in the untagged catch-all pool.
-    assert '" · DRIFT " + root.obsInt(root.obsDriftScopes)' in text
-    assert '" · UNTAG " + root.fmtPct0(root.obsUntaggedSharePct)' in text
-    # Scope split is reported as a trend against the previous valid poll.
-    assert 'root.obsScopeTrendLabel()' in text
-    assert 'root.obsScopeTotal <= root.obsPreviousScopeTotal' in text
-    # Thresholds travel with the payload instead of being duplicated in QML.
-    assert 'root.obsThreshold(' in text
-    assert 'payload.thresholds' in text
+    # The old HINDSIGHT OBS health row (backlog, scope drift, untag, lag, merge
+    # trend, orphan audit) was removed; its unused QML functions and properties
+    # went with it. The helper still ships the full payload for its CLI.
+    for gone in ('function obsHealthLabel(', 'function obsHealthDetail(', 'function obsHealthTone(',
+                 'function obsHealthBorderColor(', 'function obsHealthOk(', 'function obsScopeTrendOk(',
+                 'function obsMergeTrendText(', 'function obsRecordMergeTrend(', 'function obsThreshold(',
+                 'function updateObsScopeTotal(', 'function updateObsDriftTotal(', 'obsMergeHistory',
+                 'obsOrphanBacklog', 'obsDriftScopes', 'obsLagHours', 'obsThresholds'):
+        assert gone not in text, gone
+    # The frozen pre-reset reference stays gone as well.
+    assert 'VOR DEM RESET' not in text and 'SCOPE-BASIS' not in text
     # Absent fields must not read as zero.
-    assert 'payload.merge_pct, -1' in text
-    assert 'payload.lag_hours, -1' in text
-    assert 'payload.orphans, -1' in text
-    assert 'payload.drift_scopes, -1' in text
-    assert 'payload.untagged_share_pct, -1' in text
-    assert 'payload.orphan_check_median_containment, -1' in text
-    # No stale values on screen when the API is unreachable or the payload is malformed:
-    # both branches go through one reset path that blanks every metric.
+    for field in ('merge_pct', 'merged', 'orphans', 'raw_facts', 'referenced_pct', 'avg_proofs'):
+        assert f'payload.{field}, -1' in text, field
+    # No stale values on screen when the API is unreachable or the payload is
+    # malformed: both branches go through one reset path that blanks every
+    # displayed metric.
     assert text.count('root.resetObsHealth()') >= 2
-    assert 'root.updateObsScopeTotal(-1)' in text
-    reset = text[text.index('    function resetObsHealth()'):text.index('    function obsHealthOk()')]
-    for field in ('obsHealthUnavailable', 'obsMergePct', 'obsOrphans', 'obsLagHours',
-                  'obsLargestScope', 'obsUntaggedSharePct', 'obsConsolidatedRecent',
-                  'obsOrphanCheckMedianContainment'):
-        assert field in reset, f"resetObsHealth leaves {field} stale"
-    # The scope total and the drift count are cleared through the shared helpers,
-    # which also reset the trends so the next poll cannot report a delta against a
-    # stale baseline.
-    assert 'root.updateObsScopeTotal(-1)' in reset
-    assert 'root.updateObsDriftTotal(-1)' in reset
-
-
-def test_obs_card_accepts_a_rising_scope_count_only_without_new_tag_drift():
-    text = source()
-    rule = text[text.index('    function obsScopeTrendOk()'):text.index('    function obsHealthOk()')]
-    # An unchanged or shrinking scope count stays healthy, exactly as before.
-    assert 'root.obsScopeTotal <= root.obsPreviousScopeTotal' in rule
-    # A rising count is only accepted when no scope started wrapping an existing
-    # tag set: a brand-new topic opens a new pool, while a tag permutation splits
-    # an existing one. Without drift data the old strict verdict stands.
-    assert 'root.obsDriftScopes <= root.obsPreviousDriftScopes' in rule
-    assert 'return false' in rule
-    assert 'root.obsScopeTrendOk()' in text
-
-
-def test_obs_tooltip_carries_the_new_context_and_no_frozen_reference():
-    text = source()
-    detail = text[text.index('function obsHealthDetail()'):text.index('function gpuPowerText')]
-    # Throughput replaces the frozen pre-reset reference: LAG alone cannot show
-    # whether consolidation ran at all.
-    assert '"KONSOLIDIERUNG " + root.obsInt(windowHours) + "H: "' in detail
-    assert 'consolidated_window_hours' in detail
-    assert 'OHNE REFERENZ' in detail
-    # The sample audit of unreferenced facts is named, and its limits are stated
-    # instead of reading as a pass/fail gate.
-    assert 'ORPHAN-AUDIT' in detail
-    assert 'PARAPHRASIERT' in detail
-    assert 'DRIFT ' in detail
-    assert 'UNTAG' in detail
-    # The pre-reset snapshot (1009 obs / 37.6% merge) and the stale scope basis are
-    # gone: the rebuilt bank sat at the same merge share, which made the number
-    # read like a live benchmark.
-    assert 'VOR DEM RESET' not in text
-    assert 'SCOPE-BASIS' not in text
-    assert 'obsReferenceMergePct' not in text
-    assert 'obsReferenceObservations' not in text
-
-
-def test_obs_card_keeps_its_own_rolling_merge_trend_instead_of_a_frozen_reference():
-    text = source()
-    # A rolling trend of the card's own polls replaces the frozen pre-reset
-    # baseline. It is labelled as "since widget start" because it is not
-    # persisted and starts over with the widget.
-    assert 'property var obsMergeHistory' in text
-    assert 'root.obsRecordMergeTrend(' in text
-    assert 'TREND SEIT WIDGET-START' in text
-    history = text[text.index('    function obsRecordMergeTrend('):text.index('    function obsMergeTrendText(')]
-    # The window is bounded, so the history cannot grow without limit.
-    assert 'obsTrendWindowMs' in text
-    assert 'slice(' in history
-
-
-def test_obs_card_keeps_the_all_time_figures_in_the_tooltip_only():
-    text = source()
-    detail = text[text.index('function obsHealthDetail()'):text.index('function gpuPowerText')]
-    assert 'TAGS 0 ' in detail and 'PROOF 1 ' in detail
-    # They were the headline before; they must not be in the card label any more.
-    label = text[text.index('function obsHealthLabel()'):text.index('function obsHealthOk()')]
-    assert 'TAGS 0' not in label and 'PROOF 1' not in label
-    assert 'MERGE ' in label
+    reset = text[text.index('    function resetObsHealth()'):text.index('    function gpuPowerText(')]
+    for field in ('obsHealthUnavailable', 'obsCount', 'obsMergePct', 'obsMerged', 'obsOrphans',
+                  'obsRawFacts', 'obsReferencedPct', 'obsAvgProofs'):
+        assert f'root.{field} = ' in reset, f"resetObsHealth leaves {field} stale"
 
 
 def test_gpu_temperature_uses_warning_at_85_and_critical_at_90():
