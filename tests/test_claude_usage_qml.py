@@ -68,11 +68,11 @@ Item {
    verify(u.detailText().indexOf("Token abgelaufen") >= 0 && u.detailText().indexOf("undefined") < 0)
    u.payload = {available:false,stamp:t,reason:"http_429",plan:null,tone:"unknown",session:null,weekly:null}
    verify(unknown.text.indexOf("HTTP 429") >= 0, unknown.text)
-   // Stale after 2.5 poll intervals (25 min at 10 min).
+   // Stale after 2.5 poll intervals (5 min at 2 min).
    u.payload = base(t)
-   u.nowMs = (t + 24 * 60) * 1000
+   u.nowMs = (t + 4 * 60) * 1000
    compare(u.fresh, true)
-   u.nowMs = (t + 26 * 60) * 1000
+   u.nowMs = (t + 6 * 60) * 1000
    compare(u.fresh, false)
    verify(unknown.text.indexOf("Messung veraltet") >= 0, unknown.text)
    u.payload = null
@@ -88,7 +88,7 @@ Item {
     assert 'ReferenceError' not in result.stderr and 'TypeError' not in result.stderr
 
 
-def test_poll_interval_is_ten_minutes():
+def test_poll_interval_is_two_minutes():
     qml = (ROOT / 'contents/ui/ClaudeUsage.qml').read_text()
-    assert re.search(r'property int pollIntervalMs: 600000\b', qml)
+    assert re.search(r'property int pollIntervalMs: 120000\b', qml)
     assert 'ClaudeUsage {' in (ROOT / 'contents/ui/main.qml').read_text()

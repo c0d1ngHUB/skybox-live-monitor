@@ -5,7 +5,7 @@ import org.kde.plasma.plasma5support 2.0 as PlasmaSupport
 
 // Claude plan usage (5-h session + weekly limit) from the same endpoint as
 // claude.ai's "Plan usage limits" page. Read-only, never refreshes the token,
-// costs no model usage. Polled every 10 min; unknown is never shown as 0 %.
+// costs no model usage. Polled every 2 min; unknown is never shown as 0 %.
 Rectangle {
     id: usage
     objectName: "claudeUsage"
@@ -15,7 +15,7 @@ Rectangle {
     property color warning: "#ffca70"
     property color critical: "#ff7373"
     property bool pollingEnabled: true
-    property int pollIntervalMs: 600000
+    property int pollIntervalMs: 120000
     property var payload: null
     property double nowMs: Date.now()
     // Stale after 2.5 poll intervals (one missed poll is tolerated).

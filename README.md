@@ -41,7 +41,7 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   `?`/`UNBEKANNT`, never zero.
 - Claude plan usage row (**CLAUDE MAX**) below the Hermes panel: 5-hour session and
   weekly limit in percent with bar and local reset time, the same numbers as the
-  "Plan usage limits" page on claude.ai. Polled every 10 min; yellow from 75 %, red
+  "Plan usage limits" page on claude.ai. Polled every 2 min; yellow from 75 %, red
   from 90 % or when the API reports a non-normal severity. The tooltip adds the
   per-model weekly limits, the weekly share per surface and the extra-usage state.
 - Longest completed Hermes run across the default and named profiles;
