@@ -20,7 +20,7 @@ READY_TIMEOUT=180
 # Snapshot before ExecStartPre releases the GPU. A failed engine/gateway start
 # must return an already-active Hindsight backend, without starting one that
 # the user had deliberately left off.
-backend_before=$(systemctl --user is-active hindsight-ollama.service || true)
+backend_before=$(systemctl --user is-active nimble-v3-serve.service || true)
 case "$backend_before" in
   active|activating|reloading) restore_hindsight=1 ;;
   inactive|failed) restore_hindsight=0 ;;
@@ -45,10 +45,10 @@ rollback_start() {
       echo "Qwen recovery failed: container still present; Hindsight not reloaded." >&2
       result=75
     elif (( restore_hindsight )); then
-      if ! systemctl --user start hindsight-ollama.service; then
+      if ! systemctl --user start nimble-v3-serve.service; then
         echo "Qwen recovery failed: previous Hindsight backend could not be restored." >&2
         result=75
-      elif [[ "$(systemctl --user is-active hindsight-ollama.service || true)" != active ]]; then
+      elif [[ "$(systemctl --user is-active nimble-v3-serve.service || true)" != active ]]; then
         echo "Qwen recovery failed: previous Hindsight backend is not active." >&2
         result=75
       fi

@@ -67,7 +67,7 @@ def scripts(tmp_path, monkeypatch):
     fake_bin=tmp_path/'bin';fake_bin.mkdir()
     ctl=fake_bin/'systemctl'
     ctl.write_text(f'#!{sys.executable}\nimport os,sys\n'
-        +'if "hindsight-ollama.service" not in sys.argv:sys.exit(1)\n'
+        +'if "nimble-v3-serve.service" not in sys.argv:sys.exit(1)\n'
         +'state=os.environ.get("HINDSIGHT_TEST_STATE","active");print(state);sys.exit(0 if state=="active" else 3)\n')
     ctl.chmod(0o755)
     import os

@@ -9,7 +9,7 @@ The AI SERVICES header contains one state-dependent start/stop button.
 - A sleeping Qwen server is still ON: its session reservation is not released until the server is stopped.
 - Actions disable the button, use a per-user process lock and return verified service state. An active unit also requires a confirmed running NInfer container; Docker query failures produce UNKNOWN. Unique executable-source request IDs discard disconnected/stale completions before buffer mutation.
 - The priority gateway remains active when Qwen is OFF. Boot settings and model configuration are not modified.
-- Stopping interrupts Qwen requests and restores only the Hindsight Ollama service. GPT-OSS warm-up follows its unit. Nimble is no longer used: it is never started, checked or probed by the stop script. The existing gateway configuration already has `[gpu_handoff].nimble = false` and remains unchanged.
+- Stopping interrupts Qwen requests and restores only the resident service `nimble-v3-serve.service` (since 2026-11-01; model residency follows `nimble-ctl`, see docs/NIMBLE_CONTROL.md). The old `ollama-nimble` (:11440) is never started, checked or probed.
 
 ## Engine: NInfer Docker server (switch 2026-10-12)
 

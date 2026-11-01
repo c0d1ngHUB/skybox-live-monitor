@@ -58,7 +58,7 @@ def test_stop_waits_until_a_started_service_binds_its_http_socket(tmp_path):
     original = stop_script.read_text()
     isolated = original.replace("for port in 11439 11440; do",
                                 f"for port in {ready.server_port} {delayed.server_port}; do")
-    isolated = isolated.replace("for port in 11439; do",
+    isolated = isolated.replace("for port in 11441; do",
                                 f"for port in {delayed.server_port}; do")
     assert isolated != original, "Cannot isolate the localhost probes"
     script = tmp_path / "qwen38-stop-isolated"

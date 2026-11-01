@@ -124,7 +124,7 @@ def prior_backend_active() -> bool | None:
     """Snapshot rollback intent before the start script can release the GPU."""
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "is-active", "hindsight-ollama.service"],
+            ["systemctl", "--user", "is-active", "nimble-v3-serve.service"],
             capture_output=True, text=True, timeout=PROBE_TIMEOUT, check=False,
         )
     except (OSError, subprocess.SubprocessError):

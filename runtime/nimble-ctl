@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Residency policy for Nimble v3 on the shared Blackwell.
+
+Modes (persisted in ~/.config/hermes-nimble/mode):
+  auto  model stays unloaded; consumers load it briefly on demand (default)
+  hold  model is pinned resident (keep_alive=-1) until switched back to auto
+
+Commands print one JSON object:
+  status  read-only state
+  hold    persist hold and load the model now unless Qwen/MOSS owns the GPU
+  auto    persist auto and unload the model now
+  apply   enforce the persisted mode (unit ExecStartPost, GPU-scheduler restore);
+          never loads in auto, never loads while Qwen or a MOSS job owns the GPU
+
+The service (nimble-v3-serve.service) keeps running in both modes; an idle
+Ollama server without a loaded model costs no meaningful VRAM.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import ProxyHandler, Request, build_opener
+
+BASE = os.environ.get("NIMBLE_URL", "http://127.0.0.1:11441")
+MODEL = os.environ.get("NIMBLE_MODEL", "nimble-v3:9b-nvfp4")
+SERVICE = "nimble-v3-serve.service"
+QWEN_SERVICE = "qwen38-ninfer.service"
+SCHEDULER_STATUS = os.environ.get("NIMBLE_SCHEDULER_STATUS", "http://127.0.0.1:8097/status")
+MODE_FILE = Path(os.environ.get("NIMBLE_MODE_FILE",
+                                Path.home() / ".config/hermes-nimble/mode"))
+SYSTEMCTL = os.environ.get("NIMBLE_SYSTEMCTL", "systemctl")
+LOAD_TIMEOUT = float(os.environ.get("NIMBLE_LOAD_TIMEOUT", "300"))
+UNLOAD_TIMEOUT = 60.0
+OPENER = build_opener(ProxyHandler({}))
+# Nimble v3 (MLX runner) rejects /api/generate for loading; a SystemOne
+# question is the only way to load it. Unloading via keep_alive=0 works.
+WARM_QUESTION = {"lasting_value": {
+    "type": "noul",
+    "instructions": "Enthaelt dieser Eintrag dauerhaft nuetzliche Information?",
+    "criteria": {"false": "Rauschen", "true": "Dauerhaft nuetzlich"},
+}}
+
+
+def read_mode() -> str:
+    try:
+        return "hold" if MODE_FILE.read_text().strip() == "hold" else "auto"
+    except OSError:
+        return "auto"
+
+
+def write_mode(mode: str) -> None:
+    MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = MODE_FILE.with_suffix(".tmp")
+    tmp.write_text(mode + "\n")
+    os.replace(tmp, MODE_FILE)
+
+
+def http(path: str, payload: dict | None = None, timeout: float = 5.0) -> dict:
+    data = None if payload is None else json.dumps(payload).encode()
+    req = Request(BASE + path, data=data, headers={"Content-Type": "application/json"})
+    with OPENER.open(req, timeout=timeout) as resp:
+        return json.loads(resp.read() or b"{}")
+
+
+def loaded_entry() -> dict | None | bool:
+    """Entry when loaded, None when not loaded, False when the API is unreachable."""
+    try:
+        models = http("/api/ps").get("models", [])
+    except (URLError, HTTPError, OSError, ValueError):
+        return False
+    return next((m for m in models if m.get("name") == MODEL), None)
+
+
+def unit_state(unit: str) -> str:
+    try:
+        out = subprocess.run([SYSTEMCTL, "--user", "is-active", unit], capture_output=True,
+                             text=True, timeout=5, check=False).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return out or "unknown"
+
+
+def gpu_blocker() -> str:
+    """Why loading now would collide with another Blackwell owner ('' = free)."""
+    if unit_state(QWEN_SERVICE) in {"active", "activating", "reloading"}:
+        return "Qwen 3.8 belegt die Blackwell"
+    try:
+        with OPENER.open(SCHEDULER_STATUS, timeout=3) as resp:
+            sched = json.loads(resp.read())
+        if sched.get("current_job") or sched.get("state") not in (None, "HINDSIGHT_ACTIVE"):
+            return "MOSS-Sprachausgabe belegt die Blackwell"
+    except (URLError, HTTPError, OSError, ValueError):
+        pass  # scheduler down: no MOSS job can be running
+    return ""
+
+
+def status(note: str = "", ok: bool = True, error: str = "") -> dict:
+    entry = loaded_entry()
+    service = unit_state(SERVICE)
+    if entry is False:
+        loaded, vram = None, None
+    else:
+        loaded = entry is not None
+        vram = round(int(entry.get("size_vram", 0)) / 1048576) if entry else 0
+    return {"mode": read_mode(), "service": service, "loaded": loaded, "vram_mib": vram,
+            "blocker": gpu_blocker(), "note": note, "ok": ok, "error": error}
+
+
+def load() -> None:
+    payload = {"model": MODEL, "keep_alive": -1, "questions": WARM_QUESTION,
+               "state": {"current_turn": "Warmup: residentes Halten.", "existing_memories": []}}
+    deadline = time.monotonic() + LOAD_TIMEOUT
+    last = "not attempted"
+    while time.monotonic() < deadline:
+        try:
+            http("/v1/systemone", payload, timeout=min(180.0, LOAD_TIMEOUT))
+            entry = loaded_entry()
+            if entry and entry.get("size", 0) > 0 and entry.get("size_vram") == entry.get("size"):
+                return
+            last = "model not fully on GPU"
+        except (URLError, HTTPError, OSError, ValueError) as exc:
+            last = type(exc).__name__
+        time.sleep(2)
+    raise RuntimeError(f"Nimble konnte nicht geladen werden: {last}")
+
+
+def unload() -> None:
+    http("/api/generate", {"model": MODEL, "keep_alive": 0}, timeout=UNLOAD_TIMEOUT)
+    deadline = time.monotonic() + UNLOAD_TIMEOUT
+    while time.monotonic() < deadline:
+        if loaded_entry() is None:
+            return
+        time.sleep(1)
+    raise RuntimeError("Nimble blieb nach dem Entladen geladen")
+
+
+def ensure_service() -> None:
+    if unit_state(SERVICE) != "active":
+        # ExecStartPost runs `nimble-ctl apply`, which loads in hold mode.
+        subprocess.run([SYSTEMCTL, "--user", "start", SERVICE], capture_output=True,
+                       text=True, timeout=LOAD_TIMEOUT + 60, check=True)
+
+
+def cmd_hold() -> dict:
+    write_mode("hold")
+    blocker = gpu_blocker()
+    if blocker:
+        return status(f"{blocker}; Nimble wird danach automatisch geladen.")
+    try:
+        ensure_service()
+        if not loaded_entry():
+            load()
+    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as exc:
+        return status(ok=False, error=str(exc)[-600:])
+    return status("Nimble ist dauerhaft geladen.")
+
+
+def cmd_auto() -> dict:
+    write_mode("auto")
+    try:
+        if loaded_entry():
+            unload()
+    except (URLError, HTTPError, OSError, RuntimeError, ValueError) as exc:
+        return status(ok=False, error=str(exc)[-600:])
+    return status("Nimble ist entladen und wird nur bei Bedarf kurz geladen.")
+
+
+def cmd_apply() -> dict:
+    if read_mode() != "hold":
+        return status("Modus auto: nichts zu laden.")
+    blocker = gpu_blocker()
+    if blocker:
+        return status(f"{blocker}; Laden verschoben.")
+    try:
+        if not loaded_entry():
+            load()
+    except (OSError, RuntimeError, ValueError) as exc:
+        return status(ok=False, error=str(exc)[-600:])
+    return status("Modus hold: Nimble geladen.")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("command", choices=("status", "hold", "auto", "apply", "mode"))
+    parser.add_argument("--request-id", type=int, default=0)  # widget source rotation
+    args = parser.parse_args()
+    if args.command == "mode":
+        print(read_mode())
+        return 0
+    result = {"status": status, "hold": cmd_hold, "auto": cmd_auto, "apply": cmd_apply}[args.command]()
+    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

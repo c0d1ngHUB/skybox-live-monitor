@@ -29,7 +29,7 @@ def test_qwen_button_executes_start_stop_handles_failure_and_blocks_duplicate_cl
     state.write_text("inactive")
     ctl = fake_bin / "systemctl"
     ctl.write_text(f"#!{sys.executable}\nfrom pathlib import Path\nimport sys\n"
-                   "if 'is-active' in sys.argv and 'hindsight-ollama.service' in sys.argv:print('active');sys.exit(0)\n"
+                   "if 'is-active' in sys.argv and 'nimble-v3-serve.service' in sys.argv:print('active');sys.exit(0)\n"
                    f"print('LoadState=loaded\\nActiveState='+Path({str(state)!r}).read_text()+'\\nSubState=dead')\n")
     ctl.chmod(0o755)
     docker = fake_bin / "docker"

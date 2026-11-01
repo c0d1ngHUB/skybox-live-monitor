@@ -30,7 +30,7 @@ from pathlib import Path
 p=Path({str(state)!r});s=json.loads(p.read_text());args=sys.argv[1:]
 verb=next((a for a in args if a in ('is-active','start','stop','status','show')),None)
 unit=next((a for a in args if a.endswith('.service')),'')
-key={{'qwen38-ninfer.service':'engine','hindsight-ollama.service':'backend','qwen38-gateway.service':'gateway'}}.get(unit)
+key={{'qwen38-ninfer.service':'engine','nimble-v3-serve.service':'backend','qwen38-gateway.service':'gateway'}}.get(unit)
 s['calls'].append([verb,unit]);rc=0
 if verb=='is-active':
  value=s.get(key,'unknown')
@@ -101,7 +101,7 @@ def test_failed_start_restores_previously_active_backend_after_engine_is_stopped
     assert state['backend'] == 'active', result.stderr
     assert state['engine'] == 'inactive'
     stop = state['calls'].index(['stop', 'qwen38-ninfer.service'])
-    restore = state['calls'].index(['start', 'hindsight-ollama.service'])
+    restore = state['calls'].index(['start', 'nimble-v3-serve.service'])
     assert stop < restore
 
 
@@ -109,7 +109,7 @@ def test_failed_start_preserves_previously_inactive_backend(tmp_path):
     result, state = run_start(tmp_path, failure='engine', backend='inactive')
     assert result.returncode != 0
     assert state['backend'] == 'inactive'
-    assert ['start', 'hindsight-ollama.service'] not in state['calls']
+    assert ['start', 'nimble-v3-serve.service'] not in state['calls']
     assert state['engine'] == 'inactive'
 
 
@@ -118,7 +118,7 @@ def test_rollback_does_not_restore_backend_until_engine_stop_succeeds(tmp_path):
     assert result.returncode != 0
     assert state['engine'] == 'active'
     assert ['stop', 'qwen38-ninfer.service'] in state['calls']
-    assert ['start', 'hindsight-ollama.service'] not in state['calls']
+    assert ['start', 'nimble-v3-serve.service'] not in state['calls']
     assert 'recovery' in result.stderr.lower() or 'rollback' in result.stderr.lower()
 
 
@@ -126,7 +126,7 @@ def test_failed_restore_is_visible_in_original_start_error(tmp_path):
     result, state = run_start(tmp_path, failure='restore')
     assert result.returncode != 0
     assert state['engine'] == 'inactive'
-    assert ['start', 'hindsight-ollama.service'] in state['calls']
+    assert ['start', 'nimble-v3-serve.service'] in state['calls']
     assert 'recovery' in result.stderr.lower() or 'rollback' in result.stderr.lower()
 
 
@@ -158,14 +158,14 @@ def test_retry_after_failed_timeout_cleanup_retains_original_off_policy(tmp_path
     assert result['ok'] is False
     assert state['engine']=='inactive'
     assert state['backend']=='inactive'
-    assert ['start','hindsight-ollama.service'] not in state['calls']
+    assert ['start','nimble-v3-serve.service'] not in state['calls']
 
 
 @pytest.mark.parametrize('failure', ['container','docker'])
 def test_rollback_does_not_reload_backend_without_confirmed_container_cleanup(tmp_path, failure):
     result,state=run_start(tmp_path,failure=failure)
     assert result.returncode != 0
-    assert ['start','hindsight-ollama.service'] not in state['calls']
+    assert ['start','nimble-v3-serve.service'] not in state['calls']
     assert 'recovery' in result.stderr.lower() or 'rollback' in result.stderr.lower()
 
 
@@ -198,7 +198,7 @@ def test_stop_never_reloads_hindsight_after_unsettled_engine_stop(tmp_path):
     result = subprocess.run(['/bin/bash',str(runtime_script('qwen38-stop'))], capture_output=True,text=True,
         timeout=10,env={**os.environ,'PATH':str(bindir)+os.pathsep+os.environ['PATH']})
     assert result.returncode != 0
-    assert 'start hindsight-ollama.service' not in calls.read_text()
+    assert 'start nimble-v3-serve.service' not in calls.read_text()
 
 
 @pytest.mark.parametrize('docker_output,docker_exit', [('running',0),('',1)])
@@ -214,7 +214,7 @@ def test_stop_requires_confirmed_container_absence_before_hindsight_reload(tmp_p
     result=subprocess.run(['/bin/bash',str(runtime_script('qwen38-stop'))],capture_output=True,text=True,timeout=10,
         env={**os.environ,'PATH':str(bindir)+os.pathsep+os.environ['PATH']})
     assert result.returncode != 0
-    assert 'start hindsight-ollama.service' not in calls.read_text()
+    assert 'start nimble-v3-serve.service' not in calls.read_text()
 
 
 def test_gateway_error_cannot_hide_an_unsettled_unit_recovery_result(tmp_path):

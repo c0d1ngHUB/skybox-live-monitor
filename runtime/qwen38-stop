@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Stop Qwen3.8 (NInfer engine) and hand the Blackwell back to the Hindsight
-# GPT-OSS backend.
+# resident backend (nimble-v3-serve; model residency follows nimble-ctl auto/hold).
 #
-# Order matters. The priority gateway remains running: Hindsight reaches GPT-OSS
+# Order matters. The priority gateway remains running: Hindsight reaches its LLM
 # exclusively through its :11438 listener. Once Qwen is stopped, the gateway
 # detects its closed backend, releases the Qwen reservation and routes Hindsight
 # to its restored Ollama service.
 #
 # The Docker container is bound to the unit: ExecStop runs `docker stop`, and
 # --rm removes it. Warm-up, when configured, is owned by each unit's
-# ExecStartPost. hindsight-ollama is Type=simple and may report active before
-# its HTTP socket is listening; the probe below retries that bind race. Nimble
-# is no longer used.
+# ExecStartPost. nimble-v3-serve (resident since 2026-11-01) is Type=simple and
+# may report active before its HTTP socket is listening; the probe below retries
+# that bind race. The old ollama-nimble (nimble:9b, :11440) is no longer used.
 set -uo pipefail
 
 # Automatic rollback of a failed start preserves a backend deliberately left
@@ -47,8 +47,8 @@ if (( ! restore_hindsight )); then
   exit 0
 fi
 
-# Restore only Hindsight; never revive the decommissioned Nimble service.
-if ! systemctl --user start hindsight-ollama.service; then
+# Restore only the resident service; never revive the decommissioned ollama-nimble.
+if ! systemctl --user start nimble-v3-serve.service; then
   echo "Hindsight backend could not be restored after Qwen stop." >&2
   exit 75
 fi
@@ -64,13 +64,13 @@ done
 state=$(systemctl --user is-active qwen38-gateway.service)
 printf '%-26s %s\n' qwen38-gateway.service "$state"
 if [[ "$state" != active ]] && (( rc == 0 )); then rc=1; fi
-for unit in hindsight-ollama.service; do
+for unit in nimble-v3-serve.service; do
   state=$(systemctl --user is-active "$unit")
   printf '%-26s %s\n' "$unit" "$state"
   [[ "$state" == active ]] || rc=75
 done
 
-for port in 11439; do
+for port in 11441; do
   curl -fsS --max-time 10 --retry 10 --retry-delay 1 --retry-connrefused --retry-max-time 30 "http://127.0.0.1:${port}/api/ps" 2>/dev/null | python3 -c '
 import json, sys
 for model in json.load(sys.stdin)["models"]:

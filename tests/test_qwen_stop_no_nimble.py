@@ -36,6 +36,6 @@ def test_qwen_stop_does_not_start_check_or_probe_decommissioned_nimble(tmp_path)
     assert commands
     assert not any("ollama-nimble.service" in command or any(":11440" in arg for arg in command)
                    for command in commands), commands
-    assert any("hindsight-ollama.service" in command and "start" in command for command in commands)
+    assert any("nimble-v3-serve.service" in command and "start" in command for command in commands)
     assert any("qwen38-gateway.service" in command and "is-active" in command for command in commands)
     assert result.returncode == 0, result.stdout + result.stderr
