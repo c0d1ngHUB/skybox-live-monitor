@@ -35,12 +35,20 @@ there is no fallback TTS provider. The Blackwell is completely free.
 - `contents/code/moss_control.py status|start|stop` is the JSON-only bridge. It prints exactly one JSON object
   (`mode` `on`/`off`/`unknown`, `ready`, `busy`, `state`, `free_mib`, `blocker`, `note`, `ok`, `error`) and exits
   with 0 only when `ok` is true. It uses only `systemctl --user` and the loopback API, no sudo.
-- `stop` never interrupts a running voice job: if one is still running after the wait, it reports an error and
-  leaves the service on. A job counts as running when the API reports `current_job` or a queue, or when the
-  scheduler's MOSS child exists. That child is matched by its exact argv (`<python> …/hermes_gpu_scheduler/moss_service.py`,
-  see `moss_proc.py`), not by a substring: a shell, editor or `grep` that merely mentions the script must not block a
-  stop. A silent API therefore cannot cause an interrupted job. The one remaining gap is a job accepted in the few milliseconds between the idle check
-  and `systemctl stop`: it is cancelled and Hermes falls back to a text reply.
+- `stop` never interrupts a voice reply. It waits (up to 150 s) until all of this is false, then stops the unit; if the
+  wait runs out it reports an error and leaves the service on:
+  - the API reports `current_job` or a queue;
+  - the scheduler's MOSS child exists;
+  - a Hermes TTS client (`moss_tts_client.py`) is still alive. It collects a job's result only every 5 s, so stopping
+    the scheduler right after the job ended would leave it polling a dead API until its 900 s timeout and lose the
+    reply (found in a live test on 2026-11-02);
+  - the scheduler changed state less than 8 s ago (`ts` in `~/.local/state/moss-tts/scheduler-state.json`). A long
+    reply is several jobs in a row with short gaps between the chunks.
+
+  Processes are matched by exact argv (`<python> …/hermes_gpu_scheduler/moss_service.py`, `<python> …/moss_tts_client.py`,
+  see `moss_proc.py`), not by substring: a shell, editor or `grep` that merely mentions a script must not block a stop.
+  The one remaining gap is a reply that starts in the few milliseconds between the last check and `systemctl stop`:
+  it is cancelled and Hermes falls back to a text reply.
 - The scheduler unit has `Restart=on-failure`, so a clean `systemctl stop` does not respawn it. systemd's default
   `KillMode=control-group` also ends a leftover MOSS child of the unit.
 - Autostart (`systemctl --user is-enabled hermes-gpu-scheduler.service` is `enabled`) is not changed. After a login

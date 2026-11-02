@@ -7,8 +7,9 @@ no VRAM. This helper switches that unit on and off for the AI SERVICES button.
 
   status  read-only state
   start   start the unit and wait until the scheduler API answers
-  stop    wait until no voice job is running, then stop the unit (systemd takes a MOSS
-          child process of the unit down with it)
+  stop    wait until no voice job is running and the last one has been collected (a TTS
+          client is waiting for its result, or the scheduler changed state a moment ago),
+          then stop the unit (systemd takes a MOSS child process of the unit down with it)
 
 Always prints exactly one JSON object, also on unexpected errors, so the QML side never has
 to parse free text. The exit status is 0 only when "ok" is true.
@@ -35,6 +36,12 @@ START_WAIT = float(os.environ.get("MOSS_START_WAIT", "40"))
 STOP_WAIT = float(os.environ.get("MOSS_STOP_WAIT", "150"))
 POLL = float(os.environ.get("MOSS_POLL", "1"))
 PROC_ROOT = Path(os.environ.get("MOSS_PROC_ROOT", "/proc"))
+STATE_FILE = Path(os.environ.get("MOSS_STATE_FILE",
+                                 Path.home() / ".local/state/moss-tts/scheduler-state.json"))
+# Quiet period after the scheduler's last state change before a stop may proceed. The Hermes
+# TTS client collects a job's result only every 5 s (--poll), and a long reply is several jobs
+# in a row with short gaps; stopping inside that window loses the reply.
+QUIET = float(os.environ.get("MOSS_QUIET", "8"))
 OPENER = build_opener(ProxyHandler({}))  # loopback only, never through a proxy
 RUNNING = {"active", "activating", "reloading"}
 STOPPED = {"inactive", "failed"}  # a removed unit also reports "inactive" (exit 4)
@@ -83,19 +90,30 @@ def api_status() -> dict | None:
 
 
 MOSS_SCRIPT_SUFFIX = "/hermes_gpu_scheduler/moss_service.py"
+CLIENT_SCRIPT = "moss_tts_client.py"
+
+
+def _runs_python_script(argv: list[str], matches) -> bool:
+    return len(argv) >= 2 and Path(argv[0]).name.startswith("python") \
+        and any(matches(arg) for arg in argv[1:])
 
 
 def is_moss_service_argv(argv: list[str]) -> bool:
-    """True for the scheduler's MOSS child: `<python> .../hermes_gpu_scheduler/moss_service.py`
-    (moss_proc.py starts exactly this). A substring test on the whole command line is not
-    enough: a shell, editor or grep that merely mentions the script would count as a job."""
-    return (len(argv) >= 2 and Path(argv[0]).name.startswith("python")
-            and any(arg.endswith(MOSS_SCRIPT_SUFFIX) for arg in argv[1:]))
+    """The scheduler's MOSS child: `<python> .../hermes_gpu_scheduler/moss_service.py` (moss_proc.py
+    starts exactly this). A substring test on the whole command line is not enough: a shell,
+    editor or grep that merely mentions the script would count as a job."""
+    return _runs_python_script(argv, lambda arg: arg.endswith(MOSS_SCRIPT_SUFFIX))
 
 
-def moss_process_running() -> bool:
-    """A MOSS inference process of the scheduler exists. It holds the Blackwell, so it
-    counts as a voice job even when the API is silent."""
+def is_tts_client_argv(argv: list[str]) -> bool:
+    """A Hermes TTS client (`<python> .../moss_tts_client.py ...`) that submitted or is about to
+    submit a job and has not yet collected its result."""
+    return _runs_python_script(argv, lambda arg: Path(arg).name == CLIENT_SCRIPT)
+
+
+def voice_process_running() -> bool:
+    """A MOSS child or a TTS client exists. The child holds the Blackwell; the client still waits
+    for audio. Either counts as a voice job even when the API is silent."""
     try:
         entries = list(PROC_ROOT.iterdir())
     except OSError:
@@ -104,10 +122,10 @@ def moss_process_running() -> bool:
         if not entry.name.isdigit():
             continue
         try:
-            argv = (entry / "cmdline").read_bytes().decode(errors="replace").split("\0")
+            argv = [arg for arg in (entry / "cmdline").read_bytes().decode(errors="replace").split("\0") if arg]
         except OSError:
             continue  # the process ended while scanning
-        if is_moss_service_argv([arg for arg in argv if arg]):
+        if is_moss_service_argv(argv) or is_tts_client_argv(argv):
             return True
     return False
 
@@ -115,7 +133,17 @@ def moss_process_running() -> bool:
 def is_busy(api: dict | None) -> bool:
     if api is not None and (bool(api.get("current_job")) or int(api.get("queue_len") or 0) > 0):
         return True
-    return moss_process_running()
+    return voice_process_running()
+
+
+def recently_active() -> bool:
+    """The scheduler changed state less than QUIET seconds ago (it persists {"ts"} at every
+    transition). Unreadable data and timestamps from the future are not trusted."""
+    try:
+        age = time.time() - float(json.loads(STATE_FILE.read_text()).get("ts"))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+    return -1.0 < age < QUIET
 
 
 def required_mib() -> int:
@@ -184,7 +212,7 @@ def cmd_stop() -> dict:
         return snapshot("MOSS ist bereits beendet.")
     deadline = time.monotonic() + STOP_WAIT
     while True:
-        if not is_busy(api_status()):
+        if not is_busy(api_status()) and not recently_active():
             break
         if time.monotonic() >= deadline:
             return snapshot(ok=False, error=f"Eine Sprachausgabe läuft noch (nach {STOP_WAIT:.0f} s); "

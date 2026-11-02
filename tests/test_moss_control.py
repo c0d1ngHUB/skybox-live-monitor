@@ -127,6 +127,7 @@ class Env:
                     "MOSS_SCHEDULER_URL": self.scheduler.url,
                     "MOSS_SYSTEMCTL": str(systemctl),
                     "MOSS_CONFIG": str(tmp_path / "scheduler-config.json"),
+                    "MOSS_STATE_FILE": str(tmp_path / "scheduler-state.json"),  # absent: no recent job
                     "MOSS_POLL": "0.1", "MOSS_START_WAIT": "5", "MOSS_STOP_WAIT": "5"}
 
     def set(self, name, value):
@@ -244,6 +245,9 @@ def test_status_counts_a_running_moss_process_as_busy_even_when_the_api_is_silen
     ["/usr/bin/vim", "/home/m3kky/src/hermes-gpu-scheduler/hermes_gpu_scheduler/moss_service.py"],
     ["/usr/bin/grep", "-rn", "moss_service.py", "/home/m3kky/src/hermes-gpu-scheduler"],
     ["/usr/bin/python3", "-m", "pytest", "tests/hermes-gpu-scheduler-moss_service.py"],
+    ["/usr/bin/vim", "/home/m3kky/src/hermes-gpu-scheduler/scripts/moss_tts_client.py"],
+    ["/usr/bin/bash", "-c", "python3 moss_tts_client.py --help"],
+    ["/usr/bin/python3", "-m", "pytest", "tests/test_moss_tts_client.py"],
 ])
 def test_status_ignores_processes_that_merely_mention_the_moss_service(moss, argv):
     env = fake_proc(moss, argv)
@@ -263,6 +267,70 @@ def test_stop_is_not_blocked_by_a_shell_that_merely_mentions_the_moss_service(mo
     rc, out, _ = moss.run("stop", MOSS_STOP_WAIT="3", **env)
     assert rc == 0 and out["ok"] is True and out["mode"] == "off"
     assert moss.calls() == ["stop busy=0"]
+
+
+# The Hermes command provider runs this client per synthesis; it asks the scheduler for the
+# result only every 5 s.
+CLIENT_ARGV = ["/usr/bin/python3", "/home/m3kky/src/hermes-gpu-scheduler/scripts/moss_tts_client.py",
+               "--text-file", "/tmp/in.txt", "--out", "/tmp/out.wav", "--language", "German"]
+
+
+def test_status_counts_a_tts_client_that_still_waits_for_its_result_as_busy(moss):
+    env = fake_proc(moss, CLIENT_ARGV)
+    _, out, _ = moss.run("status", **env)
+    assert out["busy"] is True
+
+
+def test_stop_waits_for_a_tts_client_to_collect_its_result(moss):
+    """Live finding: the job was done, but the client polls every 5 s. Stopping the scheduler in
+    between left the client polling a dead API until its 900 s timeout and lost the reply."""
+    env = fake_proc(moss, CLIENT_ARGV)
+    rc, out, _ = moss.run("stop", MOSS_STOP_WAIT="1", **env)
+    assert rc == 1 and out["ok"] is False and "läuft noch" in out["error"]
+    assert out["mode"] == "on" and moss.calls() == []
+
+
+def write_activity(moss, seconds_ago):
+    """The scheduler persists {"state", "ts"} at every transition (scheduler-state.json)."""
+    path = moss.tmp / "scheduler-state.json"
+    path.write_text(json.dumps({"state": "HINDSIGHT_ACTIVE", "ts": time.time() - seconds_ago}))
+    return {"MOSS_STATE_FILE": str(path)}
+
+
+def test_stop_waits_out_the_quiet_window_after_the_last_voice_activity(moss):
+    """A long reply is several jobs in a row with short gaps, and the client collects each
+    result only every 5 s: do not stop right after a job ended."""
+    env = write_activity(moss, 0.2)
+    rc, out, elapsed = moss.run("stop", MOSS_QUIET="3", MOSS_STOP_WAIT="20", **env)
+    assert rc == 0 and out["ok"] is True and out["mode"] == "off"
+    assert elapsed >= 2.0, elapsed
+    assert moss.calls() == ["stop busy=0"]
+
+
+def test_stop_gives_up_when_voice_activity_never_calms_down(moss):
+    env = write_activity(moss, 0.0)
+    rc, out, _ = moss.run("stop", MOSS_QUIET="60", MOSS_STOP_WAIT="1", **env)
+    assert rc == 1 and out["ok"] is False and "läuft noch" in out["error"]
+    assert out["mode"] == "on" and moss.calls() == []
+
+
+def test_stop_does_not_wait_when_the_last_voice_activity_is_long_ago(moss):
+    env = write_activity(moss, 3600)
+    rc, out, elapsed = moss.run("stop", MOSS_QUIET="30", **env)
+    assert rc == 0 and out["mode"] == "off" and elapsed < 3, elapsed
+
+
+@pytest.mark.parametrize("content", ["{not json", "[]", '{"ts": "gestern"}', '{"ts": null}', '{}'])
+def test_stop_ignores_a_corrupt_state_file(moss, content):
+    (moss.tmp / "scheduler-state.json").write_text(content)
+    rc, out, elapsed = moss.run("stop", MOSS_QUIET="30")
+    assert rc == 0 and out["mode"] == "off" and elapsed < 3, (content, elapsed)
+
+
+def test_stop_does_not_trust_a_timestamp_from_the_future(moss):
+    env = write_activity(moss, -3600)  # clock jump: never wait for it
+    rc, out, elapsed = moss.run("stop", MOSS_QUIET="30", **env)
+    assert rc == 0 and out["mode"] == "off" and elapsed < 3, elapsed
 
 
 def test_helper_prints_json_even_when_systemctl_is_missing(moss):
