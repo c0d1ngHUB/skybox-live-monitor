@@ -36,9 +36,10 @@ there is no fallback TTS provider. The Blackwell is completely free.
   (`mode` `on`/`off`/`unknown`, `ready`, `busy`, `state`, `free_mib`, `blocker`, `note`, `ok`, `error`) and exits
   with 0 only when `ok` is true. It uses only `systemctl --user` and the loopback API, no sudo.
 - `stop` never interrupts a running voice job: if one is still running after the wait, it reports an error and
-  leaves the service on. A job counts as running when the API reports `current_job` or a queue, or when a
-  `moss_service.py` process of the scheduler exists (the scheduler's own orphan test), so a silent API cannot
-  cause an interrupted job. The one remaining gap is a job accepted in the few milliseconds between the idle check
+  leaves the service on. A job counts as running when the API reports `current_job` or a queue, or when the
+  scheduler's MOSS child exists. That child is matched by its exact argv (`<python> …/hermes_gpu_scheduler/moss_service.py`,
+  see `moss_proc.py`), not by a substring: a shell, editor or `grep` that merely mentions the script must not block a
+  stop. A silent API therefore cannot cause an interrupted job. The one remaining gap is a job accepted in the few milliseconds between the idle check
   and `systemctl stop`: it is cancelled and Hermes falls back to a text reply.
 - The scheduler unit has `Restart=on-failure`, so a clean `systemctl stop` does not respawn it. systemd's default
   `KillMode=control-group` also ends a leftover MOSS child of the unit.

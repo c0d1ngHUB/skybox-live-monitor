@@ -217,36 +217,52 @@ def test_status_reads_the_required_vram_from_the_scheduler_config(moss):
     assert out["required_mib"] == 3000 and out["blocker"] == ""
 
 
-SERVICE_CMDLINE = ("/home/m3kky/src/MOSS-TTS/.venv/bin/python /home/m3kky/src/hermes-gpu-scheduler/"
-                   "hermes_gpu_scheduler/moss_service.py --port 8096")
+# The scheduler starts MOSS as exactly [<venv python>, <script>] (moss_proc.py).
+SERVICE_ARGV = ["/home/m3kky/src/MOSS-TTS/.venv/bin/python",
+                "/home/m3kky/src/hermes-gpu-scheduler/hermes_gpu_scheduler/moss_service.py"]
 
 
-def fake_proc(moss, cmdline):
+def fake_proc(moss, argv):
     """A /proc look-alike with one process; the helper scans MOSS_PROC_ROOT."""
     root = moss.tmp / "proc"
     (root / "4242").mkdir(parents=True)
-    (root / "4242" / "cmdline").write_bytes(cmdline.replace(" ", "\0").encode() + b"\0")
+    (root / "4242" / "cmdline").write_bytes("\0".join(argv).encode() + b"\0")
     (root / "self").mkdir()  # non-numeric entries must be ignored
     return {"MOSS_PROC_ROOT": str(root)}
 
 
 def test_status_counts_a_running_moss_process_as_busy_even_when_the_api_is_silent(moss):
-    env = fake_proc(moss, SERVICE_CMDLINE)
+    env = fake_proc(moss, SERVICE_ARGV)
     _, out, _ = moss.run("status", MOSS_SCHEDULER_URL="http://127.0.0.1:9", **env)
     assert out["mode"] == "on" and out["ready"] is False and out["busy"] is True
 
 
-def test_status_ignores_unrelated_processes_that_merely_mention_moss(moss):
-    env = fake_proc(moss, "/usr/bin/vim notes-about-moss_service.py.txt")
+@pytest.mark.parametrize("argv", [
+    # A shell whose command text merely contains both names (this was a real false positive:
+    # the stop waited forever for the shell that ran the test command).
+    ["/usr/bin/bash", "-c", "pgrep -f 'hermes-gpu-scheduler.*moss_service.py'"],
+    ["/usr/bin/vim", "/home/m3kky/src/hermes-gpu-scheduler/hermes_gpu_scheduler/moss_service.py"],
+    ["/usr/bin/grep", "-rn", "moss_service.py", "/home/m3kky/src/hermes-gpu-scheduler"],
+    ["/usr/bin/python3", "-m", "pytest", "tests/hermes-gpu-scheduler-moss_service.py"],
+])
+def test_status_ignores_processes_that_merely_mention_the_moss_service(moss, argv):
+    env = fake_proc(moss, argv)
     _, out, _ = moss.run("status", MOSS_SCHEDULER_URL="http://127.0.0.1:9", **env)
-    assert out["busy"] is False
+    assert out["busy"] is False, argv
 
 
 def test_stop_never_interrupts_a_moss_process_when_the_api_is_silent(moss):
-    env = fake_proc(moss, SERVICE_CMDLINE)
+    env = fake_proc(moss, SERVICE_ARGV)
     rc, out, _ = moss.run("stop", MOSS_SCHEDULER_URL="http://127.0.0.1:9", MOSS_STOP_WAIT="1", **env)
     assert rc == 1 and out["ok"] is False and "läuft noch" in out["error"]
     assert out["mode"] == "on" and moss.calls() == []
+
+
+def test_stop_is_not_blocked_by_a_shell_that_merely_mentions_the_moss_service(moss):
+    env = fake_proc(moss, ["/usr/bin/bash", "-c", "echo hermes-gpu-scheduler moss_service.py"])
+    rc, out, _ = moss.run("stop", MOSS_STOP_WAIT="3", **env)
+    assert rc == 0 and out["ok"] is True and out["mode"] == "off"
+    assert moss.calls() == ["stop busy=0"]
 
 
 def test_helper_prints_json_even_when_systemctl_is_missing(moss):

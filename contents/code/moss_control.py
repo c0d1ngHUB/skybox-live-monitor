@@ -82,10 +82,20 @@ def api_status() -> dict | None:
     return data if isinstance(data, dict) and data.get("ok") is True else None
 
 
+MOSS_SCRIPT_SUFFIX = "/hermes_gpu_scheduler/moss_service.py"
+
+
+def is_moss_service_argv(argv: list[str]) -> bool:
+    """True for the scheduler's MOSS child: `<python> .../hermes_gpu_scheduler/moss_service.py`
+    (moss_proc.py starts exactly this). A substring test on the whole command line is not
+    enough: a shell, editor or grep that merely mentions the script would count as a job."""
+    return (len(argv) >= 2 and Path(argv[0]).name.startswith("python")
+            and any(arg.endswith(MOSS_SCRIPT_SUFFIX) for arg in argv[1:]))
+
+
 def moss_process_running() -> bool:
-    """A MOSS inference process of the scheduler exists (same test as the scheduler's own
-    orphan cleanup). It holds the Blackwell, so it counts as a voice job even when the
-    API is silent."""
+    """A MOSS inference process of the scheduler exists. It holds the Blackwell, so it
+    counts as a voice job even when the API is silent."""
     try:
         entries = list(PROC_ROOT.iterdir())
     except OSError:
@@ -94,10 +104,10 @@ def moss_process_running() -> bool:
         if not entry.name.isdigit():
             continue
         try:
-            cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+            argv = (entry / "cmdline").read_bytes().decode(errors="replace").split("\0")
         except OSError:
             continue  # the process ended while scanning
-        if "moss_service.py" in cmdline and "hermes-gpu-scheduler" in cmdline:
+        if is_moss_service_argv([arg for arg in argv if arg]):
             return True
     return False
 
