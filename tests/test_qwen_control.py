@@ -68,7 +68,8 @@ def scripts(tmp_path, monkeypatch):
     ctl=fake_bin/'systemctl'
     ctl.write_text(f'#!{sys.executable}\nimport os,sys\n'
         +'if "nimble-v3-serve.service" not in sys.argv:sys.exit(1)\n'
-        +'state=os.environ.get("HINDSIGHT_TEST_STATE","active");print(state);sys.exit(0 if state=="active" else 3)\n')
+        +'state=os.environ.get("HINDSIGHT_TEST_STATE","active");print(state)\n'
+        +'rc=os.environ.get("HINDSIGHT_TEST_RC");sys.exit(int(rc) if rc else (0 if state=="active" else 3))\n')
     ctl.chmod(0o755)
     import os
     monkeypatch.setenv('PATH',str(fake_bin)+os.pathsep+os.environ['PATH'])
@@ -220,6 +221,37 @@ def test_unreadable_prior_backend_prevents_start_without_dispatch(scripts,monkey
     helper=timed_helper(scripts,monkeypatch)
     result=helper.run_action('start')
     assert result['ok'] is False
+    assert not calls.exists()
+    assert not helper.recovery_barrier().exists()
+
+
+def test_uninstalled_backend_unit_counts_as_inactive_and_start_proceeds(scripts, monkeypatch):
+    """systemd 257 reports a removed unit as 'inactive' with exit 4 (no such unit).
+
+    A backend that is no longer installed was not running, so there is nothing
+    to restore; it must not block every Qwen start (2026-11-02, nimble-v3-serve).
+    """
+    directory, state, calls = scripts
+    monkeypatch.setenv("HINDSIGHT_TEST_STATE", "inactive")
+    monkeypatch.setenv("HINDSIGHT_TEST_RC", "4")
+    helper = load_helper()
+    monkeypatch.setattr(helper, "qwen_status", lambda: {"state": state.read_text(), "detail": ""})
+    assert helper.prior_backend_active() is False
+    result = helper.run_action("start")
+    assert result["ok"] is True and result["state"] == "running"
+    assert calls.read_text().splitlines() == ["start"]
+    assert not helper.recovery_barrier().exists()
+
+
+@pytest.mark.parametrize("output,rc", [("", "1"), ("unknown", "4")])
+def test_failed_backend_query_still_prevents_start(scripts, monkeypatch, output, rc):
+    """Only the exact not-installed answer is accepted; bus errors stay fail-closed."""
+    directory, state, calls = scripts
+    monkeypatch.setenv("HINDSIGHT_TEST_STATE", output)
+    monkeypatch.setenv("HINDSIGHT_TEST_RC", rc)
+    helper = timed_helper(scripts, monkeypatch)
+    result = helper.run_action("start")
+    assert result["ok"] is False
     assert not calls.exists()
     assert not helper.recovery_barrier().exists()
 

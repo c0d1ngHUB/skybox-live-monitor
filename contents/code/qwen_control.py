@@ -135,6 +135,11 @@ def prior_backend_active() -> bool | None:
             return True
         if state in {"inactive", "failed"}:
             return False
+    # Exit 4 is "no such unit": a backend that is no longer installed was not
+    # running, so a failed start has nothing to restore. Without this a removed
+    # backend unit blocks every Qwen start (2026-11-02, nimble-v3-serve).
+    if result.returncode == 4 and state == "inactive":
+        return False
     return None
 
 
