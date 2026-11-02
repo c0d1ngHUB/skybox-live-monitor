@@ -2,11 +2,12 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import org.kde.plasma.plasma5support as PlasmaSupport
 
-// Nimble v3 residency: "auto" keeps the model unloaded (loaded briefly on
-// demand), "hold" pins it on the Blackwell. The policy lives in nimble-ctl.
+// MOSS-TTS (the /voice speech output) on/off. The scheduler service loads MOSS onto the
+// Blackwell for one voice reply at a time, so "on" costs no idle VRAM; "off" stops the
+// service and /voice replies fall back to text. All state logic lives in moss_control.py.
 Item {
     id: control
-    implicitWidth: 200
+    implicitWidth: 180
     implicitHeight: 32
     width: implicitWidth
     height: implicitHeight
@@ -17,8 +18,8 @@ Item {
     property color warning: "#FFBF69"
     property color surface: "#082A3A"
     property string mode: "unknown"
-    property var loaded: null
-    property int vramMib: 0
+    property bool ready: false
+    property bool busy: false
     property string blocker: ""
     property string note: ""
     property string serviceState: "unknown"
@@ -30,23 +31,14 @@ Item {
     property string stderrBuffer: ""
     property int requestId: 0
     property double lastStatusMs: 0
-    readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("../code/nimble_control.py").toString().replace(/^file:\/\//, ""))
-    readonly property bool holding: mode === "hold"
-    readonly property bool canToggle: !actionBusy && (mode === "auto" || mode === "hold")
-    readonly property string toolTipText: stateLine()
+    readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("../code/moss_control.py").toString().replace(/^file:\/\//, ""))
+    readonly property bool running: mode === "on"
+    readonly property bool canToggle: !actionBusy && (mode === "on" || mode === "off")
+    readonly property string toolTipText: (mode === "unknown" ? "MOSS-Zustand unbekannt." : note)
+        + (blocker.length ? "\n" + blocker + "." : "")
         + (errorMessage.length ? "\n\nFehler: " + errorMessage : "")
-        + "\n\nAuto (Standard): Nimble bleibt entladen; der Fakt-Scorer lädt es nur für seinen Lauf (~8 s) und gibt den Grafikspeicher danach wieder frei."
-        + "\nLaden: Nimble bleibt dauerhaft auf der Blackwell (~15 GB), bis du es wieder entlädst. Qwen und MOSS haben weiterhin Vorrang."
-
-    function stateLine() {
-        if (mode === "unknown") return "Nimble-Zustand unbekannt."
-        var residency = loaded === true ? "geladen (" + (vramMib / 1024).toFixed(1) + " GB)"
-            : loaded === false ? "entladen" : "Server nicht erreichbar"
-        var line = "Modus: " + (holding ? "dauerhaft geladen" : "Auto") + " · aktuell " + residency
-        if (blocker.length) line += "\n" + blocker + "."
-        if (note.length) line += "\n" + note
-        return line
-    }
+        + "\n\nMOSS ist die Sprachausgabe für /voice. Beenden stoppt den Scheduler samt MOSS (wartet auf eine laufende Sprachantwort); Sprachantworten kommen dann nur als Text."
+        + "\nStarten bringt MOSS zurück. Pro Sprachantwort lädt MOSS kurz auf die Blackwell (ca. 17 GB) und gibt sie danach wieder frei."
 
     function beginCommand(operation) {
         if (activeCommand.length) executable.disconnectSource(activeCommand)
@@ -65,16 +57,16 @@ Item {
         if (actionBusy) return
         if (lastStatusMs > 0 && Date.now() - lastStatusMs > 20000) {
             mode = "unknown"
-            note = "Nimble-Zustand ist veraltet; erneute Prüfung läuft."
+            note = "MOSS-Zustand ist veraltet; erneute Prüfung läuft."
         }
         if (!activeCommand.length) beginCommand("status")
     }
 
-    function toggleNimble() {
+    function toggleMoss() {
         if (!canToggle) return
         actionBusy = true
         errorMessage = ""
-        beginCommand(holding ? "auto" : "hold")
+        beginCommand(running ? "stop" : "start")
     }
 
     function handleData(source, data) {
@@ -85,10 +77,10 @@ Item {
         var completedOperation = activeOperation
         var payload = null
         try { payload = JSON.parse(stdoutBuffer.trim()) } catch (error) { payload = null }
-        var valid = payload !== null && (payload.mode === "auto" || payload.mode === "hold")
+        var valid = payload !== null && (payload.mode === "on" || payload.mode === "off")
         mode = valid ? payload.mode : "unknown"
-        loaded = valid ? payload.loaded : null
-        vramMib = valid && payload.vram_mib ? Number(payload.vram_mib) : 0
+        ready = valid && payload.ready === true
+        busy = valid && payload.busy === true
         blocker = valid ? String(payload.blocker || "") : ""
         note = valid ? String(payload.note || "") : ""
         serviceState = valid ? String(payload.service || "") : "unknown"
@@ -96,7 +88,7 @@ Item {
         if (completedOperation !== "status") {
             if (Number(data["exit code"]) !== 0 || !valid || payload.ok !== true) {
                 errorMessage = (payload && payload.error) ? String(payload.error)
-                    : (stderrBuffer.trim().slice(-600) || "Nimble-Umschaltung fehlgeschlagen.")
+                    : (stderrBuffer.trim().slice(-600) || "MOSS-Umschaltung fehlgeschlagen.")
             }
             actionBusy = false
         }
@@ -109,7 +101,7 @@ Item {
 
     QQC2.Button {
         id: toggleButton
-        objectName: "nimbleToggleButton"
+        objectName: "mossToggleButton"
         anchors.fill: parent
         enabled: control.canToggle
         hoverEnabled: true
@@ -118,21 +110,19 @@ Item {
         Accessible.description: control.toolTipText
         text: {
             if (control.actionBusy)
-                return "Nimble v3 " + (control.activeOperation === "auto" ? "entlädt …" : "lädt …")
-            if (control.mode === "unknown") return "Nimble v3 · unbekannt"
+                return "MOSS " + (control.activeOperation === "stop" ? "beendet …" : "startet …")
+            if (control.mode === "unknown") return "MOSS · unbekannt"
             var prefix = control.errorMessage.length ? "Fehler · " : ""
-            if (control.holding)
-                return prefix + (control.loaded === true ? "Nimble v3 entladen" : "Nimble v3 · wartet")
-            return prefix + "Nimble v3 laden"
+            return prefix + (control.running ? "MOSS beenden" : "MOSS starten")
         }
-        onClicked: control.toggleNimble()
+        onClicked: control.toggleMoss()
         background: Rectangle {
             radius: 5
             color: toggleButton.down ? Qt.lighter(control.surface, 1.4)
                 : toggleButton.hovered ? Qt.lighter(control.surface, 1.2) : control.surface
             border.width: toggleButton.activeFocus ? 2 : 1
             border.color: control.errorMessage.length ? control.warning
-                : control.holding || toggleButton.activeFocus ? control.accent : control.muted
+                : control.running || toggleButton.activeFocus ? control.accent : control.muted
             opacity: toggleButton.enabled || control.actionBusy ? 1 : 0.65
         }
         contentItem: Text {
@@ -141,7 +131,7 @@ Item {
             font.pixelSize: 13
             font.weight: Font.DemiBold
             color: control.errorMessage.length ? control.warning
-                : control.holding ? control.accent : control.ink
+                : control.running ? control.accent : control.ink
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight

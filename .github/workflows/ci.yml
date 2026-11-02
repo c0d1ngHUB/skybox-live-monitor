@@ -33,6 +33,8 @@ jobs:
         run: python3 -m json.tool metadata.json >/dev/null
       - name: Check JavaScript syntax
         run: node --check contents/code/monitor_logic.js
+      - name: Check Python helper syntax
+        run: python3 -m py_compile contents/code/moss_control.py
       - name: Check runtime shell syntax
         run: bash -n runtime/qwen38-start runtime/qwen38-stop
       - name: Run Python and required QML regression tests

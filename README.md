@@ -85,6 +85,10 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   or when status is unknown; failures are visible on the button and explained
   in its tooltip. Stopping interrupts Qwen requests and restores Hindsight only;
   the decommissioned Nimble service is neither started nor probed.
+- Manual **MOSS-TTS on/off button** left of the Qwen button. MOSS is the `/voice` speech output; the button
+  starts and stops `hermes-gpu-scheduler.service` (idle: no VRAM; per voice reply MOSS loads briefly onto the
+  Blackwell). Stopping waits for a running voice job. While MOSS is off, `/voice` replies arrive as text only.
+  See [MOSS control](docs/MOSS_CONTROL.md).
   Boot settings and gateway configuration are not changed.
 - Gateway query failures appear as UNKNOWN; OFFLINE requires a confirmed inactive
   or failed gateway state.
@@ -149,7 +153,7 @@ Install pytest in a project-local environment if it is unavailable. The helper t
 ```bash
 python3 -m pytest -q
 node --check contents/code/monitor_logic.js
-qmllint contents/ui/main.qml contents/ui/QwenControl.qml
+qmllint contents/ui/main.qml contents/ui/QwenControl.qml contents/ui/MossControl.qml
 ```
 
 The Python regression suite is the main test suite and covers GPU telemetry error contracts, process parsing, and QML integration. `qmllint` may report unresolved Plasma types when run outside Plasma's import environment; run the widget inside Plasma as the final integration check.

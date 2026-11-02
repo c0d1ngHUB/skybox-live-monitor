@@ -654,8 +654,8 @@ PlasmoidItem {
                         width: parent.width
                         height: 38
                         Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "AI SERVICES"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
-                        NimbleControl {
-                            objectName: "nimbleControl"
+                        MossControl {
+                            objectName: "mossControl"
                             anchors.right: qwenControl.left
                             anchors.rightMargin: 10
                             anchors.verticalCenter: parent.verticalCenter
