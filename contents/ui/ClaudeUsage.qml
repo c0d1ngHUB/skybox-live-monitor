@@ -169,7 +169,7 @@ Rectangle {
         mainText: usage.detailText()
     }
 
-    // Same bounded source-name rotation as HermesLive (see test_datasource_name_bound).
+    // Source names rotate through a bounded set (see test_datasource_name_bound).
     PlasmaSupport.DataSource {
         id: source
         engine: "executable"

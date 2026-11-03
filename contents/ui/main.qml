@@ -892,17 +892,6 @@ PlasmoidItem {
                 }
             }
 
-            HermesLive {
-                Layout.fillWidth: true
-                Layout.preferredHeight: implicitHeight
-                Layout.minimumHeight: implicitHeight
-                ink: root.ink
-                muted: root.muted
-                accent: root.violet
-                warning: root.warning
-                critical: root.critical
-            }
-
             ClaudeUsage {
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight

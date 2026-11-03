@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 
-from test_hermes_live_qml import qml_runner
+from qml_support import qml_runner
 
 ROOT = Path(__file__).parents[1]
 

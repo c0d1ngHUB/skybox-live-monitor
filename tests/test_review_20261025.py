@@ -14,7 +14,7 @@ QML = ROOT / 'contents/ui/main.qml'
 QWEN_QML = ROOT / 'contents/ui/QwenControl.qml'
 sys.path.insert(0, str(Path(__file__).parent))
 from test_review_fixes import handler, node, qml_function  # noqa: E402
-from test_hermes_live_qml import qml_runner  # noqa: E402
+from qml_support import qml_runner  # noqa: E402
 
 
 def load(name):

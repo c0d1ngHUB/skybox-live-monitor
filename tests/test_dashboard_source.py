@@ -809,6 +809,20 @@ def test_oauth_label_and_state_cover_every_helper_failure_mode():
     assert 'return "UNKNOWN"' in logic_block
 
 
+def test_hermes_live_panel_is_removed_everywhere():
+    """The HERMES status panel (HermesLive + its two helpers) is gone, not merely hidden."""
+    root = Path(__file__).parents[1]
+    for removed in ('contents/ui/HermesLive.qml', 'contents/code/hermes_live.py', 'contents/code/hermes_details.py'):
+        assert not (root / removed).exists(), f"removed panel file is back: {removed}"
+    text = source()
+    assert 'HermesLive' not in text
+    # Nothing in the UI may instantiate or reference the panel or its helpers.
+    for qml in (root / 'contents/ui').glob('*.qml'):
+        body = qml.read_text()
+        for stale in ('HermesLive', 'hermes_live', 'hermes_details'):
+            assert stale not in body, f"{qml.name} still references {stale}"
+
+
 if __name__ == "__main__":
     tests = [value for name, value in globals().items() if name.startswith("test_")]
     failures = []

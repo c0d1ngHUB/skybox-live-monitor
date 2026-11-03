@@ -32,14 +32,7 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   poll (not the separately polled services, disk, or other system sensors)
 - Disk usage in `df` semantics, including the filesystem reserve
 - NVIDIA VRAM telemetry via `nvidia-smi`
-- Hermes live panel (replaces the former Blackwell health panel): running turns with
-  duration, workers/delegations, age/source of the last activity and the active model,
-  read-only from `state.db`, `config.yaml` and `logs/errors.log(.1)` of the default and every
-  named profile (no tokens, no model call). Warning indicator (yellow border): a turn whose
-  own session shows no activity for 5 min (**HÄNGT?**), an unreadable profile (**TEILWEISE**), main-model calls on a configured fallback provider in the last 24 h
-  (**FALLBACK 24h**), or provider limit errors (**429 24h**). Unreadable sources show
-  `?`/`UNBEKANNT`, never zero.
-- Claude plan usage row (**CLAUDE MAX**) below the Hermes panel: 5-hour session and
+- Claude plan usage row (**CLAUDE MAX**) between the system-load chart and the GPU cards: 5-hour session and
   weekly limit in percent with bar and local reset time, the same numbers as the
   "Plan usage limits" page on claude.ai. Polled every 2 min; yellow from 75 %, red
   from 90 % or when the API reports a non-normal severity. The tooltip adds the
