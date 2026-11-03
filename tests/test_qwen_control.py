@@ -55,6 +55,61 @@ def test_status_failure_is_unknown_not_stopped(monkeypatch):
     assert helper.qwen_status()["state"] == "unknown"
 
 
+PINNED_FILE = "Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-DFlash2-ninfer-v3.ninfer"
+PINNED_LABEL = "HauhauCS Aggressive · NInfer v3"
+
+
+def pinned_status(monkeypatch, active, props):
+    """qwen_status() with the unit, Docker and engine boundaries faked."""
+    helper = load_helper()
+    monkeypatch.setattr(helper.subprocess, "run", lambda command, **kw: subprocess.CompletedProcess(
+        command, 0, f"LoadState=loaded\nActiveState={active}\nSubState=dead\n", ""))
+    monkeypatch.setattr(helper, "container_state", lambda: "running")
+    monkeypatch.setattr(helper, "fetch_props", lambda: props)
+    return helper.qwen_status()
+
+
+def test_the_pin_is_the_single_ninfer_v3_artifact():
+    helper = load_helper()
+    assert helper.PINNED_MODEL_FILE == PINNED_FILE
+    assert helper.PINNED_MODEL_ID == "qwen3.8-27b"
+    assert helper.PINNED_MODEL_LABEL == PINNED_LABEL
+
+
+@pytest.mark.parametrize("active,want", [("inactive", "stopped"), ("active", "running"), ("failed", "failed")])
+def test_tooltip_names_the_pinned_model_without_an_engine_to_confirm_it(monkeypatch, active, want):
+    status = pinned_status(monkeypatch, active, None)
+    assert status["state"] == want
+    assert f"Modell: {PINNED_LABEL} (qwen3.8-27b)" in status["detail"]
+    assert "bestätigt" not in status["detail"] and "Abweichung" not in status["detail"]
+
+
+@pytest.mark.parametrize("is_sleeping,want", [(False, "running"), (True, "sleeping")])
+def test_engine_reporting_the_pinned_file_is_confirmed(monkeypatch, is_sleeping, want):
+    props = {"is_sleeping": is_sleeping, "model_path": f"/models/{PINNED_FILE}"}
+    status = pinned_status(monkeypatch, "active", props)
+    assert status["state"] == want
+    assert f"Modell: {PINNED_LABEL} (qwen3.8-27b) ✓ bestätigt" in status["detail"]
+    assert "Abweichung" not in status["detail"]
+
+
+def test_a_different_loaded_file_is_flagged_but_the_button_can_still_stop_it(monkeypatch):
+    props = {"is_sleeping": False, "model_path": "/models/Other-Qwen.gguf"}
+    status = pinned_status(monkeypatch, "active", props)
+    assert status["state"] == "running"  # state untouched: Stop must stay available
+    assert "Abweichung" in status["detail"]
+    assert "Other-Qwen.gguf" in status["detail"] and PINNED_FILE in status["detail"]
+    assert "bestätigt" not in status["detail"]
+
+
+@pytest.mark.parametrize("props", [None, {}, {"is_sleeping": False}, {"model_path": ""},
+                                   {"model_path": 7}, {"model_path": None}])
+def test_missing_or_unreadable_model_path_is_unknown_not_drift(monkeypatch, props):
+    status = pinned_status(monkeypatch, "active", props)
+    assert "Abweichung" not in status["detail"] and "bestätigt" not in status["detail"]
+    assert PINNED_LABEL in status["detail"]
+
+
 @pytest.fixture
 def scripts(tmp_path, monkeypatch):
     home = tmp_path / "home with spaces"

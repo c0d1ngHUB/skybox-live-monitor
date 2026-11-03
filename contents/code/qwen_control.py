@@ -26,6 +26,14 @@ TERMINATE_GRACE = 2.0
 KILL_GRACE = 2.0
 LOCAL_OPENER = build_opener(ProxyHandler({}))
 
+# The one Qwen 3.8 build behind this button. Decision 2026-11-03: every other
+# variant was deleted from disk. qwen38-ninfer.service (ConditionPathExists) and
+# its wrapper (MODEL=) pin the same file; the engine's /props reports what it
+# really loaded, so drift becomes visible in the tooltip.
+PINNED_MODEL_FILE = "Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-DFlash2-ninfer-v3.ninfer"
+PINNED_MODEL_ID = "qwen3.8-27b"
+PINNED_MODEL_LABEL = "HauhauCS Aggressive · NInfer v3"
+
 
 class ScriptLaunchError(OSError):
     """Popen failed before an executable operation could begin."""
@@ -39,6 +47,23 @@ def fetch_props() -> dict | None:
         return payload if isinstance(payload, dict) else None
     except (URLError, HTTPException, OSError, ValueError):
         return None
+
+
+def pinned_model_note(props: dict | None) -> str:
+    """Tooltip line naming the pinned build, cross-checked against a live engine.
+
+    /props.model_path is what the engine really loaded. Only a present and
+    different path counts as drift; an absent field or an unreachable API proves
+    nothing, so it stays silent instead of guessing.
+    """
+    line = f"Modell: {PINNED_MODEL_LABEL} ({PINNED_MODEL_ID})"
+    path = props.get("model_path") if isinstance(props, dict) else None
+    if isinstance(path, str) and path:
+        loaded = Path(path).name
+        if loaded == PINNED_MODEL_FILE:
+            return f"{line} ✓ bestätigt"
+        return f"⚠ Abweichung: Engine hat {loaded} geladen, festgelegt ist {PINNED_MODEL_FILE}"
+    return line
 
 
 def container_state() -> str | None:
@@ -89,6 +114,7 @@ def qwen_status() -> dict:
         "starting": "Qwen wird gestartet.", "stopping": "Qwen wird gestoppt.",
         "unknown": "Qwen-Dienstzustand unbekannt.",
     }[state]
+    model = None
     if state == "running":
         engine = container_state()
         if engine is None:
@@ -100,7 +126,7 @@ def qwen_status() -> dict:
             state, detail = "sleeping", "Qwen ist eingeschaltet und schläft; die Sitzung bleibt reserviert."
         elif model is None:
             detail = "Qwen-Dienst ist aktiv; Modell-API noch nicht erreichbar."
-    return {"state": state, "detail": detail}
+    return {"state": state, "detail": f"{detail}\n{pinned_model_note(model)}"}
 
 
 def handoff_settled() -> bool:

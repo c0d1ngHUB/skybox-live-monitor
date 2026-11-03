@@ -103,6 +103,29 @@ install -m 0755 runtime/qwen38-start runtime/qwen38-stop "$HOME/.local/bin/"
 These scripts use the existing units and engine; deploying them does not start a
 model or change boot settings.
 
+## Pinned model (2026-11-03)
+
+The button controls exactly one build:
+`~/models/ninfer/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-DFlash2-ninfer-v3.ninfer`
+(NInfer DFlash2, sha256 `cc96e6b0ecc3644a878c4045d4ee73dce217f22fe8e3e6d52ee11c2ddd225ffe`,
+model id `qwen3.8-27b`). Every other Qwen 3.8 variant (the GGUF builds under
+`~/models/qwen3.8-27b-*` and the Ollama copy `qwen3.8-27b-nvfp4-mtp-mid-high`)
+was deleted from disk on the same day, so the unit, its wrapper and the Hermes
+provider `local-11435` can only ever load this file. There is no llama.cpp
+fallback any more: a rollback means downloading weights again.
+
+- **Where it is enforced:** `MODEL=` in `~/.local/bin/qwen38-ninfer` and the
+  matching `ConditionPathExists=` of `qwen38-ninfer.service`. `qwen_control.py`
+  repeats the file name as `PINNED_MODEL_FILE`.
+- **What the button shows:** every tooltip names the model
+  (`Modell: HauhauCS Aggressive · NInfer v3 (qwen3.8-27b)`). While the engine is
+  up, the helper compares `/props.model_path` with the pin and appends
+  `✓ bestätigt`, or replaces the line with `⚠ Abweichung: …` when a different
+  file is loaded. A mismatch never changes the state, so the button can still
+  stop whatever is running; a missing `model_path` is silent (unknown is not drift).
+- **Changing the model later** means updating the wrapper, the unit condition,
+  `PINNED_MODEL_*` in `qwen_control.py` and this section together.
+
 ## Existing stop-script readiness fix
 
 A real test reproduced a `Type=simple` bind race: Nimble was systemd-active before its HTTP listener was ready. The first curl response was empty, causing `JSONDecodeError` and a false stop failure. The existing `~/.local/bin/qwen38-stop` now uses bounded curl connection-refused retries. Its obsolete Nimble start/check/probe path was subsequently removed to honor the current no-Nimble setup. No service or model configuration was changed.
