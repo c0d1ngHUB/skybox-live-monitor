@@ -32,7 +32,7 @@ Item {
    var heading = findChild(u, "claudeHeading"), unknown = findChild(u, "claudeUnknown")
    // No data yet: unknown, never 0 %.
    compare(u.fresh, false); compare(u.tone, "unknown")
-   verify(unknown.visible && unknown.text.indexOf("SESSION --") >= 0 && unknown.text.indexOf("0 %") < 0, unknown.text)
+   verify(unknown.visible && unknown.text.indexOf("SITZUNG --") >= 0 && unknown.text.indexOf("0%") < 0, unknown.text)
    verify(u.border.color == u.warning)
    var t = Date.now() / 1000
    u.nowMs = t * 1000
@@ -40,17 +40,29 @@ Item {
    var s = findChild(u, "claudeSession"), w = findChild(u, "claudeWeekly")
    compare(u.fresh, true); compare(unknown.visible, false)
    compare(heading.text, "CLAUDE MAX")
-   verify(s.text.indexOf("SESSION 16 %") === 0 && s.text.indexOf("↻") > 0, s.text)
-   verify(w.text.indexOf("WOCHE 3 %") === 0, w.text)
-   verify(/↻(So|Mo|Di|Mi|Do|Fr|Sa) \\d\\d:\\d\\d/.test(w.text), w.text)
+   verify(s.text.indexOf("SITZUNG 16%") === 0 && s.text.indexOf(" ↻ ") > 0, s.text)
+   verify(w.text.indexOf("WOCHE 3%") === 0, w.text)
+   verify(/↻ (So|Mo|Di|Mi|Do|Fr|Sa) \\d\\d:\\d\\d/.test(w.text), w.text)
+   // Row form of the KI-DIENSTE block: quiet border while ok, muted heading.
+   compare(u.implicitHeight, 28); compare(u.radius, 9)
+   verify(u.border.color == u.quietBorder && heading.color == u.muted)
    // hh:59:59 rounds up to the full hour, 6.9 days ahead still shows a weekday.
    var r = new Date(); r.setDate(r.getDate() + 6); r.setHours(12, 59, 59, 990)
    var p0 = base(t); p0.weekly.resets_at = r.getTime() / 1000 + 0.0; u.payload = p0
-   verify(/↻(So|Mo|Di|Mi|Do|Fr|Sa) 13:00$/.test(w.text), w.text)
+   verify(/↻ (So|Mo|Di|Mi|Do|Fr|Sa) 13:00$/.test(w.text), w.text)
+   // No active 5-h window: the API reports pct 0 without a reset time. No "↻ ?".
+   var p1 = base(t); p1.session = {pct:0, resets_at:null, severity:"normal"}; u.payload = p1
+   compare(s.text, "SITZUNG 0%")
+   verify(u.detailText().indexOf("unbekannt") >= 0 && u.detailText().indexOf("undefined") < 0)
+   // Unknown plan: plain "CLAUDE", never a placeholder word.
+   var p2 = base(t); p2.plan = null; u.payload = p2
+   compare(heading.text, "CLAUDE")
+   p2 = base(t); p2.plan = "  "; u.payload = p2
+   compare(heading.text, "CLAUDE")
    u.payload = base(t)
    verify(s.color == u.accent && u.border.color != u.warning)
    var tip = u.detailText()
-   verify(tip.indexOf("Fable: 0 %") >= 0 && tip.indexOf("Claude Code 100 %") >= 0 && tip.indexOf("Extra-Usage: aus") >= 0, tip)
+   verify(tip.indexOf("Fable: 0%") >= 0 && tip.indexOf("Claude Code 100%") >= 0 && tip.indexOf("Extra-Usage: aus") >= 0, tip)
    verify(tip.indexOf("undefined") < 0 && tip.indexOf("%%") < 0 && tip.indexOf("NaN") < 0, tip)
    // Thresholds: yellow at 75 %, red at 90 % (per limit) and the card border follows the tone.
    var p = base(t); p.session.pct = 80; p.tone = "warn"
@@ -58,7 +70,7 @@ Item {
    verify(s.color == u.warning && w.color == u.accent && u.border.color == u.warning)
    p = base(t); p.weekly.pct = 95; p.tone = "critical"
    u.payload = p
-   verify(w.color == u.critical && u.border.color == u.critical && heading.color == u.critical)
+   verify(w.color == u.critical && u.border.color == u.critical && heading.color == u.muted)
    p = base(t); p.session.severity = "critical"; p.tone = "critical"
    u.payload = p
    verify(s.color == u.critical)

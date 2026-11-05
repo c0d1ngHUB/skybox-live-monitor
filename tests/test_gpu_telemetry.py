@@ -6,6 +6,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 MODULE = Path(__file__).parents[1] / "contents/code/gpu_telemetry.py"
 SPEC = importlib.util.spec_from_file_location("gpu_telemetry", MODULE)
 assert SPEC and SPEC.loader
@@ -41,6 +43,31 @@ def test_processes_are_grouped_by_gpu_uuid_and_use_service_names(tmp_path: Path)
     assert grouped["GPU-a"] == [{"pid": 101, "name": "qwen38-llama-server", "used_mib": 12000}]
     assert grouped["GPU-b"][0]["name"] == "qwen3-reranker-4b"
     assert grouped["GPU-b"][1]["name"] == "fallback-server"
+
+
+@pytest.mark.parametrize("unit", [
+    "app-steam@7b2646402acd4643a74b83846b86f80b.service",
+    "app-org.kde.konsole@a1b2c3.service",
+    "app-flatpak-com.valvesoftware.Steam-4242.scope",
+    "app-steam.service",
+])
+def test_transient_desktop_app_units_fall_back_to_the_process_name(tmp_path: Path, unit):
+    """`app-*` units are systemd's per-launch wrappers for desktop apps: their
+    name is a random instance id, not the program. The card must say
+    `nightreign.exe`, not `app-steam@7b2646402acd4…`."""
+    proc = tmp_path / "404"
+    proc.mkdir()
+    (proc / "cgroup").write_text(f"0::/user.slice/user-1000.slice/user@1000.service/app.slice/{unit}\n")
+    grouped = GPU.parse_processes(r"GPU-a, 404, S:\steamapps\common\GAME\Game\nightreign.exe, 3624", tmp_path)
+    assert grouped["GPU-a"] == [{"pid": 404, "name": "nightreign.exe", "used_mib": 3624}]
+    assert GPU.service_name_for_pid(404, tmp_path) == ""
+
+
+def test_real_services_keep_their_unit_name(tmp_path: Path):
+    proc = tmp_path / "1518"
+    proc.mkdir()
+    (proc / "cgroup").write_text("0::/user.slice/user-1000.slice/user@1000.service/app.slice/hindsight-api.service\n")
+    assert GPU.service_name_for_pid(1518, tmp_path) == "hindsight-api"
 
 
 def test_collect_attaches_top_four_processes_and_exact_count(monkeypatch, tmp_path: Path):

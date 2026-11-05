@@ -79,9 +79,12 @@ def creds(tmp_path, expires_in_s=3600, plan="max"):
     return path
 
 
-def run(credentials, url="http://127.0.0.1:9/unused"):
+def run(credentials, url="http://127.0.0.1:9/unused", account=None):
+    # Always pin the account profile so the developer's real ~/.claude.json
+    # never leaks a plan name into a synthetic run.
+    account = account if account is not None else Path(credentials).parent / "no-account.json"
     out = subprocess.run(["python3", str(SCRIPT), "--credentials", str(credentials), "--url", url,
-                          "--now", str(NOW), "--timeout", "3"],
+                          "--now", str(NOW), "--timeout", "3", "--account", str(account)],
                          check=True, text=True, capture_output=True)
     assert TOKEN not in out.stdout and TOKEN not in out.stderr
     return json.loads(out.stdout)
@@ -150,3 +153,39 @@ def test_network_error(tmp_path):
 def test_malformed_payload(tmp_path, server, body):
     p = run(creds(tmp_path), server(body=body).url)
     assert p["available"] is False and p["reason"] == "bad_payload" and p["session"] is None
+
+
+def creds_without_plan(tmp_path):
+    path = tmp_path / ".credentials.json"
+    path.write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": TOKEN, "refreshToken": "sk-ant...ETIC", "expiresAt": int((NOW + 3600) * 1000)}}))
+    return path
+
+
+@pytest.mark.parametrize("org_type,plan", [
+    ("claude_max", "max"), ("claude_pro", "pro"), ("claude_team", "team"), ("CLAUDE_MAX", "max"),
+    ("enterprise", "enterprise"), ("", None), (None, None), (42, None),
+])
+def test_plan_falls_back_to_the_account_profile_when_credentials_carry_none(tmp_path, server, org_type, plan):
+    """Newer Claude Code builds omit subscriptionType in the credentials; the
+    account profile still names the organisation type (claude_max)."""
+    account = tmp_path / "claude.json"
+    account.write_text(json.dumps({"oauthAccount": {"organizationType": org_type, "emailAddress": "x@y"}}))
+    p = run(creds_without_plan(tmp_path), server().url, account=account)
+    assert p["available"] is True and p["plan"] == plan
+
+
+def test_plan_prefers_credentials_over_the_account_profile(tmp_path, server):
+    account = tmp_path / "claude.json"
+    account.write_text(json.dumps({"oauthAccount": {"organizationType": "claude_pro"}}))
+    p = run(creds(tmp_path, plan="max"), server().url, account=account)
+    assert p["plan"] == "max"
+
+
+@pytest.mark.parametrize("body", ["not json", json.dumps([1, 2]), json.dumps({"oauthAccount": "str"}), None])
+def test_plan_is_unknown_when_the_account_profile_is_missing_or_malformed(tmp_path, server, body):
+    account = tmp_path / "claude.json"
+    if body is not None:
+        account.write_text(body)
+    p = run(creds_without_plan(tmp_path), server().url, account=account)
+    assert p["available"] is True and p["plan"] is None

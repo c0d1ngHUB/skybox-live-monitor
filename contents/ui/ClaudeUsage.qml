@@ -6,6 +6,8 @@ import org.kde.plasma.plasma5support 2.0 as PlasmaSupport
 // Claude plan usage (5-h session + weekly limit) from the same endpoint as
 // claude.ai's "Plan usage limits" page. Read-only, never refreshes the token,
 // costs no model usage. Polled every 2 min; unknown is never shown as 0 %.
+// Rendered as one status row of the KI-DIENSTE block, in the same form as the
+// OPENAI OAUTH and HINDSIGHT VERDICHTUNG rows above it.
 Rectangle {
     id: usage
     objectName: "claudeUsage"
@@ -14,6 +16,8 @@ Rectangle {
     property color accent: "#96f5f6"
     property color warning: "#ffca70"
     property color critical: "#ff7373"
+    // Healthy rows keep the quiet structural border; only warn/critical colour it.
+    property color quietBorder: Qt.rgba(0.63, 0.78, 0.85, 0.28)
     property bool pollingEnabled: true
     property int pollIntervalMs: 120000
     property var payload: null
@@ -22,10 +26,11 @@ Rectangle {
     readonly property bool fresh: !!payload && payload.available === true && typeof payload.stamp === "number"
         && nowMs / 1000 >= payload.stamp - 2 && nowMs / 1000 - payload.stamp <= pollIntervalMs / 1000 * 2.5
     readonly property string tone: fresh ? String(payload.tone || "unknown") : "unknown"
-    implicitHeight: 40
-    radius: 12
-    color: Qt.rgba(0.035, 0.22, 0.34, 0.82)
-    border.color: tone === "critical" ? critical : (tone === "ok" ? Qt.rgba(0.59, 0.96, 0.96, 0.35) : warning)
+    implicitHeight: 28
+    radius: 9
+    color: Qt.rgba(0, 0, 0, 0.22)
+    border.width: 1
+    border.color: tone === "critical" ? critical : (tone === "ok" ? quietBorder : warning)
     clip: true
 
     function pad(n) { return ("0" + n).slice(-2) }
@@ -52,7 +57,7 @@ Rectangle {
     }
     function pctText(key) {
         var l = limit(key)
-        return l ? l.pct + " %" : "--"
+        return l ? l.pct + "%" : "--"
     }
     function fill(key) {
         var l = limit(key)
@@ -77,13 +82,19 @@ Rectangle {
         if (payload.available === true) return "Messung veraltet"
         return "unbekannt"
     }
+    // "CLAUDE MAX" when the plan is known, plain "CLAUDE" otherwise — never a
+    // literal placeholder like "CLAUDE PLAN".
     function headingText() {
-        var plan = payload && payload.plan ? String(payload.plan).toUpperCase() : "PLAN"
-        return "CLAUDE " + plan
+        var plan = payload && typeof payload.plan === "string" ? payload.plan.trim().toUpperCase() : ""
+        return plan.length ? "CLAUDE " + plan : "CLAUDE"
     }
+    // The reset suffix only exists when the API named a reset time. Without an
+    // active 5-h window the session has pct 0 and resets_at null; "↻ ?" there
+    // read like a broken value.
     function limitText(label, key) {
         var l = limit(key)
-        return label + " " + pctText(key) + (l ? " ↻" + resetText(l.resets_at) : "")
+        var reset = l && typeof l.resets_at === "number" ? " ↻ " + resetText(l.resets_at) : ""
+        return label + " " + pctText(key) + reset
     }
     function detailText() {
         if (!fresh) return "Claude-Nutzung UNBEKANNT: " + reasonText() + ".\n"
@@ -91,18 +102,18 @@ Rectangle {
             + "Der Token wird hier nie erneuert; Claude Code bzw. Hermes erneuern ihn beim nächsten Aufruf."
         var s = limit("session"), w = limit("weekly")
         var lines = ["Nutzungslimits des Plans " + (payload.plan || "?") + " · nur lesend, kein Modellaufruf.",
-            "Aktuelle Sitzung (5 h): " + (s ? s.pct + " % · Reset " + fullReset(s.resets_at) : "unbekannt"),
-            "Woche, alle Modelle: " + (w ? w.pct + " % · Reset " + fullReset(w.resets_at) : "unbekannt")]
+            "Aktuelle Sitzung (5 h): " + (s ? s.pct + "% · Reset " + fullReset(s.resets_at) : "unbekannt"),
+            "Woche, alle Modelle: " + (w ? w.pct + "% · Reset " + fullReset(w.resets_at) : "unbekannt")]
         var scoped = payload.scoped || []
         for (var i = 0; i < scoped.length; i++)
-            lines.push("Woche, " + scoped[i].name + ": " + scoped[i].pct + " %")
+            lines.push("Woche, " + scoped[i].name + ": " + scoped[i].pct + "%")
         var rows = payload.breakdown || []
         var parts = []
-        for (var j = 0; j < rows.length; j++) parts.push(rows[j].name + " " + rows[j].pct + " %")
+        for (var j = 0; j < rows.length; j++) parts.push(rows[j].name + " " + rows[j].pct + "%")
         if (parts.length) lines.push("Wochenanteil: " + parts.join(" · "))
         lines.push("Extra-Usage: " + (payload.extra_usage_enabled === true ? "AKTIV (kostet extra)" : (payload.extra_usage_enabled === false ? "aus" : "unbekannt")))
         var t = payload.thresholds || {}
-        lines.push("Gelb ab " + (t.warn_pct || 75) + " %, rot ab " + (t.critical_pct || 90) + " %.")
+        lines.push("Gelb ab " + (t.warn_pct || 75) + "%, rot ab " + (t.critical_pct || 90) + "%.")
         lines.push("Abgerufen vor " + Math.max(0, Math.round((nowMs / 1000 - payload.stamp) / 60)) + " min · Abfrage alle " + Math.round(pollIntervalMs / 60000) + " min.")
         return lines.join("\n")
     }
@@ -111,10 +122,10 @@ Rectangle {
         id: heading
         objectName: "claudeHeading"
         anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
-        width: 120
+        width: 130
         text: usage.headingText()
-        color: usage.tone === "ok" ? usage.ink : (usage.tone === "critical" ? usage.critical : usage.warning)
-        font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true
+        color: usage.muted
+        font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true
         elide: Text.ElideRight
     }
     Text {
@@ -122,9 +133,10 @@ Rectangle {
         visible: !usage.fresh
         anchors.left: heading.right; anchors.right: parent.right; anchors.rightMargin: 10
         anchors.verticalCenter: parent.verticalCenter
-        text: "SESSION -- · WOCHE -- · " + usage.reasonText()
+        horizontalAlignment: Text.AlignRight
+        text: "SITZUNG -- · WOCHE -- · " + usage.reasonText()
         color: usage.warning
-        font.family: "DejaVu Sans Mono"; font.pixelSize: 12
+        font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true
         elide: Text.ElideRight
     }
     Row {
@@ -142,10 +154,10 @@ Rectangle {
                     id: label
                     objectName: index === 0 ? "claudeSession" : "claudeWeekly"
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    width: 190
-                    text: usage.limitText(index === 0 ? "SESSION" : "WOCHE", key)
+                    width: 200
+                    text: usage.limitText(index === 0 ? "SITZUNG" : "WOCHE", key)
                     color: usage.levelColor(key)
-                    font.family: "DejaVu Sans Mono"; font.pixelSize: 12
+                    font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true
                     elide: Text.ElideRight
                 }
                 Rectangle {
@@ -153,7 +165,7 @@ Rectangle {
                     anchors.left: label.right; anchors.right: parent.right; anchors.leftMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     height: 6; radius: 3
-                    color: Qt.rgba(1, 1, 1, 0.12)
+                    color: Qt.rgba(1, 1, 1, 0.16)
                     Rectangle {
                         anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
                         width: usage.fill(key) > 0 ? Math.max(parent.height, parent.width * usage.fill(key)) : 0

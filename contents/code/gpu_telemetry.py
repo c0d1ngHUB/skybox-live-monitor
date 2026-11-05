@@ -65,7 +65,18 @@ def service_name_for_pid(pid: int, proc_root: Path = Path("/proc")) -> str:
     matches = re.findall(r"/([^/\n]+\.service)(?:\n|$)", cgroup)
     if not matches:
         return ""
-    return matches[-1][:-len(".service")]
+    unit = matches[-1][:-len(".service")]
+    # systemd wraps every desktop launch in a transient `app-<launcher>[@<id>]`
+    # unit (app-steam@7b26…, app-org.kde.konsole@…). That name identifies the
+    # launch, not the program, so the caller falls back to the process name.
+    if unit.startswith("app-"):
+        return ""
+    return unit
+
+
+def process_basename(process_name: str) -> str:
+    """Last path segment for POSIX and Windows-style (Proton) paths."""
+    return re.split(r"[\\/]", str(process_name or "").strip())[-1]
 
 
 def parse_gpus(output: str) -> list[dict[str, Any]]:
@@ -113,7 +124,7 @@ def parse_processes(output: str, proc_root: Path = Path("/proc")) -> dict[str, l
         used_mib = number(fields[3])
         if used_mib is None:
             continue
-        fallback = Path(fields[2]).name or "GPU PROCESS"
+        fallback = process_basename(fields[2]) or "GPU PROCESS"
         display_name = service_name_for_pid(pid, proc_root) or fallback
         by_uuid.setdefault(fields[0], []).append(
             {"pid": pid, "name": display_name, "used_mib": used_mib}

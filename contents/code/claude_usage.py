@@ -54,6 +54,25 @@ def _legacy(entry):
     return {"pct": _pct(entry["utilization"]), "resets_at": _epoch(entry.get("resets_at")), "severity": "normal"}
 
 
+def plan_name(oauth, account_file: Path):
+    """Plan label for the heading: credentials first, then Claude Code's account
+    profile (~/.claude.json, `oauthAccount.organizationType` = claude_max /
+    claude_pro / …). Newer Claude Code builds no longer write subscriptionType
+    into the credentials file, which left the heading at a literal "PLAN"."""
+    plan = oauth.get("subscriptionType") if isinstance(oauth, dict) else None
+    if isinstance(plan, str) and plan.strip():
+        return plan.strip()
+    try:
+        account = json.loads(account_file.read_text()).get("oauthAccount") or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    org_type = account.get("organizationType") if isinstance(account, dict) else None
+    if not isinstance(org_type, str):
+        return None
+    org_type = org_type.strip().lower()
+    return org_type[len("claude_"):] if org_type.startswith("claude_") and len(org_type) > len("claude_") else (org_type or None)
+
+
 def parse(body):
     """Return (session, weekly, scoped, breakdown, extra_enabled) or None if unusable."""
     if not isinstance(body, dict):
@@ -102,7 +121,7 @@ def tone(session, weekly):
     return ["ok", "warn", "critical"][level]
 
 
-def collect(credentials: Path, url: str, now: float, timeout: float):
+def collect(credentials: Path, url: str, now: float, timeout: float, account: Path = Path.home() / ".claude.json"):
     result = {"available": False, "stamp": now, "reason": None, "plan": None, "tone": "unknown",
               "session": None, "weekly": None, "scoped": [], "breakdown": [], "extra_usage_enabled": None,
               "token_expires_in_s": None, "thresholds": {"warn_pct": WARN_PCT, "critical_pct": CRITICAL_PCT}}
@@ -113,7 +132,7 @@ def collect(credentials: Path, url: str, now: float, timeout: float):
     except (OSError, ValueError, KeyError, TypeError):
         result["reason"] = "no_credentials"
         return result
-    result["plan"] = oauth.get("subscriptionType") if isinstance(oauth.get("subscriptionType"), str) else None
+    result["plan"] = plan_name(oauth, account)
     result["token_expires_in_s"] = int(expires_at - now)
     if not token or expires_at - EXPIRY_MARGIN_S <= now:
         result["reason"] = "token_expired"
@@ -146,12 +165,14 @@ def collect(credentials: Path, url: str, now: float, timeout: float):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--credentials", type=Path, default=Path.home() / ".claude/.credentials.json")
+    parser.add_argument("--account", type=Path, default=Path.home() / ".claude.json",
+                        help="Claude Code account profile; plan fallback when the credentials carry no subscriptionType")
     parser.add_argument("--url", default=URL)
     parser.add_argument("--now", type=float, default=None)
     parser.add_argument("--timeout", type=float, default=8.0)
     args = parser.parse_args()
     now = args.now if args.now is not None else time.time()
-    print(json.dumps(collect(args.credentials, args.url, now, args.timeout)))
+    print(json.dumps(collect(args.credentials, args.url, now, args.timeout, args.account)))
 
 
 if __name__ == "__main__":
