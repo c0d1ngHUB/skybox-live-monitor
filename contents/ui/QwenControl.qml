@@ -10,10 +10,11 @@ Item {
     width: implicitWidth
     height: implicitHeight
 
-    property color ink: "#D8EEF3"
-    property color muted: "#8E9DA3"
-    property color accent: "#33E6D3"
-    property color warning: "#FFBF69"
+    // Defaults mirror main.qml's palette; main.qml binds them explicitly.
+    property color ink: "#E8F7FF"
+    property color muted: "#A0C8D8"
+    property color accent: "#96F5F6"
+    property color warning: "#FFD166"
     property color surface: "#082A3A"
     property string qwenState: "unknown"
     property string detail: "Qwen-Dienstzustand wird geprüft."
@@ -28,6 +29,16 @@ Item {
     readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("../code/qwen_control.py").toString().replace(/^file:\/\//, ""))
     readonly property bool modelOn: qwenState === "running" || qwenState === "sleeping"
     readonly property bool canToggle: !actionBusy && (modelOn || qwenState === "stopped" || qwenState === "failed")
+    readonly property bool inTransition: actionBusy || qwenState === "starting" || qwenState === "stopping"
+    readonly property bool showsError: errorMessage.length > 0 || qwenState === "failed"
+    // Same state vocabulary as the service rows: ● läuft, ○ aus, ◐ wechselt,
+    // ▲ Fehler, ✕ fehlt, ? unbekannt. The symbol carries the state, the colour
+    // only repeats it.
+    readonly property string stateSymbol: inTransition ? "◐"
+        : qwenState === "unavailable" ? "✕"
+        : qwenState === "unknown" ? "?"
+        : showsError ? "▲"
+        : modelOn ? "●" : "○"
     readonly property string toolTipText: detail
         + (errorMessage.length ? "\n\nFehler: " + errorMessage : "")
         + "\n\nStarten reserviert die Blackwell für Qwen. Stoppen beendet laufende Qwen-Anfragen und gibt die GPU an Hindsight zurück."
@@ -105,29 +116,32 @@ Item {
         Accessible.name: text
         Accessible.description: control.toolTipText
         text: {
-            if (control.actionBusy || control.qwenState === "starting" || control.qwenState === "stopping")
-                return "Qwen 3.8 " + ((control.activeOperation === "stop" || control.qwenState === "stopping") ? "stoppt …" : "startet …")
-            if (control.qwenState === "unavailable") return "Qwen 3.8 fehlt"
-            if (control.qwenState === "unknown") return "Qwen 3.8 · unbekannt"
-            return (control.errorMessage.length ? "Fehler · " : "") + "Qwen 3.8 "
-                + (control.modelOn ? "stoppen" : "starten")
+            var word
+            if (control.inTransition)
+                word = (control.activeOperation === "stop" || control.qwenState === "stopping") ? "stoppt …" : "startet …"
+            else if (control.qwenState === "unavailable") word = "fehlt"
+            else if (control.qwenState === "unknown") word = "unbekannt"
+            else word = (control.errorMessage.length ? "Fehler · " : "") + (control.modelOn ? "stoppen" : "starten")
+            return control.stateSymbol + " QWEN 3.8 " + word.toUpperCase()
         }
         onClicked: control.toggleQwen()
+        // Status-row form (radius 9, 1-px border) and the board's monospace
+        // caps, so the button reads as part of the KI-DIENSTE block.
         background: Rectangle {
-            radius: 5
+            radius: 9
             color: toggleButton.down ? Qt.lighter(control.surface, 1.4)
                 : toggleButton.hovered ? Qt.lighter(control.surface, 1.2) : control.surface
             border.width: toggleButton.activeFocus ? 2 : 1
-            border.color: control.errorMessage.length || control.qwenState === "failed" ? control.warning
+            border.color: control.showsError ? control.warning
                 : control.modelOn || toggleButton.activeFocus ? control.accent : control.muted
             opacity: toggleButton.enabled || control.actionBusy ? 1 : 0.65
         }
         contentItem: Text {
             text: toggleButton.text
-            font.family: "Inter"
-            font.pixelSize: 13
-            font.weight: Font.DemiBold
-            color: control.errorMessage.length || control.qwenState === "failed" ? control.warning
+            font.family: "DejaVu Sans Mono"
+            font.pixelSize: 12
+            font.bold: true
+            color: control.showsError ? control.warning
                 : control.modelOn ? control.accent : control.ink
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter

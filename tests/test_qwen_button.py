@@ -57,14 +57,16 @@ Item {{
             var button = findChild(control, "qwenToggleButton")
             verify(button !== null)
             verify(button.enabled)
-            verify(button.text.indexOf("starten") >= 0)
+            // Status symbol + caps label, same vocabulary as the service rows.
+            compare(button.text, "○ QWEN 3.8 STARTEN")
             mouseClick(button)
+            verify(button.text.indexOf("◐ QWEN 3.8 STARTET") === 0, button.text)
             verify(control.actionBusy)
             verify(!button.enabled)
             mouseClick(button)
             tryCompare(control, "actionBusy", false, 10000)
             verify(control.modelOn, "The actual helper must report Qwen ON")
-            verify(button.text.indexOf("stoppen") >= 0)
+            compare(button.text, "● QWEN 3.8 STOPPEN")
             button.forceActiveFocus()
             keyClick(Qt.Key_Space)
             tryCompare(control, "qwenState", "stopped", 10000)
@@ -80,7 +82,7 @@ Item {{
             }}
             control.qwenState = "sleeping"
             verify(button.enabled)
-            verify(button.text.indexOf("stoppen") >= 0, "Sleeping Qwen is ON, not OFF")
+            verify(button.text.indexOf("STOPPEN") >= 0, "Sleeping Qwen is ON, not OFF")
             // The second start fails through the real subprocess boundary.
             control.qwenState = "stopped"
             mouseClick(button)

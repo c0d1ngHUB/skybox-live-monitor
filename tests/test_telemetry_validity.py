@@ -21,7 +21,7 @@ def node(script):
 
 
 @pytest.mark.parametrize('index', [0, 1])
-@pytest.mark.parametrize('power,expected', [(None, 'POWER --/115 W'), (0, 'POWER 0/115 W'), (12.6, 'POWER 13/115 W')])
+@pytest.mark.parametrize('power,expected', [(None, 'LEISTUNG --/115 W'), (0, 'LEISTUNG 0/115 W'), (12.6, 'LEISTUNG 13/115 W')])
 def test_gpu_power_missing_does_not_invent_zero_or_hide_other_metrics(index, power, expected):
     script = 'const root={gpuProcessRows:()=>[]};\n' + qml_function('applyGpuTelemetry') + '\n' + qml_function('gpuPowerText')
     entry = dict(short_name='Test', temperature_c=40, memory_used_mib=200, memory_total_mib=1000,

@@ -12,10 +12,11 @@ Item {
     width: implicitWidth
     height: implicitHeight
 
-    property color ink: "#D8EEF3"
-    property color muted: "#8E9DA3"
-    property color accent: "#33E6D3"
-    property color warning: "#FFBF69"
+    // Defaults mirror main.qml's palette; main.qml binds them explicitly.
+    property color ink: "#E8F7FF"
+    property color muted: "#A0C8D8"
+    property color accent: "#96F5F6"
+    property color warning: "#FFD166"
     property color surface: "#082A3A"
     property string mode: "unknown"
     property bool ready: false
@@ -34,6 +35,11 @@ Item {
     readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("../code/moss_control.py").toString().replace(/^file:\/\//, ""))
     readonly property bool running: mode === "on"
     readonly property bool canToggle: !actionBusy && (mode === "on" || mode === "off")
+    // Same state vocabulary as the service rows and the Qwen button.
+    readonly property string stateSymbol: actionBusy ? "◐"
+        : mode === "unknown" ? "?"
+        : errorMessage.length ? "▲"
+        : running ? "●" : "○"
     readonly property string toolTipText: (mode === "unknown" ? "MOSS-Zustand unbekannt." : note)
         + (blocker.length ? "\n" + blocker + "." : "")
         + (errorMessage.length ? "\n\nFehler: " + errorMessage : "")
@@ -109,15 +115,15 @@ Item {
         Accessible.name: text
         Accessible.description: control.toolTipText
         text: {
-            if (control.actionBusy)
-                return "MOSS " + (control.activeOperation === "stop" ? "beendet …" : "startet …")
-            if (control.mode === "unknown") return "MOSS · unbekannt"
-            var prefix = control.errorMessage.length ? "Fehler · " : ""
-            return prefix + (control.running ? "MOSS beenden" : "MOSS starten")
+            var word
+            if (control.actionBusy) word = control.activeOperation === "stop" ? "stoppt …" : "startet …"
+            else if (control.mode === "unknown") word = "unbekannt"
+            else word = (control.errorMessage.length ? "Fehler · " : "") + (control.running ? "stoppen" : "starten")
+            return control.stateSymbol + " MOSS " + word.toUpperCase()
         }
         onClicked: control.toggleMoss()
         background: Rectangle {
-            radius: 5
+            radius: 9
             color: toggleButton.down ? Qt.lighter(control.surface, 1.4)
                 : toggleButton.hovered ? Qt.lighter(control.surface, 1.2) : control.surface
             border.width: toggleButton.activeFocus ? 2 : 1
@@ -127,9 +133,9 @@ Item {
         }
         contentItem: Text {
             text: toggleButton.text
-            font.family: "Inter"
-            font.pixelSize: 13
-            font.weight: Font.DemiBold
+            font.family: "DejaVu Sans Mono"
+            font.pixelSize: 12
+            font.bold: true
             color: control.errorMessage.length ? control.warning
                 : control.running ? control.accent : control.ink
             horizontalAlignment: Text.AlignHCenter

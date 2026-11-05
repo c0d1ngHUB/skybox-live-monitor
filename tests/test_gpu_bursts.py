@@ -116,7 +116,7 @@ def test_qml_gpu_load_is_fast_but_process_poll_stays_two_seconds():
     assert re.search(r"interval: 500\s+running: true\s+repeat: true\s+onTriggered: gpuLoadSource.connectSource", qml)
     assert re.search(r"interval: 2000\s+running: true\s+repeat: true\s+onTriggered: gpuTelemetrySource.connectSource", qml)
     assert "--query-gpu=index,uuid,utilization.gpu" in qml
-    assert '"PEAK 30s · "' in qml
+    assert '"SPITZE 30 s · "' in qml
     assert "text: parent.process.role ||" in qml
     assert "Layout.preferredHeight: 342" in qml
     assert "root.gpu0Usage =" not in qml  # Slow full poll must not overwrite fast load.

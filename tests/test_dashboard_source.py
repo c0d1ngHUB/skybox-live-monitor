@@ -68,7 +68,7 @@ def test_process_sources_distinguish_empty_results_from_command_failures():
     assert 'root.gpuProcessUnavailable = fullUnavailable || payload === null || payload.processes_available === false' in gpu
     assert 'root.applyGpuTelemetry(null, 0)' in gpu
     assert 'root.applyGpuTelemetry(null, 1)' in gpu
-    assert '"NO ACTIVE WORKLOAD"' in text
+    assert '"KEINE AKTIVE LAST"' in text
 
 
 def test_gpu_cards_separate_full_telemetry_failure_from_process_failure():
@@ -91,15 +91,15 @@ def test_gpu_card_prioritizes_vram_and_active_workload_context():
     text = source()
     assert 'function shortProcessName(name)' in text
     assert 'function compactProcessValue(metricLabel, value)' in text
-    assert 'detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE"' in text
-    assert 'detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE"' in text
+    assert 'detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "KEINE DATEN"' in text
+    assert 'detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "KEINE DATEN"' in text
     assert 'powerText:root.gpu0Available ? root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts) : ""' in text
     assert 'powerText:root.gpu1Available ? root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts) : ""' in text
     assert 'mainText: cardData.powerText || ""' in text
-    assert 'text: (cardData.powerText || "").replace("POWER ", "")' in text
+    assert 'text: (cardData.powerText || "").replace("LEISTUNG ", "")' in text
     assert 'vramFill:root.gpu0Available ? root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) : 0' in text
     assert 'vramFill:root.gpu1Available ? root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) : 0' in text
-    assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)' in text
+    assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.vramTotalMiB, cardData.available)' in text
     assert 'gpuFill:' not in text
     assert 'id: gpuTelemetrySource' in text
     assert 'gpu_telemetry.py' in text
@@ -127,7 +127,7 @@ def test_ram_card_shows_top_four_processes_in_its_detail_area():
     assert 'id: topRamSource' in text
     assert 'ps -eo rss=,comm= --sort=-rss | head -4' in text
     assert 'processes:root.topRamProcesses' in text
-    assert 'if (metricLabel === "RAM" && number >= 1024) return (number / 1024).toFixed(1) + "G"' in text
+    assert 'if (metricLabel === "RAM" && number >= 1024) return (number / 1024).toFixed(1) + " GiB"' in text
     assert 'processes.length < 4' in text
     assert 'onTriggered: topRamSource.connectSource(topRamSource.command)' in text
 
@@ -297,9 +297,9 @@ def test_compact_cards_preserve_legible_operational_detail():
     assert 'Text { anchors.fill: parent; text: cardData.label' in text
     assert 'elide: Text.ElideMiddle' in text
     assert 'elide: Text.ElideRight' in text
-    assert '"SYSTEM DISK /"' in text
-    assert 'text: "LOAD 1M"' in text
-    assert 'text: "PROCESSES"' in text
+    assert '"DATENTRÄGER /"' in text
+    assert 'text: "LAST 1 MIN"' in text
+    assert 'text: "PROZESSE"' in text
 
 
 
@@ -362,12 +362,14 @@ def test_network_live_values_scale_to_kbit_and_are_labeled_with_direction():
 
 def test_footer_uses_explicit_disk_and_uptime_labels():
     text = source()
-    assert 'text: "SYSTEM DISK /"' in text
-    assert 'text: "UPTIME"' in text
+    assert 'text: "DATENTRÄGER /"' in text
+    assert 'text: "LAUFZEIT"' in text
     assert 'text: root.fmtUptime(root.uptimeSeconds)' in text
-    assert 'text: "LOAD 1M"' in text
+    assert 'text: "LAST 1 MIN"' in text
     assert 'text: root.loadAverage.toFixed(2)' in text
-    assert 'text: "PROCESSES"' in text
+    assert 'text: "LAST 15 MIN"' in text
+    assert 'text: root.loadAverage15.toFixed(2)' in text
+    assert 'text: "PROZESSE"' in text
     assert 'text: root.processCount' in text
     # The disk summary line carries df semantics plus the ext4 reserve; it stays
     # in the 12px tier because the label is longer than the old FREE/USED pair.
@@ -408,17 +410,21 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'hermes_openai_keys.py' in text
     assert 'id: systemMetaGrid' in text
     assert 'columns: 2' in text and 'rows: 2' in text
-    assert 'text: "LOAD 1M"' in text
-    assert 'text: "PROCESSES"' in text
-    assert 'sessionLabel: "ANTW. MAX24H"' in text
-    assert 'root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"' in text
+    assert 'text: "LAST 1 MIN"' in text
+    assert 'text: "PROZESSE"' in text
+    # The longest Hermes turn is a gateway figure and lives in the GATEWAY card.
+    gateway = text[text.index('text: "GATEWAY"'):text.index('text: "HINDSIGHT"')]
+    assert 'sessionLabel: "LÄNGSTE ANTWORT · 24 H"' in gateway
+    assert 'root.fmtDuration(root.hermesMaxThinkSeconds)' in gateway
+    assert 'id: systemMetaGrid' in text and 'ANTW. MAX24H' not in text
+    assert 'root.openAiActiveKeys + "/" + root.openAiTotalKeys + " SCHLÜSSEL"' in text
     assert 'OPENAI 0AUTH' not in text
     assert 'id: openAiOauthCard' in text
     assert 'root.openAiOauthLabel()' in text
     assert 'root.openAiOauthTone()' in text
     assert 'function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }' in text
     assert 'font.pixelSize: 14' in text
-    assert 'Layout.preferredHeight: 178' in text
+    assert 'Layout.preferredHeight: 214' in text
 
 
 
@@ -497,7 +503,7 @@ def test_gpu_card_uses_primary_gpu_value_and_one_unambiguous_vram_bar():
     assert 'property color orange: "#FF9F43"' in text
     assert 'color: (cardData.vramFill || 0) >= 95 ? root.critical : ((cardData.vramFill || 0) >= 85 ? root.warning : root.cyan)' in text
     assert len(re.findall(r'vramFill:root.gpu[012]Available \? root.vramPercent\(', text)) == 2
-    assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)' in text
+    assert 'text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.vramTotalMiB, cardData.available)' in text
     assert 'Math.max(0, Math.min(1, (cardData.vramFill || 0) / 100))' in text
     assert '(cardData.vramFill || 0) >= 95 ? root.critical : ((cardData.vramFill || 0) >= 85 ? root.warning : root.cyan)' in text
     assert 'gpuFill:' not in text
@@ -568,8 +574,8 @@ def test_charts_show_filling_indicator_until_history_is_full():
     text = source()
     assert 'function historyFillProgress()' in text
     assert 'function historyFilling()' in text
-    assert '% FILLED' in text
-    assert '"NOW · "' in text
+    assert '% GEFÜLLT' in text
+    assert '"JETZT · "' in text
     assert 'historyFillProgress() * 100' in text
     assert 'visible: !root.historyFilling()' not in text
     assert text.count('text: "−2 MIN"') == 3
@@ -633,7 +639,7 @@ def test_system_load_graph_plots_both_gpus_without_cpu_or_motion():
     assert 'root.gpu0Name' in text and 'root.gpu1Name' in text
     assert 'RTX PRO 4000' not in text
     assert 'RTX 3060 Ti' not in text
-    assert 'UNAVAILABLE")' in text
+    assert 'KEINE DATEN")' in text
     assert 'CPU LOAD' not in text
     assert 'plot(root.cpuHistory' not in text
     assert 'plot(root.gpu0History, root.violet' in text
@@ -658,7 +664,7 @@ def test_elided_model_process_and_system_texts_expose_full_tooltips():
     assert text.count('PlasmaCore.ToolTipArea {') >= 4
     assert 'mainText: parent.process.name' in text
     assert 'mainText: cardData.label' in text
-    assert 'sessionLabel: "ANTW. MAX24H"' in text
+    assert 'sessionLabel: "LÄNGSTE ANTWORT · 24 H"' in text
     assert '"Längste abgeschlossene Hermes-Antwort der letzten 24 h" + profileHint' in text
 
 
@@ -706,18 +712,18 @@ def test_ai_services_helper_is_local_only_and_null_safe_for_weekly_usage():
 
 def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     text = source()
-    assert 'AI SERVICES' in text
+    assert 'AI SERVICES' in text and 'text: "KI-DIENSTE"' in text
     assert 'root.hermesGatewayState' in text
     assert 'root.hindsightState' in text
     assert 'QWEN' not in text
     assert 'localLlm' not in text
-    assert 'POWER ' in text
+    assert 'LEISTUNG ' in text
     assert 'root.gpu0PowerDrawWatts' in text and 'root.gpu1PowerDrawWatts' in text
     assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text
     assert 'elide: Text.ElideRight' in text
     assert 'height: 44' in text
-    assert 'Layout.preferredHeight: 178' in text
-    assert 'Layout.minimumHeight: 174' in text
+    assert 'Layout.preferredHeight: 214' in text
+    assert 'Layout.minimumHeight: 210' in text
     assert 'id: openAiOauthCard' in text
     # The HINDSIGHT OBS row was removed on request; VERDICHTUNG replaces it.
     assert 'id: obsHealthCard' not in text
@@ -802,7 +808,7 @@ def test_ai_services_source_does_not_touch_oauth_counts():
 def test_oauth_label_and_state_cover_every_helper_failure_mode():
     text = source()
     label = text[text.index('function openAiOauthLabel()'):text.index('function openAiOauthTone()')]
-    assert '?/? KEYS' in label
+    assert '?/? SCHLÜSSEL' in label
     logic = (Path(__file__).parents[1] / "contents/code/monitor_logic.js").read_text()
     logic_block = logic[logic.index('function openAiOauthState('):logic.index('function openAiOauthSymbol(')]
     assert 'active < 0 || total < 0' in logic_block

@@ -90,15 +90,15 @@ Item {
                 var card=findChild(metricCards,"card"+index)
                 var fill=findChild(card,"vramFill"),power=findChild(card,"powerTip")
                 root.applyGpuTelemetry(entry,index); wait(20)
-                compare(power.mainText,"POWER 100/115 W");verify(power.visible)
+                compare(power.mainText,"LEISTUNG 100/115 W");verify(power.visible)
                 verify(fill.width>0)
                 root.applyGpuTelemetry(null,index); wait(20)
                 compare(findChild(card,"vramValue").text,"VRAM --")
-                compare(findChild(card,"vramTip").mainText,"VRAM UNAVAILABLE")
+                compare(findChild(card,"vramTip").mainText,"VRAM KEINE DATEN")
                 compare(power.mainText,"");compare(power.visible,false)
                 compare(fill.width,0)
                 root.applyGpuTelemetry(entry,index);wait(20)
-                compare(power.mainText,"POWER 100/115 W");verify(power.visible)
+                compare(power.mainText,"LEISTUNG 100/115 W");verify(power.visible)
                 verify(fill.width>0)
             }
         }
@@ -129,11 +129,11 @@ Item {
             for(var index=0;index<2;index++) {
                 var card=findChild(metricCards,"card"+index)
                 root.applyGpuTelemetry(entry,index);wait(20)
-                compare(findChild(card,"powerTip").mainText,"POWER --/115 W")
+                compare(findChild(card,"powerTip").mainText,"LEISTUNG --/115 W")
                 verify(findChild(card,"vramFill").width>0)
                 compare(card.cardData.detail,"40°C")
                 entry.power_draw_w=0;root.applyGpuTelemetry(entry,index);wait(20)
-                compare(findChild(card,"powerTip").mainText,"POWER 0/115 W")
+                compare(findChild(card,"powerTip").mainText,"LEISTUNG 0/115 W")
                 compare(card.cardData.healthLevel,0)
                 entry.power_draw_w=null
             }

@@ -4,6 +4,11 @@
 
 A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is designed for a dedicated status display and shows CPU, GPU, VRAM, RAM, network throughput, disk space, and the most relevant active processes.
 
+All visible labels are German (KI-DIENSTE, GPU-AUSLASTUNG, NETZWERK, DATENTRÄGER, HOST, KEINE DATEN, …);
+the canonical service states exchanged with the helpers (`OPERATIONAL`, `DEGRADED`, `OFFLINE`,
+`NOT_CONFIGURED`) stay English in `monitor_logic.js` and are translated only at the display edge.
+Memory figures use one unit family everywhere (GiB / MiB).
+
 ## Highlights
 
 - CPU temperature display (like GPU card — no percentage, no progress bar)
@@ -12,15 +17,15 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
 - Independent telemetry for NVIDIA GPU 0 and GPU 1: utilization, temperature,
   VRAM, power and per-GPU compute processes (up to four largest consumers). The
   two GPU cards share the full dashboard width in one row, with the live GPU model name and
-  used VRAM in decimal GB always visible (the bar still shows percent filled;
-  hover for exact MiB and total capacity). CPU and RAM share the row below
+  VRAM as `used / total GiB` always visible (the bar still shows percent filled;
+  hover for exact MiB). CPU and RAM share the row below
 - Compact CPU and RAM process summaries (up to four largest consumers)
-- Narrow cards show compact M/G memory figures so process names remain readable;
+- Narrow cards show compact MiB/GiB memory figures so process names remain readable;
   hover a row for the full process name or the source reading (RAM: unrounded
   RSS in KiB; GPU: unrounded VRAM in MiB)
 - GPU utilization is sampled every 500 ms via a lightweight `nvidia-smi` query;
   VRAM, temperature, power and process lists remain on their two-second cadence.
-  Each GPU card shows **PEAK 30s**, the highest observed whole-GPU utilization
+  Each GPU card shows **SPITZE 30 s** (rolling 30-second peak), the highest observed whole-GPU utilization
   in the rolling window, without holding the current percentage above idle.
   Missing/stale samples show `--`, and GPU UUID changes reset the window.
   The `hindsight-api` process carries the descriptive **EMBED / RERANK** role
@@ -71,7 +76,7 @@ A compact, vertical real-time system dashboard for **KDE Plasma 6**. It is desig
   rows). The frozen pre-reset reference (1009 observations, 37.6% merges) was dropped
   in favour of a rolling merge trend of the card's own polls, which is memory only
   and restarts with the widget.
-- Manual **Qwen 3.8 start/stop button** in the AI SERVICES header. It reads the
+- Manual **Qwen 3.8 start/stop button** in the KI-DIENSTE (AI services) header. It reads the
   real Qwen server unit (not the always-on gateway), treats a sleeping model as
   still ON, and calls the existing `~/.local/bin/qwen38-start` / `qwen38-stop`
   scripts for the Blackwell GPU handoff. The button is disabled while switching

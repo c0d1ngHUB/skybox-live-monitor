@@ -1,6 +1,6 @@
 # MOSS-TTS on/off control
 
-The AI SERVICES header shows one MOSS button, left of the Qwen button. It replaces the Nimble v3 button
+The KI-DIENSTE (AI services) header shows one MOSS button, left of the Qwen button. It replaces the Nimble v3 button
 (Nimble was decommissioned on 2026-11-02).
 
 MOSS-TTS v1.5 BF16 is the `/voice` speech output of Hermes, not an LLM. It is owned by
@@ -16,11 +16,14 @@ MOSS-TTS v1.5 BF16 is the `/voice` speech output of Hermes, not an LLM. It is ow
 
 | Label | Meaning | Click |
 | --- | --- | --- |
-| `MOSS beenden` | the unit runs | wait until no voice job is running (up to 150 s), then stop the unit |
-| `MOSS starten` | the unit is stopped | start the unit and wait until `/status` answers (up to 40 s) |
-| `MOSS beendet …` / `MOSS startet …` | switching | button disabled |
-| `MOSS · unbekannt` | state cannot be read | button disabled, status is re-checked every 5 s |
-| `Fehler · …` | last action failed | tooltip carries the reason; the real state is shown again |
+| `● MOSS STOPPEN` | the unit runs | wait until no voice job is running (up to 150 s), then stop the unit |
+| `○ MOSS STARTEN` | the unit is stopped | start the unit and wait until `/status` answers (up to 40 s) |
+| `◐ MOSS STOPPT …` / `◐ MOSS STARTET …` | switching | button disabled |
+| `? MOSS UNBEKANNT` | state cannot be read | button disabled, status is re-checked every 5 s |
+| `▲ MOSS FEHLER · …` | last action failed | tooltip carries the reason; the real state is shown again |
+
+The leading symbol is the same state vocabulary as the service rows (● running, ○ off, ◐ switching,
+▲ error, ? unknown); the border/text colour only repeats it.
 
 The tooltip also names a VRAM shortage: when less than `moss_required_free_mib` (default 19000 MiB, read from
 `~/.local/state/moss-tts/scheduler-config.json`) is free and no voice job is running, for example because Qwen

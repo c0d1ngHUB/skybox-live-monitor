@@ -63,6 +63,7 @@ PlasmoidItem {
     property double previousNetworkSampleMs: 0
     property real uptimeSeconds: 0
     property real loadAverage: 0
+    property real loadAverage15: 0
     property int processCount: 0
     property real hermesMaxThinkSeconds: 0
     property string hermesMaxThinkService: ""
@@ -108,8 +109,8 @@ PlasmoidItem {
     }
     function telemetryAgeLabel() {
         var age = root.telemetryAge()
-        if (age === null) return "ABFRAGEN: WARTEN"
-        return age > 15 ? "ABFRAGEN: ALT " + age + "S" : "ABFRAGEN: VOR " + age + "S"
+        if (age === null) return "ABFRAGE WARTET"
+        return age > 15 ? "ABFRAGE ALT " + age + " s" : "ABFRAGE VOR " + age + " s"
     }
     // Four largest CPU, RAM, and GPU consumers, sampled every five seconds.
     property var topCpuProcesses: []
@@ -138,7 +139,7 @@ PlasmoidItem {
     }
     function gpuPeakLabel(index) {
         var peak = MonitorLogic.gpuLoadPeak(root.gpuLoadStates[String(index)], root.telemetryNowMs)
-        return "PEAK 30s · " + (peak === null ? "--" : Math.round(peak) + "%")
+        return "SPITZE 30 s · " + (peak === null ? "--" : Math.round(peak) + "%")
     }
     property int historySeconds: 120
     property double historyLastTickMs: 0
@@ -224,7 +225,7 @@ PlasmoidItem {
         return root.networkUseMbit(direction) ? 1 : 1000
     }
     function networkLiveLabel(direction) {
-        if (!root.networkAvailable || root.telemetryNowMs - root.lastNetworkTelemetryMs > 5000) return "UNAVAILABLE"
+        if (!root.networkAvailable || root.telemetryNowMs - root.lastNetworkTelemetryMs > 5000) return "KEINE DATEN"
         return MonitorLogic.networkRateLabel(root.networkLive(direction), root.networkUseMbit(direction))
     }
     function fmtNetworkAxisValue(value) {
@@ -340,9 +341,18 @@ PlasmoidItem {
         if (state === "OFFLINE") return root.critical
         return root.quietBorder
     }
+    // Canonical states stay English in monitor_logic.js (they are the helper
+    // contract); only the displayed word is German.
+    function serviceStateWord(state) {
+        if (state === "OPERATIONAL") return "AKTIV"
+        if (state === "DEGRADED") return "GESTÖRT"
+        if (state === "OFFLINE") return "OFFLINE"
+        if (state === "NOT_CONFIGURED") return "NICHT EINGERICHTET"
+        return "UNBEKANNT"
+    }
     function serviceStateLabel(rawState) {
         var state = MonitorLogic.normalizeServiceState(rawState)
-        return MonitorLogic.serviceSymbol(state) + " " + state
+        return MonitorLogic.serviceSymbol(state) + " " + root.serviceStateWord(state)
     }
     // Per-process CPU percentages are shares of one core (top(1) convention), so
     // the card says how many cores the aggregate "CPU" figure refers to. Without
@@ -362,9 +372,10 @@ PlasmoidItem {
     function openAiOauthState() { return MonitorLogic.openAiOauthState(root.openAiActiveKeys, root.openAiTotalKeys) }
     function openAiOauthLabel() {
         var state = root.openAiOauthState()
-        if (state === "NOT_CONFIGURED") return MonitorLogic.serviceSymbol(state) + " " + state + " · 0 KEYS"
-        if (root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0) return MonitorLogic.serviceSymbol(state) + " " + state + " · ?/? KEYS"
-        return MonitorLogic.serviceSymbol(state) + " " + state + " · " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " KEYS"
+        var word = MonitorLogic.serviceSymbol(state) + " " + root.serviceStateWord(state)
+        if (state === "NOT_CONFIGURED") return word + " · 0 SCHLÜSSEL"
+        if (root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0) return word + " · ?/? SCHLÜSSEL"
+        return word + " · " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " SCHLÜSSEL"
     }
     function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }
     function openAiOauthBorderColor() { return root.serviceBorderColor(root.openAiOauthState()) }
@@ -388,13 +399,14 @@ PlasmoidItem {
     }
 
     // HINDSIGHT VERDICHTUNG: how much of the raw input ends up condensed.
-    // "IN OBS" = raw facts referenced by >= 1 observation, MERGE = observations
-    // with >= 2 proofs, Ø = mean proofs per observation. Informational only.
+    // ERFASST = raw facts referenced by >= 1 observation, VERDICHTET =
+    // observations with >= 2 proofs, Ø = mean proofs per observation.
+    // Informational only.
     function obsCondenseLabel() {
-        if (root.obsHealthUnavailable) return "? OBS"
+        if (root.obsHealthUnavailable) return "? UNBEKANNT"
         var avg = (root.obsAvgProofs < 0 || !isFinite(root.obsAvgProofs)) ? "--" : root.obsAvgProofs.toFixed(2)
-        return "IN OBS " + root.fmtPct0(root.obsReferencedPct) + " · MERGE " + root.fmtPct0(root.obsMergePct)
-            + " · Ø " + avg
+        return "ERFASST " + root.fmtPct0(root.obsReferencedPct) + " · VERDICHTET " + root.fmtPct0(root.obsMergePct)
+            + " · Ø " + avg + " BELEGE"
     }
 
     function obsCondenseDetail() {
@@ -402,12 +414,12 @@ PlasmoidItem {
         var avg = (root.obsAvgProofs < 0 || !isFinite(root.obsAvgProofs)) ? "--" : root.obsAvgProofs.toFixed(2)
         var referenced = (root.obsRawFacts >= 0 && root.obsOrphans >= 0) ? root.obsRawFacts - root.obsOrphans : -1
         return [
-            "IN OBS " + root.fmtPct1(root.obsReferencedPct) + " (" + root.obsInt(referenced) + " VON "
+            "ERFASST " + root.fmtPct1(root.obsReferencedPct) + " (" + root.obsInt(referenced) + " VON "
                 + root.obsInt(root.obsRawFacts) + " ROHFAKTEN IN MIND. 1 OBSERVATION)",
-            "MERGE " + root.fmtPct1(root.obsMergePct) + " (" + root.obsInt(root.obsMerged) + " VON "
-                + root.obsInt(root.obsCount) + " OBS MIT PROOF >= 2)",
+            "VERDICHTET " + root.fmtPct1(root.obsMergePct) + " (" + root.obsInt(root.obsMerged) + " VON "
+                + root.obsInt(root.obsCount) + " OBSERVATIONEN MIT MIND. 2 BELEGEN)",
             "Ø " + avg + " BELEGE PRO OBSERVATION",
-            "HINWEIS: BEIM MERGEN VERLIERT DER UNTERLEGENE FAKT SEINE REFERENZ -- IN OBS IST EINE UNTERGRENZE"
+            "HINWEIS: BEIM VERDICHTEN VERLIERT DER UNTERLEGENE FAKT SEINE REFERENZ -- ERFASST IST EINE UNTERGRENZE"
         ].join("\n")
     }
 
@@ -428,15 +440,20 @@ PlasmoidItem {
         var draw = MonitorLogic.sensorNumber(drawValue)
         var limit = Number(limitValue)
         if (!isFinite(limit) || limit <= 0) return ""
-        return "POWER " + (isFinite(draw) ? draw.toFixed(0) : "--") + "/" + limit.toFixed(0) + " W"
+        return "LEISTUNG " + (isFinite(draw) ? draw.toFixed(0) : "--") + "/" + limit.toFixed(0) + " W"
     }
 
-    // nvidia-smi reports MiB; the visible GB label uses decimal gigabytes.
-    function gpuVramUsedText(usedMiB, available) {
+    // nvidia-smi reports MiB. The card shows used / total in GiB — the same
+    // binary unit as the RAM pair — so 3.7 / 24 GiB and 4.2 / 8 GiB are
+    // comparable at a glance. Exact MiB stay in the tooltip.
+    function gpuVramUsedText(usedMiB, totalMiB, available) {
         var used = Number(usedMiB)
         if (!available || !isFinite(used) || used < 0) return "VRAM --"
-        var gb = used * 1048576 / 1000000000
-        return "VRAM " + gb.toFixed(gb > 0 && gb < 0.1 ? 2 : 1) + "GB"
+        var usedGiB = used / 1024
+        var usedText = usedGiB.toFixed(usedGiB > 0 && usedGiB < 0.1 ? 2 : 1)
+        var total = Number(totalMiB)
+        if (!isFinite(total) || total <= 0) return "VRAM " + usedText + " GiB"
+        return "VRAM " + usedText + " / " + Math.round(total / 1024) + " GiB"
     }
     function vramPercent(usedMiB, totalMiB) {
         if (totalMiB <= 0) return 0
@@ -446,7 +463,7 @@ PlasmoidItem {
         var rows = []
         var processes = entry && entry.processes ? entry.processes : []
         for (var i = 0; i < processes.length; i++) {
-            rows.push({ name: processes[i].name || "GPU PROCESS", gpu: root.fmtVram(Number(processes[i].used_mib) || 0), gpuExact: String(processes[i].used_mib) + " MiB", role: MonitorLogic.gpuProcessRole(processes[i].name) })
+            rows.push({ name: processes[i].name || "GPU-PROZESS", gpu: root.fmtVram(Number(processes[i].used_mib) || 0), gpuExact: String(processes[i].used_mib) + " MiB", role: MonitorLogic.gpuProcessRole(processes[i].name) })
         }
         return rows
     }
@@ -508,8 +525,8 @@ PlasmoidItem {
     // used and not available; it is shown so the total still adds up on screen.
     function fmtDiskSummary() {
         var reserved = root.diskReservedBytes()
-        var suffix = reserved > 1024 * 1024 * 1024 ? " (+" + root.fmtDisk(reserved) + " RES)" : ""
-        return "USED " + root.fmtDisk(root.diskUsedBytes()) + " · FREE " + root.fmtDisk(root.diskAvailBytesDf) + suffix
+        var suffix = reserved > 1024 * 1024 * 1024 ? " (+" + root.fmtDisk(reserved) + " RES.)" : ""
+        return "BELEGT " + root.fmtDisk(root.diskUsedBytes()) + " · FREI " + root.fmtDisk(root.diskAvailBytesDf) + suffix
     }
     function diskReserveDetail() {
         return "Belegt: " + root.fmtDisk(root.diskUsedBytes()) + "\nVerfügbar: " + root.fmtDisk(root.diskAvailBytesDf)
@@ -522,19 +539,19 @@ PlasmoidItem {
         return normalColor
     }
     function shortProcessName(name) {
-        return (name || "PROCESS").split("/").pop()
+        return (name || "PROZESS").split("/").pop()
     }
     function compactProcessValue(metricLabel, value) {
         var text = String(value || "")
-        // Narrow cards reserve the process column for names. Hover retains the
-        // exact binary unit and precision; G/M are display-only abbreviations.
+        // Same unit family as every other memory figure on the board (GiB /
+        // MiB); whole MiB, one decimal GiB. Hover keeps the exact value.
         if (metricLabel === "RAM" || metricLabel === "VRAM") {
             var number = parseFloat(text)
             if (!isFinite(number)) return text
-            if (text.endsWith(" GiB")) return number.toFixed(1) + "G"
+            if (text.endsWith(" GiB")) return number.toFixed(1) + " GiB"
             if (text.endsWith(" MiB")) {
-                if (metricLabel === "RAM" && number >= 1024) return (number / 1024).toFixed(1) + "G"
-                return Math.round(number) + "M"
+                if (metricLabel === "RAM" && number >= 1024) return (number / 1024).toFixed(1) + " GiB"
+                return Math.round(number) + " MiB"
             }
         }
         return text
@@ -616,7 +633,7 @@ PlasmoidItem {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 0
                     Text { text: "SKYBOX"; color: root.cyan; font.family: "DejaVu Sans"; font.bold: true; font.pixelSize: 26; font.letterSpacing: 3 }
-                    Text { text: "AIEX · LOCAL · " + root.currentTimezoneLabel(); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                    Text { text: "AIEX · LOKAL · " + root.currentTimezoneLabel(); color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                 }
                 Column {
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -640,11 +657,14 @@ PlasmoidItem {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.bottomMargin: -8; color: root.cyan; opacity: 0.45 }
 
-            // --- AI SERVICES section ---
+            // --- AI SERVICES section --- (rendered title: KI-DIENSTE)
+            // Status cards, then the three status rows: Hindsight condensation,
+            // OpenAI OAuth keys, Claude plan limits. Everything about the AI
+            // stack lives in this block; the host card below is host-only.
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 178
-                Layout.minimumHeight: 174
+                Layout.preferredHeight: 214
+                Layout.minimumHeight: 210
                 clip: true
                 Column {
                     anchors.fill: parent
@@ -653,7 +673,7 @@ PlasmoidItem {
                     Item {
                         width: parent.width
                         height: 38
-                        Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "AI SERVICES"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
+                        Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "KI-DIENSTE"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
                         MossControl {
                             objectName: "mossControl"
                             anchors.right: qwenControl.left
@@ -686,11 +706,27 @@ PlasmoidItem {
                             border.width: 1
                             border.color: root.serviceBorderColor(root.hermesGatewayState)
                             Column {
-                                anchors.fill: parent
+                                anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
                                 anchors.margins: 8
                                 spacing: 2
                                 Text { text: "GATEWAY"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                                 Text { text: root.serviceStateLabel(root.hermesGatewayState); color: root.serviceToneColor(root.hermesGatewayState); font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
+                            }
+                            // Longest completed Hermes turn of the last 24 h: a gateway
+                            // figure, so it sits in the gateway card, not in the host card.
+                            PlasmaCore.ToolTipArea {
+                                id: hermesThinkTip
+                                anchors.right: parent.right; anchors.rightMargin: 10
+                                anchors.top: parent.top; anchors.bottom: parent.bottom
+                                anchors.topMargin: 8; anchors.bottomMargin: 8
+                                width: Math.max(thinkLabel.implicitWidth, thinkDuration.implicitWidth)
+                                property string sessionLabel: "LÄNGSTE ANTWORT · 24 H"
+                                property string profileHint: root.hermesMaxThinkService.length > 0 ? " · Profil: " + root.hermesMaxThinkService.toLowerCase() : ""
+                                mainText: "Längste abgeschlossene Hermes-Antwort der letzten 24 h" + profileHint
+                                    + (root.hermesMaxThinkUnavailable ? "\nAntwortzeiten nicht lesbar."
+                                        : root.hermesMaxThinkPartial ? "\nTeilabfrage: Mindestens diese Dauer; einzelne Profile sind nicht lesbar." : "")
+                                Text { id: thinkLabel; anchors.right: parent.right; anchors.top: parent.top; text: hermesThinkTip.sessionLabel; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true }
+                                Text { id: thinkDuration; anchors.right: parent.right; anchors.bottom: parent.bottom; text: root.hermesMaxThinkUnavailable ? "--" : (root.hermesMaxThinkPartial ? "≥ " : "") + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.hermesMaxThinkUnavailable || root.hermesMaxThinkPartial ? root.warning : root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 15; font.bold: true }
                             }
                         }
                         Rectangle {
@@ -707,6 +743,40 @@ PlasmoidItem {
                                 Text { text: "HINDSIGHT"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                                 Text { text: root.serviceStateLabel(root.hindsightState); color: root.serviceToneColor(root.hindsightState); font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
                             }
+                        }
+                    }
+                    Rectangle {
+                        id: obsCondenseCard
+                        width: parent.width
+                        height: 28
+                        radius: 9
+                        color: Qt.rgba(0, 0, 0, 0.22)
+                        border.width: 1
+                        border.color: root.obsHealthUnavailable ? root.warning : root.quietBorder
+                        PlasmaCore.ToolTipArea {
+                            anchors.fill: parent
+                            mainText: root.obsCondenseDetail()
+                        }
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "HINDSIGHT VERDICHTUNG"
+                            color: root.muted
+                            font.family: "DejaVu Sans Mono"
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.obsCondenseLabel()
+                            color: root.obsHealthUnavailable ? root.muted : root.cyan
+                            font.family: "DejaVu Sans Mono"
+                            font.pixelSize: 13
+                            font.bold: true
+                            elide: Text.ElideRight
                         }
                     }
                     Rectangle {
@@ -739,39 +809,15 @@ PlasmoidItem {
                             elide: Text.ElideRight
                         }
                     }
-                    Rectangle {
-                        id: obsCondenseCard
+                    ClaudeUsage {
+                        id: claudeUsage
                         width: parent.width
-                        height: 28
-                        radius: 9
-                        color: Qt.rgba(0, 0, 0, 0.22)
-                        border.width: 1
-                        border.color: root.obsHealthUnavailable ? root.muted : root.cyan
-                        PlasmaCore.ToolTipArea {
-                            anchors.fill: parent
-                            mainText: root.obsCondenseDetail()
-                        }
-                        Text {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "HINDSIGHT VERDICHTUNG"
-                            color: root.muted
-                            font.family: "DejaVu Sans Mono"
-                            font.pixelSize: 14
-                            font.bold: true
-                        }
-                        Text {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: root.obsCondenseLabel()
-                            color: root.obsHealthUnavailable ? root.muted : root.cyan
-                            font.family: "DejaVu Sans Mono"
-                            font.pixelSize: 13
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
+                        ink: root.ink
+                        muted: root.muted
+                        accent: root.cyan
+                        warning: root.warning
+                        critical: root.critical
+                        quietBorder: root.quietBorder
                     }
                 }
             }
@@ -786,12 +832,12 @@ PlasmoidItem {
                 Layout.minimumHeight: 160
                 clip: true
 
-                Text { id: headline; anchors.left: parent.left; anchors.top: parent.top; text: "SYSTEM LOAD"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
+                Text { id: headline; anchors.left: parent.left; anchors.top: parent.top; text: "GPU-AUSLASTUNG"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
                 Row {
                     id: computeLegend
                     anchors.left: parent.left; anchors.top: headline.bottom; anchors.topMargin: 26; spacing: 18
-                    Text { text: "━━ GPU 0 · " + root.gpu0Name + " · " + (root.gpu0Available && root.gpuLoadAvailable(0) ? Math.round(root.gpu0Usage) + "%" : "UNAVAILABLE"); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
-                    Text { text: "━━ GPU 1 · " + root.gpu1Name + " · " + (root.gpu1Available && root.gpuLoadAvailable(1) ? Math.round(root.gpu1Usage) + "%" : "UNAVAILABLE"); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
+                    Text { text: "━━ GPU 0 · " + root.gpu0Name + " · " + (root.gpu0Available && root.gpuLoadAvailable(0) ? Math.round(root.gpu0Usage) + "%" : "KEINE DATEN"); color: root.violet; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
+                    Text { text: "━━ GPU 1 · " + root.gpu1Name + " · " + (root.gpu1Available && root.gpuLoadAvailable(1) ? Math.round(root.gpu1Usage) + "%" : "KEINE DATEN"); color: root.cyan; font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 13 }
                 }
 
                 // P0a: Y-axis labels positioned INSIDE the graph area, not with negative margins
@@ -888,19 +934,8 @@ PlasmoidItem {
                     height: 20
                     Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−2 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
                     Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "−1 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
-                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
+                    Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "JETZT · " + Math.round(root.historyFillProgress() * 100) + "% GEFÜLLT" : "JETZT"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 14 }
                 }
-            }
-
-            ClaudeUsage {
-                Layout.fillWidth: true
-                Layout.preferredHeight: implicitHeight
-                Layout.minimumHeight: implicitHeight
-                ink: root.ink
-                muted: root.muted
-                accent: root.cyan
-                warning: root.warning
-                critical: root.critical
             }
 
             // --- Two-GPU row followed by two full-width CPU/RAM cards ---
@@ -919,8 +954,8 @@ PlasmoidItem {
                     model: 4
                     delegate: Rectangle {
                         readonly property var cardData: [
-                            {kind:"gpu", label:"GPU 0 · " + root.gpu0Name, gpuName:root.gpu0Name, gpuIndex:0, labelText: root.cardGpuLabel(0, root.gpu0Name), labelTooltip: root.cardGpuTooltip(0, root.gpu0Name), available:root.gpu0Available, value:root.gpu0Available && root.gpuLoadAvailable(0) ? Math.round(root.gpu0Usage) + "%" : "--", detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "UNAVAILABLE", color:root.violet, detailColor:root.gpuTempColor(root.gpu0Temp, root.muted), healthLevel:!root.gpu0Available ? 2 : ((root.gpu0Temp >= 90 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 95) ? 2 : ((root.gpu0Temp >= 85 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu0Available ? root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) : 0, vramUsedMiB:root.gpu0VramUsedMiB, vramTotalMiB:root.gpu0VramTotalMiB, powerText:root.gpu0Available ? root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts) : "", processes:root.topGpu0Processes, processCount:root.gpu0ProcessCount, processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable},
-                            {kind:"gpu", label:"GPU 1 · " + root.gpu1Name, gpuName:root.gpu1Name, gpuIndex:1, labelText: root.cardGpuLabel(1, root.gpu1Name), labelTooltip: root.cardGpuTooltip(1, root.gpu1Name), available:root.gpu1Available, value:root.gpu1Available && root.gpuLoadAvailable(1) ? Math.round(root.gpu1Usage) + "%" : "--", detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "UNAVAILABLE", color:root.cyan, detailColor:root.gpuTempColor(root.gpu1Temp, root.muted), healthLevel:!root.gpu1Available ? 2 : ((root.gpu1Temp >= 90 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 95) ? 2 : ((root.gpu1Temp >= 85 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu1Available ? root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) : 0, vramUsedMiB:root.gpu1VramUsedMiB, vramTotalMiB:root.gpu1VramTotalMiB, powerText:root.gpu1Available ? root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts) : "", processes:root.topGpu1Processes, processCount:root.gpu1ProcessCount, processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable},
+                            {kind:"gpu", label:"GPU 0 · " + root.gpu0Name, gpuName:root.gpu0Name, gpuIndex:0, labelText: root.cardGpuLabel(0, root.gpu0Name), labelTooltip: root.cardGpuTooltip(0, root.gpu0Name), available:root.gpu0Available, value:root.gpu0Available && root.gpuLoadAvailable(0) ? Math.round(root.gpu0Usage) + "%" : "--", detail:root.gpu0Available ? Math.round(root.gpu0Temp) + "°C" : "KEINE DATEN", color:root.violet, detailColor:root.gpuTempColor(root.gpu0Temp, root.muted), healthLevel:!root.gpu0Available ? 2 : ((root.gpu0Temp >= 90 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 95) ? 2 : ((root.gpu0Temp >= 85 || root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu0Available ? root.vramPercent(root.gpu0VramUsedMiB, root.gpu0VramTotalMiB) : 0, vramUsedMiB:root.gpu0VramUsedMiB, vramTotalMiB:root.gpu0VramTotalMiB, powerText:root.gpu0Available ? root.gpuPowerText(root.gpu0PowerDrawWatts, root.gpu0PowerLimitWatts) : "", processes:root.topGpu0Processes, processCount:root.gpu0ProcessCount, processUnavailable:!root.gpu0Available || root.gpuProcessUnavailable},
+                            {kind:"gpu", label:"GPU 1 · " + root.gpu1Name, gpuName:root.gpu1Name, gpuIndex:1, labelText: root.cardGpuLabel(1, root.gpu1Name), labelTooltip: root.cardGpuTooltip(1, root.gpu1Name), available:root.gpu1Available, value:root.gpu1Available && root.gpuLoadAvailable(1) ? Math.round(root.gpu1Usage) + "%" : "--", detail:root.gpu1Available ? Math.round(root.gpu1Temp) + "°C" : "KEINE DATEN", color:root.cyan, detailColor:root.gpuTempColor(root.gpu1Temp, root.muted), healthLevel:!root.gpu1Available ? 2 : ((root.gpu1Temp >= 90 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 95) ? 2 : ((root.gpu1Temp >= 85 || root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) >= 85) ? 1 : 0)), vramFill:root.gpu1Available ? root.vramPercent(root.gpu1VramUsedMiB, root.gpu1VramTotalMiB) : 0, vramUsedMiB:root.gpu1VramUsedMiB, vramTotalMiB:root.gpu1VramTotalMiB, powerText:root.gpu1Available ? root.gpuPowerText(root.gpu1PowerDrawWatts, root.gpu1PowerLimitWatts) : "", processes:root.topGpu1Processes, processCount:root.gpu1ProcessCount, processUnavailable:!root.gpu1Available || root.gpuProcessUnavailable},
                             {kind:"cpu", label:"CPU", value:isFinite(root.cpu) ? Math.round(root.cpu) + "%" : "--", detail:root.cpuDetailLabel(), color:root.blue, detailColor:root.tempColor(root.cpuTemp, root.muted), healthLevel:root.cpuTemp >= 85 ? 2 : (root.cpuTemp >= 75 ? 1 : 0), processes:root.topCpuProcesses, processCount:root.topCpuProcesses.length, processUnavailable:root.cpuProcessUnavailable},
                             {kind:"ram", label:"RAM", value:isFinite(root.ram) ? Math.round(root.ram) + "%" : "--", detail:root.fmtMemoryPair(root.ramUsedBytes, root.ramTotalBytes), color:root.orange, detailColor:root.ram >= 85 ? root.warning : root.muted, healthLevel:root.ram >= 95 ? 2 : (root.ram >= 85 ? 1 : 0), processes:root.topRamProcesses, processCount:root.topRamProcesses.length, processUnavailable:root.ramProcessUnavailable}
                         ][index]
@@ -976,7 +1011,7 @@ PlasmoidItem {
                                     PlasmaCore.ToolTipArea {
                                         anchors.fill: parent
                                         mainText: cardData.available ? "VRAM " + root.fmtVram(cardData.vramUsedMiB || 0) + " / " + root.fmtVram(cardData.vramTotalMiB || 0)
-                                            + "\n" + cardData.vramUsedMiB + " MiB / " + cardData.vramTotalMiB + " MiB · " + Math.round(cardData.vramFill || 0) + "% · 1 GB = 10⁹ Bytes" : "VRAM UNAVAILABLE"
+                                            + "\n" + cardData.vramUsedMiB + " MiB / " + cardData.vramTotalMiB + " MiB · " + Math.round(cardData.vramFill || 0) + "% belegt" : "VRAM KEINE DATEN"
                                     }
                                     Rectangle {
                                         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -993,7 +1028,7 @@ PlasmoidItem {
                                     }
                                     Text {
                                         anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter
-                                        text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.available)
+                                        text: root.gpuVramUsedText(cardData.vramUsedMiB, cardData.vramTotalMiB, cardData.available)
                                         color: root.ink
                                         font.family: "DejaVu Sans Mono"
                                         font.pixelSize: 13
@@ -1007,7 +1042,7 @@ PlasmoidItem {
                                     mainText: cardData.powerText || ""
                                     Text {
                                         anchors.fill: parent
-                                        text: (cardData.powerText || "").replace("POWER ", "")
+                                        text: (cardData.powerText || "").replace("LEISTUNG ", "")
                                         color: root.muted
                                         font.family: "DejaVu Sans Mono"
                                         font.pixelSize: 13
@@ -1075,7 +1110,7 @@ PlasmoidItem {
                                     width: parent.width; height: 18
                                     mainText: processDetails.metricKind === "cpu"
                                         ? "Pro Prozess: Anteil eines CPU-Threads. CPU-Gesamtwert: Durchschnitt über " + root.cpuCoreCount + " Threads."
-                                        : processDetails.metricKind === "gpu" ? cardData.labelTooltip + " · TOP · VRAM\nVideospeicher pro Prozess (M = MiB, G = GiB)" : "Arbeitsspeicher pro Prozess (M = MiB, G = GiB)"
+                                        : processDetails.metricKind === "gpu" ? cardData.labelTooltip + " · TOP · VRAM\nVideospeicher pro Prozess" : "Arbeitsspeicher pro Prozess"
                                     Text { anchors.fill: parent; text: processDetails.heading + processDetails.headingSuffix; color: cardData.color; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true; elide: Text.ElideRight }
                                 }
                                 PlasmaCore.ToolTipArea {
@@ -1142,7 +1177,7 @@ PlasmoidItem {
                                 Text {
                                     visible: parent.processes.length === 0
                                     width: parent.width
-                                    text: cardData.processUnavailable ? "UNAVAILABLE" : (cardData.processCount === 0 ? (processDetails.metricKind === "gpu" ? "NO ACTIVE WORKLOAD" : "SAMPLING…") : "SAMPLING…")
+                                    text: cardData.processUnavailable ? "KEINE DATEN" : (cardData.processCount === 0 ? (processDetails.metricKind === "gpu" ? "KEINE AKTIVE LAST" : "MESSUNG …") : "MESSUNG …")
                                     color: root.muted
                                     font.family: "DejaVu Sans Mono"
                                     font.pixelSize: 13
@@ -1163,7 +1198,7 @@ PlasmoidItem {
                 Layout.minimumHeight: 230
                 clip: true
 
-                Text { id: networkTitle; anchors.left: parent.left; anchors.top: parent.top; text: "NETWORK"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
+                Text { id: networkTitle; anchors.left: parent.left; anchors.top: parent.top; text: "NETZWERK"; color: root.ink; font.bold: true; font.pixelSize: 30; font.letterSpacing: 2 }
                 Text { anchors.right: parent.right; anchors.verticalCenter: networkTitle.verticalCenter; text: "SKALEN UNABHÄNGIG"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 12 }
                 Column {
                     id: networkDataBlock
@@ -1251,7 +1286,7 @@ PlasmoidItem {
                             height: 20
                             Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−2 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                             Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "−1 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "JETZT · " + Math.round(root.historyFillProgress() * 100) + "% GEFÜLLT" : "JETZT"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                         }
                     }
 
@@ -1324,7 +1359,7 @@ PlasmoidItem {
                             height: 20
                             Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "−2 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                             Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "−1 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
-                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "NOW · " + Math.round(root.historyFillProgress() * 100) + "% FILLED" : "NOW"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                            Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.historyFilling() ? "JETZT · " + Math.round(root.historyFillProgress() * 100) + "% GEFÜLLT" : "JETZT"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                         }
                     }
                 }
@@ -1332,7 +1367,7 @@ PlasmoidItem {
                     anchors.centerIn: parent
                     anchors.verticalCenterOffset: 14
                     visible: root.networkIdle()
-                    text: "IDLE · NO TRANSFER IN LAST 2 MIN"
+                    text: "RUHE · KEIN TRANSFER SEIT 2 MIN"
                     color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true
                 }
             }
@@ -1351,7 +1386,7 @@ PlasmoidItem {
                         Item {
                             width: parent.width
                             height: 26
-                            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "SYSTEM DISK /"; color: root.blue; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "DATENTRÄGER /"; color: root.blue; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
                             Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: Math.round(root.diskPercent()) + "%"; color: root.ink; font.family: "DejaVu Sans"; font.pixelSize: 20; font.bold: true }
                         }
                         // df semantics plus the ext4 reserve, elided if the card is narrow.
@@ -1373,8 +1408,13 @@ PlasmoidItem {
                     clip: true
                     color: Qt.rgba(0.035, 0.22, 0.34, 0.82); border.width: 1; border.color: root.quietBorder; opacity: 0.95
                     Column {
-                        anchors.fill: parent; anchors.margins: 10; spacing: 4
-                        Text { text: "SYSTEM /"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
+                        anchors.fill: parent; anchors.margins: 10; spacing: 2
+                        // Same 26-px title row as the disk card so both titles share a baseline.
+                        Item {
+                            width: parent.width
+                            height: 26
+                            Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "HOST"; color: root.cyan; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
+                        }
                         Grid {
                             id: systemMetaGrid
                             width: parent.width
@@ -1384,34 +1424,23 @@ PlasmoidItem {
                             rowSpacing: 3
                             Item {
                                 width: (parent.width - 12) / 2; height: 24
-                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "UPTIME"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "LAUFZEIT"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                                 Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.fmtUptime(root.uptimeSeconds); color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                             }
                             Item {
                                 width: (parent.width - 12) / 2; height: 24
-                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "LOAD 1M"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "LAST 1 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                                 Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.loadAverage.toFixed(2); color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                             }
                             Item {
                                 width: (parent.width - 12) / 2; height: 24
-                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "PROCESSES"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "PROZESSE"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                                 Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.processCount; color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                             }
                             Item {
                                 width: (parent.width - 12) / 2; height: 24
-                                PlasmaCore.ToolTipArea {
-                                    anchors.left: parent.left
-                                    anchors.right: thinkDuration.left
-                                    anchors.rightMargin: 8
-                                    height: parent.height
-                                    property string sessionLabel: "ANTW. MAX24H"
-                                    property string profileHint: root.hermesMaxThinkService.length > 0 ? " · Profil: " + root.hermesMaxThinkService.toLowerCase() : ""
-                                    mainText: "Längste abgeschlossene Hermes-Antwort der letzten 24 h" + profileHint
-                                        + (root.hermesMaxThinkUnavailable ? "\nAntwortzeiten nicht lesbar."
-                                            : root.hermesMaxThinkPartial ? "\nTeilabfrage: Mindestens diese Dauer; einzelne Profile sind nicht lesbar." : "")
-                                    Text { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: parent.sessionLabel; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; elide: Text.ElideRight }
-                                }
-                                Text { id: thinkDuration; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.hermesMaxThinkUnavailable ? "--" : (root.hermesMaxThinkPartial ? "≥ " : "") + root.fmtDuration(root.hermesMaxThinkSeconds); color: root.hermesMaxThinkUnavailable || root.hermesMaxThinkPartial ? root.warning : root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
+                                Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: "LAST 15 MIN"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                                Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: root.loadAverage15.toFixed(2); color: root.ink; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true }
                             }
                         }
                     }
@@ -1948,5 +1977,6 @@ PlasmoidItem {
     Sensors.Sensor { sensorId: "memory/physical/total"; enabled: true; property bool readyForSamples: false; onValueChanged: root.recordSystemSensor("ramTotalBytes", value, readyForSamples && status === Sensors.Sensor.Ready); onStatusChanged: { readyForSamples = false; Qt.callLater(function() { readyForSamples = status === Sensors.Sensor.Ready }); if (status !== Sensors.Sensor.Ready) root.recordSystemSensor("ramTotalBytes", NaN, false) } }
     Sensors.Sensor { sensorId: "os/system/uptime"; enabled: true; onValueChanged: root.uptimeSeconds = parseFloat(value) || 0 }
     Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage1"; enabled: true; onValueChanged: root.loadAverage = parseFloat(value) || 0 }
+    Sensors.Sensor { sensorId: "cpu/loadaverages/loadaverage15"; enabled: true; onValueChanged: root.loadAverage15 = parseFloat(value) || 0 }
     Sensors.Sensor { sensorId: "cpu/all/coreCount"; enabled: true; onValueChanged: { root.cpuCoreCount = Math.round(parseFloat(value)) || 0 } }
 }

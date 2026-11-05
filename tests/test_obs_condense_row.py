@@ -64,13 +64,13 @@ console.log(obsCondenseLabel());
 
 def test_row_label_shows_the_three_condensation_values():
     out = _label('{obsHealthUnavailable: false, obsReferencedPct: 83.0, obsMergePct: 36.9, obsAvgProofs: 2.27}')
-    assert out == "IN OBS 83% \u00b7 MERGE 37% \u00b7 \u00d8 2.27"
+    assert out == "ERFASST 83% \u00b7 VERDICHTET 37% \u00b7 \u00d8 2.27 BELEGE"
 
 
 def test_row_label_is_unknown_when_unavailable_or_unmeasured():
-    assert _label('{obsHealthUnavailable: true, obsReferencedPct: -1, obsMergePct: -1, obsAvgProofs: -1}') == "? OBS"
+    assert _label('{obsHealthUnavailable: true, obsReferencedPct: -1, obsMergePct: -1, obsAvgProofs: -1}') == "? UNBEKANNT"
     out = _label('{obsHealthUnavailable: false, obsReferencedPct: -1, obsMergePct: -1, obsAvgProofs: -1}')
-    assert out == "IN OBS -- \u00b7 MERGE -- \u00b7 \u00d8 --"
+    assert out == "ERFASST -- \u00b7 VERDICHTET -- \u00b7 \u00d8 -- BELEGE"
 
 
 def test_row_tooltip_explains_the_values_without_placeholders():
@@ -87,7 +87,7 @@ console.log(obsCondenseDetail());
     detail = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout
     assert "undefined" not in detail and "%%" not in detail and "NaN" not in detail
     assert "83.0% (12104 VON 14586 ROHFAKTEN" in detail
-    assert "36.9% (2167 VON 5871 OBS MIT PROOF >= 2)" in detail
+    assert "36.9% (2167 VON 5871 OBSERVATIONEN MIT MIND. 2 BELEGEN)" in detail
     assert "\u00d8 2.27 BELEGE PRO OBSERVATION" in detail
 
 
@@ -99,6 +99,9 @@ def test_row_is_wired_into_the_dashboard_and_reset_path():
     assert "payload.referenced_pct, -1" in text and "payload.avg_proofs, -1" in text
     reset = text[text.index('    function resetObsHealth()'):text.index('    function gpuPowerText(')]
     assert "root.obsReferencedPct = -1" in reset and "root.obsAvgProofs = -1" in reset
-    # The row sits directly below the OAuth card (the OBS row was removed).
-    assert text.index("id: obsCondenseCard") > text.index("id: openAiOauthCard")
+    # Block order: service cards → HINDSIGHT VERDICHTUNG (directly under its
+    # card) → OPENAI OAUTH → CLAUDE, so the two external quotas sit together.
+    assert text.index('text: "HINDSIGHT"') < text.index("id: obsCondenseCard") < text.index("id: openAiOauthCard") < text.index("id: claudeUsage")
+    # Healthy rows keep the quiet border; only an unreachable API colours it.
+    assert 'border.color: root.obsHealthUnavailable ? root.warning : root.quietBorder' in text
     assert "id: obsHealthCard" not in text

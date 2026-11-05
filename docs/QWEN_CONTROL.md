@@ -1,6 +1,10 @@
 # Manual Qwen 3.8 control
 
-The AI SERVICES header contains one state-dependent start/stop button.
+The KI-DIENSTE (AI services) header contains one state-dependent start/stop button:
+`○ QWEN 3.8 STARTEN` (off), `● QWEN 3.8 STOPPEN` (running or sleeping), `◐ QWEN 3.8 STARTET …` /
+`◐ QWEN 3.8 STOPPT …` (switching, disabled), `▲ QWEN 3.8 FEHLER · …` (last action failed),
+`✕ QWEN 3.8 FEHLT` (backend not installed), `? QWEN 3.8 UNBEKANNT` (state unreadable, disabled).
+The symbol is the same state vocabulary as the service rows.
 
 ## Runtime
 

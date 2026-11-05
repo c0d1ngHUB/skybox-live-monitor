@@ -16,7 +16,7 @@ def test_process_names_get_space_without_losing_exact_values():
     assert 'processDetails.metricKind === "gpu" ? "VRAM" : processDetails.metricKind.toUpperCase()' in source
     assert 'text: root.shortProcessName(parent.mainText)' in source
     assert 'mainText: cardData.powerText || ""' in source
-    assert 'text: (cardData.powerText || "").replace("POWER ", "")' in source
+    assert 'text: (cardData.powerText || "").replace("LEISTUNG ", "")' in source
 
 
 def test_compact_process_values_preserve_full_units_in_tooltips():
@@ -30,7 +30,7 @@ def test_compact_process_values_preserve_full_units_in_tooltips():
         'compactProcessValue("CPU %", "39.3%")',
     ]) + "]))"
     result = subprocess.run(["node", "-e", probe], check=True, capture_output=True, text=True)
-    assert json.loads(result.stdout) == ["920M", "1.5G", "3.7G", "250M", "39.3%"]
+    assert json.loads(result.stdout) == ["920 MiB", "1.5 GiB", "3.7 GiB", "250 MiB", "39.3%"]
     assert 'mainText: parent.fullValue' in source
     assert 'mainText: parent.process.name' in source
 
@@ -71,7 +71,7 @@ def test_metric_denominators_and_short_labels_have_explanations():
     assert 'CPU-Gesamtwert: Durchschnitt' in source
     assert 'text: "SKALEN UNABHÄNGIG"' in source
     assert 'mainText: root.diskReserveDetail()' in source
-    assert 'MERGE ' in source
+    assert 'VERDICHTET ' in source
 
 
 def test_fast_telemetry_age_tracks_the_oldest_successful_source():
