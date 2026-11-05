@@ -131,25 +131,6 @@ function serviceTone(state) {
     return "muted"
 }
 
-function openAiOauthState(active, total) {
-    active = Number(active)
-    total = Number(total)
-    if (!isFinite(active) || !isFinite(total) || active < 0 || total < 0) return "UNKNOWN"
-    // No credentials configured at all is a configuration state, not an outage.
-    if (total === 0) return "NOT_CONFIGURED"
-    if (active >= total) return "OPERATIONAL"
-    if (active <= 0) return "OFFLINE"
-    return "DEGRADED"
-}
-
-function openAiOauthSymbol(state) {
-    return serviceSymbol(state)
-}
-
-function openAiOauthTone(state) {
-    return serviceTone(state)
-}
-
 function cpuProcessRates(previousByPid, samples, elapsedMs, limit) {
     if (elapsedMs <= 0) return []
     var rates = []
@@ -353,9 +334,6 @@ if (typeof module !== "undefined") {
         normalizeServiceState: normalizeServiceState,
         serviceSymbol: serviceSymbol,
         serviceTone: serviceTone,
-        openAiOauthState: openAiOauthState,
-        openAiOauthSymbol: openAiOauthSymbol,
-        openAiOauthTone: openAiOauthTone,
         cpuProcessRates: cpuProcessRates,
         networkScaleMbit: networkScaleMbit,
         adaptiveNetworkScale: adaptiveNetworkScale,

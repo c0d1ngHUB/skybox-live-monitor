@@ -61,16 +61,13 @@ class MonitorBehaviorTests(unittest.TestCase):
             "m.normalizeServiceState('down'),"
             "m.serviceSymbol('OPERATIONAL'),"
             "m.serviceSymbol('DEGRADED'),"
-            "m.serviceSymbol('OFFLINE'),"
-            "m.openAiOauthState(3, 3),"
-            "m.openAiOauthState(0, 3),"
-            "m.openAiOauthState(1, 3)"
+            "m.serviceSymbol('OFFLINE')"
             "]));"
         )
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
-        self.assertEqual(json.loads(result.stdout), ["OPERATIONAL", "OPERATIONAL", "OPERATIONAL", "OFFLINE", "●", "▲", "✕", "OPERATIONAL", "OFFLINE", "DEGRADED"])
+        self.assertEqual(json.loads(result.stdout), ["OPERATIONAL", "OPERATIONAL", "OPERATIONAL", "OFFLINE", "●", "▲", "✕"])
 
-    def test_unconfigured_openai_store_is_not_reported_as_an_outage(self):
+    def test_not_configured_service_is_not_reported_as_an_outage(self):
         """0/0 keys means "never set up", not "down".
 
         A missing credential store used to surface as OFFLINE, which colours the
@@ -79,10 +76,7 @@ class MonitorBehaviorTests(unittest.TestCase):
         script = (
             f"const m=require({json.dumps(str(LOGIC))});"
             "console.log(JSON.stringify(["
-            "m.openAiOauthState(0, 0),"
-            "m.openAiOauthState(-1, 0),"
-            "m.serviceSymbol(m.openAiOauthState(0, 0)),"
-            "m.serviceTone(m.openAiOauthState(0, 0)),"
+            "m.serviceTone('NOT_CONFIGURED'),"
             "m.normalizeServiceState('NOT_CONFIGURED'),"
             "m.serviceSymbol('NOT_CONFIGURED'),"
             "m.normalizeServiceState('offline'),"
@@ -92,7 +86,7 @@ class MonitorBehaviorTests(unittest.TestCase):
         result = subprocess.run(["node", "-e", script], text=True, capture_output=True, check=True)
         self.assertEqual(
             json.loads(result.stdout),
-            ["NOT_CONFIGURED", "UNKNOWN", "○", "muted", "NOT_CONFIGURED", "○", "OFFLINE", "critical"],
+            ["muted", "NOT_CONFIGURED", "○", "OFFLINE", "critical"],
         )
 
     def test_network_rate_and_axis_agree_on_one_unit_threshold(self):

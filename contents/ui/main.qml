@@ -69,9 +69,6 @@ PlasmoidItem {
     property string hermesMaxThinkService: ""
     property bool hermesMaxThinkUnavailable: true
     property bool hermesMaxThinkPartial: false
-    property int openAiActiveKeys: -1
-    property int openAiTotalKeys: -1
-    property int openAiFetchFailures: 0
     property string hermesGatewayState: "UNKNOWN"
     property string hindsightState: "UNKNOWN"
     // HINDSIGHT VERDICHTUNG row, read by contents/code/hindsight_observation_health.py.
@@ -154,8 +151,6 @@ PlasmoidItem {
     property bool networkAvailable: false
     property double lastServiceTelemetryMs: 0
 
-    // OAuth counts come from their own source (openAiKeysSource) and have
-    // their own failure handling; a service-poll failure must not wipe them.
     function resetServices() {
         root.hermesGatewayState = "UNKNOWN"
         root.hindsightState = "UNKNOWN"
@@ -369,17 +364,6 @@ PlasmoidItem {
         // the thread count that disambiguates the per-process percentages.
         return root.cpuCoreCount > 0 ? temp + " · " + root.cpuCoreCount + "T" : temp
     }
-    function openAiOauthState() { return MonitorLogic.openAiOauthState(root.openAiActiveKeys, root.openAiTotalKeys) }
-    function openAiOauthLabel() {
-        var state = root.openAiOauthState()
-        var word = MonitorLogic.serviceSymbol(state) + " " + root.serviceStateWord(state)
-        if (state === "NOT_CONFIGURED") return word + " · 0 SCHLÜSSEL"
-        if (root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0) return word + " · ?/? SCHLÜSSEL"
-        return word + " · " + root.openAiActiveKeys + "/" + root.openAiTotalKeys + " SCHLÜSSEL"
-    }
-    function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }
-    function openAiOauthBorderColor() { return root.serviceBorderColor(root.openAiOauthState()) }
-
     // --- Hindsight VERDICHTUNG -------------------------------------------
     function fmtPct1(value) {
         if (value === null || value === undefined || value < 0 || !isFinite(value)) return "--"
@@ -658,13 +642,13 @@ PlasmoidItem {
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.bottomMargin: -8; color: root.cyan; opacity: 0.45 }
 
             // --- AI SERVICES section --- (rendered title: KI-DIENSTE)
-            // Status cards, then the three status rows: Hindsight condensation,
-            // OpenAI OAuth keys, Claude plan limits. Everything about the AI
+            // Status cards, then the two status rows: Hindsight condensation
+            // and Claude plan limits. Everything about the AI
             // stack lives in this block; the host card below is host-only.
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 214
-                Layout.minimumHeight: 210
+                Layout.preferredHeight: 178
+                Layout.minimumHeight: 174
                 clip: true
                 Column {
                     anchors.fill: parent
@@ -775,36 +759,6 @@ PlasmoidItem {
                             color: root.obsHealthUnavailable ? root.muted : root.cyan
                             font.family: "DejaVu Sans Mono"
                             font.pixelSize: 13
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
-                    }
-                    Rectangle {
-                        id: openAiOauthCard
-                        width: parent.width
-                        height: 28
-                        radius: 9
-                        color: Qt.rgba(0, 0, 0, 0.22)
-                        border.width: 1
-                        border.color: root.openAiOauthBorderColor()
-                        Text {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "OPENAI OAUTH"
-                            color: root.muted
-                            font.family: "DejaVu Sans Mono"
-                            font.pixelSize: 14
-                            font.bold: true
-                        }
-                        Text {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: root.openAiOauthLabel()
-                            color: root.openAiOauthTone()
-                            font.family: "DejaVu Sans Mono"
-                            font.pixelSize: 14
                             font.bold: true
                             elide: Text.ElideRight
                         }
@@ -1598,40 +1552,6 @@ PlasmoidItem {
         }
     }
 
-    // Exposes aggregate OpenAI OAuth availability only; no credential details
-    // are passed to the UI.
-    PlasmaSupport.DataSource {
-        id: openAiKeysSource
-        engine: "executable"
-        connectedSources: []
-        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/hermes_openai_keys.py"))
-        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath)
-        property string buffer: ""
-        onNewData: function(source, data) {
-            buffer += data["stdout"] || ""
-            if (data["exit code"] === undefined) return
-            // Helper contract: always "<available> <total>"; "-1 0" is the
-            // explicit drift signal (missing executable, subprocess/timeout
-            // error, missing selected profile or format drift).
-            // Nonzero exit or unknown output resets the card to unknown so
-            // stale values never persist.
-            var match = buffer.trim().match(/^(-?\d+)\s+(\d+)$/)
-            buffer = ""
-            disconnectSource(source)
-            if (Number(data["exit code"]) !== 0 || !match) {
-                root.openAiActiveKeys = -1
-                root.openAiTotalKeys = 0
-                // Failed fetch (e.g. plasmashell cold start): back off briefly instead of
-                // staying UNKNOWN for the full 15-minute refresh interval.
-                if (root.openAiFetchFailures < 5) root.openAiFetchFailures += 1
-                return
-            }
-            root.openAiFetchFailures = 0
-            root.openAiActiveKeys = parseInt(match[1])
-            root.openAiTotalKeys = parseInt(match[2])
-        }
-    }
-
     PlasmaSupport.DataSource {
         id: aiServicesSource
         engine: "executable"
@@ -1859,7 +1779,6 @@ PlasmoidItem {
         topRamSource.connectSource(topRamSource.command)
         processCountSource.connectSource(processCountSource.command)
         hermesThinkSource.connectSource(hermesThinkSource.command)
-        openAiKeysSource.connectSource(openAiKeysSource.command)
         aiServicesSource.connectSource(aiServicesSource.command)
         obsHealthSource.connectSource(obsHealthSource.command)
         netDetectSource.connectSource(netDetectSource.command)
@@ -1914,24 +1833,6 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: hermesThinkSource.connectSource(hermesThinkSource.command)
-    }
-
-    // OAuth key counts: retry failed fetches with short backoff (cold-start failures),
-    // then settle on the 15-minute steady-state interval.
-    Timer {
-        interval: Math.min(60000, 5000 * Math.pow(2, Math.min(5, root.openAiFetchFailures)))
-        running: root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0
-        repeat: true
-        onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
-    }
-
-    // Sole steady-state OAuth poll (the service poll no longer runs
-    // `hermes auth list`); one minute tracks elapsing cooldowns closely.
-    Timer {
-        interval: 60000
-        running: true
-        repeat: true
-        onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)
     }
 
     Timer {

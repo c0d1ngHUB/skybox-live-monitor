@@ -7,7 +7,7 @@ import org.kde.plasma.plasma5support 2.0 as PlasmaSupport
 // claude.ai's "Plan usage limits" page. Read-only, never refreshes the token,
 // costs no model usage. Polled every 2 min; unknown is never shown as 0 %.
 // Rendered as one status row of the KI-DIENSTE block, in the same form as the
-// OPENAI OAUTH and HINDSIGHT VERDICHTUNG rows above it.
+// HINDSIGHT VERDICHTUNG row above it.
 Rectangle {
     id: usage
     objectName: "claudeUsage"

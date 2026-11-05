@@ -90,13 +90,11 @@ def test_http_disconnect_is_unavailable():
 
 @pytest.mark.parametrize('data', [{'stdout':'','exit code':1}, {'stdout':'{}','exit code':0}, {'stdout':'{"gateway":"running","hindsight":"healthy"}','exit code':1}])
 def test_service_failure_clears_previous_health(data):
-    script = '''var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3};
+    script = '''var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY'};
 var buffer='',source=''; function disconnectSource(){};
 ''' + qml_function('resetServices') + '\nroot.resetServices=resetServices;\n' + handler('aiServicesSource','gpuTelemetrySource') + '\nhandle('+json.dumps(data)+'); console.log(JSON.stringify(root));'
     result = node(script)
     assert result['hermesGatewayState'] == result['hindsightState'] == 'UNKNOWN'
-    # OAuth counts have their own source and failure handling since 2026-10-25.
-    assert result['openAiActiveKeys'] == 3
 
 
 def test_failed_network_poll_invalidates_rate():
@@ -142,7 +140,7 @@ def test_disk_total_has_only_root_filesystem_producer():
 
 def test_service_null_states_do_not_claim_health():
     data = {'stdout':json.dumps({'gateway':None,'hindsight':'healthy'}),'exit code':0}
-    script = "var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3};var buffer='',source='';function disconnectSource(){};"+qml_function('resetServices')+';root.resetServices=resetServices;'+handler('aiServicesSource','gpuTelemetrySource')+';handle('+json.dumps(data)+');console.log(JSON.stringify(root.hermesGatewayState));'
+    script = "var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY'};var buffer='',source='';function disconnectSource(){};"+qml_function('resetServices')+';root.resetServices=resetServices;'+handler('aiServicesSource','gpuTelemetrySource')+';handle('+json.dumps(data)+');console.log(JSON.stringify(root.hermesGatewayState));'
     assert node(script) == 'UNKNOWN'
 
 
@@ -169,7 +167,7 @@ def test_stalled_service_poll_expires_without_expiring_fresh_services(age, expec
     body = 'root.telemetryNowMs = Date.now()'+source.split('root.telemetryNowMs = Date.now()',1)[1].split('computeGraph.requestPaint()',1)[0]
     script = LOGIC.read_text()+'''
 var MonitorLogic={telemetrySample:telemetrySample,gpuLoadSample:gpuLoadSample};
-var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3,cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpuLoadStates:{},downHistory:[],upHistory:[],lastServiceTelemetryMs:Date.now()-61000};
+var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',cpu:0,ram:0,cpuHistory:[],ramHistory:[],gpu0History:[],gpu1History:[],gpuLoadStates:{},downHistory:[],upHistory:[],lastServiceTelemetryMs:Date.now()-61000};
 root.push=function(h,v){return h.concat([v]);};
 ''' .replace('Date.now()-61000','Date.now()-'+str(age)) + qml_function('resetServices')+';root.resetServices=resetServices;'+body+';console.log(JSON.stringify([root.hermesGatewayState,root.hindsightState]));'
     assert node(script) == expected

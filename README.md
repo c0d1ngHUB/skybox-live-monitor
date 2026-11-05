@@ -91,7 +91,6 @@ Memory figures use one unit family everywhere (GiB / MiB).
 - Gateway query failures appear as UNKNOWN; OFFLINE requires a confirmed inactive
   or failed gateway state.
 - No analytics uploads; local system probes and Hindsight HTTP health queries
-- OpenAI OAuth availability is read through the local `hermes auth list` command; only aggregate counts reach the widget (polled once per minute; an elapsed cooldown shown as `(ready to retry)` counts as available, matching the Hermes credential pool)
 
 ## Requirements
 
@@ -133,14 +132,13 @@ The hardware panels work independently of the AI integrations. Missing tools or 
 | Helper | Data source / configuration |
 |---|---|
 | [hermes_max_think.py](contents/code/hermes_max_think.py) | Local SQLite history under `~/.hermes`, including named profiles; standalone `--root` / `--db` overrides |
-| [hermes_openai_keys.py](contents/code/hermes_openai_keys.py) | `hermes auth list` via PATH or `~/.local/bin/hermes`; inherits `HERMES_HOME`; `HERMES_MONITOR_PROFILE` explicitly selects a named profile |
-| [ai_services_status.py](contents/code/ai_services_status.py) | User unit `hermes-gateway.service`, fixed `http://127.0.0.1:9177/health`, and aggregate OAuth counts |
+| [ai_services_status.py](contents/code/ai_services_status.py) | User unit `hermes-gateway.service`, and fixed `http://127.0.0.1:9177/health` |
 | [claude_usage.py](contents/code/claude_usage.py) | Read-only `GET https://api.anthropic.com/api/oauth/usage` (undocumented) with the Claude Code OAuth access token from `~/.claude/.credentials.json`. The token is never refreshed (that would rotate the refresh token and log out Claude Code); an expired token shows `Token abgelaufen` until Claude Code refreshes it. No model call, no usage cost |
 | [hindsight_observation_health.py](contents/code/hindsight_observation_health.py) | `HINDSIGHT_API_URL` (default `http://127.0.0.1:9177`) and `HINDSIGHT_HEALTH_BANK` (default `hermes`) |
 
 Environment overrides must be visible to the Plasma shell process, not just a terminal running a helper. `HINDSIGHT_API_URL` affects observation health only; the service status helper retains its fixed loopback endpoint. Overriding the API URL can cause remote HTTP requests. The observation helper reads paginated memory and scope data without invoking an LLM, and its migration timestamp/baselines are specific to the original `hermes` bank; reassess them for another installation.
 
-The widget needs no embedded API key, but Hermes OAuth monitoring requires an existing local auth store. Credential identifiers and labels are not shown by the helper. Keep local services and their access policies under your own control.
+The widget needs no embedded API key. Keep local services and their access policies under your own control.
 
 QML polling and panel integration live in [contents/ui/main.qml](contents/ui/main.qml); reusable chart calculations live in [monitor_logic.js](contents/code/monitor_logic.js).
 

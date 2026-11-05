@@ -17,10 +17,10 @@ for component in ('main.qml', 'ClaudeUsage.qml'):
 
 
 def test_all_helper_paths_are_covered():
-    assert len(SOURCES) == 10
+    assert len(SOURCES) == 9
     assert {row[1] for row in SOURCES} == {
         'disk_usage.py', 'hermes_max_think.py',
-        'hindsight_observation_health.py', 'hermes_openai_keys.py',
+        'hindsight_observation_health.py',
         'ai_services_status.py', 'gpu_telemetry.py', 'cpu_process_snapshot.py',
         'network_interface.py', 'network_counters.sh', 'claude_usage.py',
     }

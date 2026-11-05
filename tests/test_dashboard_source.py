@@ -399,15 +399,11 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'property int processCount: 0' in text
     assert 'property real hermesMaxThinkSeconds: 0' in text
     assert 'property string hermesMaxThinkService: ""' in text
-    assert 'property int openAiActiveKeys: -1' in text
-    assert 'property int openAiTotalKeys: -1' in text
     assert 'function fmtDuration(seconds)' in text
     assert 'id: processCountSource' in text
     assert 'set -- /proc/[0-9]*; echo $(($# - 1))' in text
     assert 'id: hermesThinkSource' in text
     assert 'hermes_max_think.py' in text
-    assert 'id: openAiKeysSource' in text
-    assert 'hermes_openai_keys.py' in text
     assert 'id: systemMetaGrid' in text
     assert 'columns: 2' in text and 'rows: 2' in text
     assert 'text: "LAST 1 MIN"' in text
@@ -417,14 +413,9 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'sessionLabel: "LÄNGSTE ANTWORT · 24 H"' in gateway
     assert 'root.fmtDuration(root.hermesMaxThinkSeconds)' in gateway
     assert 'id: systemMetaGrid' in text and 'ANTW. MAX24H' not in text
-    assert 'root.openAiActiveKeys + "/" + root.openAiTotalKeys + " SCHLÜSSEL"' in text
-    assert 'OPENAI 0AUTH' not in text
-    assert 'id: openAiOauthCard' in text
-    assert 'root.openAiOauthLabel()' in text
-    assert 'root.openAiOauthTone()' in text
-    assert 'function openAiOauthTone() { return root.serviceToneColor(root.openAiOauthState()) }' in text
+    assert 'id: openAiOauthCard' not in text
     assert 'font.pixelSize: 14' in text
-    assert 'Layout.preferredHeight: 214' in text
+    assert 'Layout.preferredHeight: 178' in text
 
 
 
@@ -617,9 +608,8 @@ def test_ai_services_precede_system_load_and_use_normalized_accessible_states():
     assert 'font.pixelSize: 11' not in text
 
 
-def test_oauth_state_still_labels_the_card_without_the_global_banner():
+def test_no_global_status_banner():
     text = source()
-    assert 'root.openAiOauthLabel()' in text
     assert text.count('root.statusLabel()') == 0
     assert 'id: telemetryStatus' not in text
 
@@ -628,8 +618,6 @@ def test_status_cards_use_symbols_and_quiet_healthy_borders():
     text = source()
     assert 'function serviceBorderColor(rawState)' in text
     assert text.count('border.color: root.serviceBorderColor(') == 2
-    assert 'border.color: root.openAiOauthBorderColor()' in text
-    assert 'function openAiOauthBorderColor()' in text
 
 
 def test_system_load_graph_plots_both_gpus_without_cpu_or_motion():
@@ -722,9 +710,9 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text
     assert 'elide: Text.ElideRight' in text
     assert 'height: 44' in text
-    assert 'Layout.preferredHeight: 214' in text
-    assert 'Layout.minimumHeight: 210' in text
-    assert 'id: openAiOauthCard' in text
+    assert 'Layout.preferredHeight: 178' in text
+    assert 'Layout.minimumHeight: 174' in text
+    assert 'id: openAiOauthCard' not in text
     # The HINDSIGHT OBS row was removed on request; VERDICHTUNG replaces it.
     assert 'id: obsHealthCard' not in text
     assert 'text: "HINDSIGHT OBS"' not in text
@@ -780,39 +768,19 @@ def test_removed_ollama_service_has_no_stale_references():
     assert 'ollama' not in AI_HELPER.read_text().lower()
 
 
-def test_openai_keys_source_resets_to_unknown_on_invalid_helper_output():
-    """A helper failure must override a previously valid count, not keep it stale."""
+def test_openai_oauth_row_is_removed_everywhere():
+    """The OPENAI OAUTH row (card, key poll, helper, state logic) is gone, not hidden."""
+    root = Path(__file__).parents[1]
+    assert not (root / 'contents/code/hermes_openai_keys.py').exists()
+    for rel in ('contents/ui/main.qml', 'contents/ui/ClaudeUsage.qml', 'contents/ui/MossControl.qml',
+                'contents/ui/QwenControl.qml', 'contents/code/monitor_logic.js',
+                'contents/code/ai_services_status.py'):
+        text = (root / rel).read_text().lower()
+        assert 'openai' not in text, rel
+        assert 'schlüssel' not in text, rel
+    # Block order without the row: service cards -> VERDICHTUNG -> CLAUDE.
     text = source()
-    block = text[text.index("id: openAiKeysSource"):text.index("id: aiServicesSource")]
-    assert 'buffer.trim().match(/^(-?' + chr(92) + 'd+)' + chr(92) + 's+(' + chr(92) + 'd+)$/' in block
-    assert 'if (Number(data["exit code"]) !== 0 || !match) {' in block
-    assert 'root.openAiActiveKeys = -1' in block
-    assert 'root.openAiTotalKeys = 0' in block
-    assert 'root.openAiActiveKeys = parseInt(match[1])' in block
-    assert 'root.openAiTotalKeys = parseInt(match[2])' in block
-
-
-def test_openai_keys_polls_again_while_availability_is_unknown():
-    text = source()
-    assert 'running: root.openAiActiveKeys < 0 || root.openAiTotalKeys < 0' in text
-    assert 'onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)' in text
-    assert text.count('onTriggered: openAiKeysSource.connectSource(openAiKeysSource.command)') == 2
-
-
-def test_ai_services_source_does_not_touch_oauth_counts():
-    text = source()
-    block = text[text.index("id: aiServicesSource"):text.index("id: gpuTelemetrySource")]
-    assert 'openai' not in block.lower()
-
-
-def test_oauth_label_and_state_cover_every_helper_failure_mode():
-    text = source()
-    label = text[text.index('function openAiOauthLabel()'):text.index('function openAiOauthTone()')]
-    assert '?/? SCHLÜSSEL' in label
-    logic = (Path(__file__).parents[1] / "contents/code/monitor_logic.js").read_text()
-    logic_block = logic[logic.index('function openAiOauthState('):logic.index('function openAiOauthSymbol(')]
-    assert 'active < 0 || total < 0' in logic_block
-    assert 'return "UNKNOWN"' in logic_block
+    assert text.index('id: obsCondenseCard') < text.index('id: claudeUsage')
 
 
 def test_hermes_live_panel_is_removed_everywhere():

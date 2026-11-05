@@ -64,9 +64,6 @@ def hindsight_status() -> ServiceStatus:
 def main() -> int:
     gateway = hermes_gateway_status()
     hindsight = hindsight_status()
-    # OAuth key availability is polled separately by the widget
-    # (hermes_openai_keys.py); running `hermes auth list` here every 15 s
-    # duplicated that work at ~0.5 s CPU per poll.
     payload = {
         "gateway": gateway.state,
         "hindsight": hindsight.state,

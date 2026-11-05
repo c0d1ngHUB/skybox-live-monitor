@@ -100,8 +100,8 @@ def test_row_is_wired_into_the_dashboard_and_reset_path():
     reset = text[text.index('    function resetObsHealth()'):text.index('    function gpuPowerText(')]
     assert "root.obsReferencedPct = -1" in reset and "root.obsAvgProofs = -1" in reset
     # Block order: service cards → HINDSIGHT VERDICHTUNG (directly under its
-    # card) → OPENAI OAUTH → CLAUDE, so the two external quotas sit together.
-    assert text.index('text: "HINDSIGHT"') < text.index("id: obsCondenseCard") < text.index("id: openAiOauthCard") < text.index("id: claudeUsage")
+    # card) → CLAUDE.
+    assert text.index('text: "HINDSIGHT"') < text.index("id: obsCondenseCard") < text.index("id: claudeUsage")
     # Healthy rows keep the quiet border; only an unreachable API colours it.
     assert 'border.color: root.obsHealthUnavailable ? root.warning : root.quietBorder' in text
     assert "id: obsHealthCard" not in text

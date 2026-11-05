@@ -15,11 +15,11 @@ console.log(JSON.stringify(m.normalizeServiceState(m.normalizeServiceState({json
     assert json.loads(subprocess.check_output(['node', '-e', js], text=True)) == state
 
 
-def test_healthy_oauth_uses_cyan_through_real_qml_function():
+def test_operational_state_uses_cyan_through_real_qml_function():
     source = (ROOT/'contents/ui/main.qml').read_text()
     function = 'function serviceToneColor(' + source.split('function serviceToneColor(', 1)[1].split('\n    }', 1)[0] + '\n}'
     js = f'''const MonitorLogic=require({json.dumps(str(ROOT/'contents/code/monitor_logic.js'))});
 const root={{cyan:'cyan',warning:'warning',critical:'critical',muted:'muted'}};
 {function}
-console.log(JSON.stringify(serviceToneColor(MonitorLogic.openAiOauthState(3,3))));'''
+console.log(JSON.stringify(serviceToneColor("OPERATIONAL")));'''
     assert json.loads(subprocess.check_output(['node', '-e', js], text=True)) == 'cyan'

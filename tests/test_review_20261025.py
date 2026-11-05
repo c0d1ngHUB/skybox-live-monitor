@@ -31,31 +31,9 @@ def qml_property(source_id, name):
     return json.loads(line)
 
 
-# --- OAuth availability -----------------------------------------------------
+# --- AI services poll -------------------------------------------------------
 
-AUTH_LIST = """openai-codex (4 credentials):
-  #1  acct-a               oauth   id=1449ff priority=0 device_code
-  #2  acct-b               oauth   id=3ee6cf priority=1 device_code rate-limited usage_limit_reached (429) (ready to retry) \u2190
-  #3  acct-c               oauth   id=cd334c priority=2 device_code rate-limited usage_limit_reached (429) (4m 10s left)
-  #4  acct-d               oauth   id=aa11bb priority=3 device_code auth failed invalid_grant (401) (re-auth may be required)
-"""
-
-
-def test_expired_cooldown_counts_as_available_like_the_hermes_pool():
-    keys = load('hermes_openai_keys')
-    assert keys.count_openai_credentials(AUTH_LIST) == (2, 4)
-
-
-def test_ready_to_retry_in_a_label_does_not_make_a_cooling_key_available():
-    keys = load('hermes_openai_keys')
-    output = ("openai-codex (1 credentials):\n"
-              "  #1  ready to retry       oauth   id=1449ff priority=0 device_code rate-limited (429) (2m left)\n")
-    assert keys.count_openai_credentials(output) == (0, 1)
-
-
-# --- AI services poll no longer runs `hermes auth list` ----------------------
-
-def test_service_poll_does_not_spawn_the_oauth_helper(monkeypatch, capsys):
+def test_service_poll_reports_only_gateway_and_hindsight(monkeypatch, capsys):
     ai = load('ai_services_status')
     calls = []
     monkeypatch.setattr(ai.subprocess, 'run', lambda command, *a, **k: calls.append(command))
@@ -64,22 +42,16 @@ def test_service_poll_does_not_spawn_the_oauth_helper(monkeypatch, capsys):
     assert ai.main() == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == {'gateway': 'running', 'hindsight': 'healthy'}
-    assert not any('hermes_openai_keys' in ' '.join(map(str, c)) for c in calls)
+    assert calls == []
 
 
-def test_service_payload_without_oauth_fields_is_accepted_and_keeps_oauth_counts():
+def test_service_payload_sets_gateway_and_hindsight_state():
     data = {'stdout': json.dumps({'gateway': 'running', 'hindsight': 'healthy'}), 'exit code': 0}
-    script = ("var root={hermesGatewayState:'UNKNOWN',hindsightState:'UNKNOWN',openAiActiveKeys:3,openAiTotalKeys:3,lastServiceTelemetryMs:0};"
+    script = ("var root={hermesGatewayState:'UNKNOWN',hindsightState:'UNKNOWN',lastServiceTelemetryMs:0};"
               "var buffer='',source='';function disconnectSource(){};" + qml_function('resetServices')
               + ';root.resetServices=resetServices;' + handler('aiServicesSource', 'gpuTelemetrySource')
-              + ';handle(' + json.dumps(data) + ');console.log(JSON.stringify([root.hermesGatewayState,root.hindsightState,root.openAiActiveKeys,root.openAiTotalKeys]));')
-    assert node(script) == ['RUNNING', 'HEALTHY', 3, 3]
-
-
-def test_service_reset_does_not_wipe_independently_polled_oauth_counts():
-    script = ("var root={hermesGatewayState:'RUNNING',hindsightState:'HEALTHY',openAiActiveKeys:3,openAiTotalKeys:3};"
-              + qml_function('resetServices') + ';resetServices();console.log(JSON.stringify([root.hermesGatewayState,root.openAiActiveKeys,root.openAiTotalKeys]));')
-    assert node(script) == ['UNKNOWN', 3, 3]
+              + ';handle(' + json.dumps(data) + ');console.log(JSON.stringify([root.hermesGatewayState,root.hindsightState]));')
+    assert node(script) == ['RUNNING', 'HEALTHY']
 
 
 # --- Fast GPU path and process count ----------------------------------------

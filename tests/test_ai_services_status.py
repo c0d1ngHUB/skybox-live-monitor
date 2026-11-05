@@ -65,18 +65,6 @@ def test_fetch_json_bypasses_proxy_environment(monkeypatch):
     assert proxy_requests == []
 
 
-def test_oauth_helper_reports_missing_executable_as_drift_signal(tmp_path, monkeypatch):
-    """A real PATH without `hermes` yields the helper's explicit drift signal, not a crash."""
-    import subprocess
-    empty_bin = tmp_path / "bin"
-    empty_bin.mkdir()
-    env = {"PATH": str(empty_bin), "HOME": str(tmp_path)}
-    helper = MODULE.with_name("hermes_openai_keys.py")
-    result = subprocess.run([sys.executable, str(helper)], env=env, capture_output=True, text=True, timeout=20)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "-1 0"
-
-
 def test_hindsight_status_accepts_live_healthy_payload():
     original = ai.fetch_json
     ai.fetch_json = lambda url: {"status": "healthy", "database": "connected"} if url.endswith("/health") else None
