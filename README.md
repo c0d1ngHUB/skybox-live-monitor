@@ -84,8 +84,9 @@ Memory figures use one unit family everywhere (GiB / MiB).
   in its tooltip. Stopping interrupts Qwen requests and restores Hindsight only;
   the decommissioned Nimble service is neither started nor probed.
 - Manual **MOSS-TTS on/off button** left of the Qwen button. MOSS is the `/voice` speech output; the button
-  starts and stops `hermes-gpu-scheduler.service` (idle: no VRAM; per voice reply MOSS loads briefly onto the
-  Blackwell). Stopping waits for a running voice job. While MOSS is off, `/voice` replies arrive as text only.
+  starts and stops `hermes-gpu-scheduler.service`. While it runs, MOSS stays loaded on the Blackwell (about
+  16.4 GiB; unloaded during a Qwen session and reloaded afterwards); stopping waits for a running voice job, ends
+  MOSS and frees the memory completely. While MOSS is off, `/voice` replies arrive as text only.
   See [MOSS control](docs/MOSS_CONTROL.md).
   Boot settings and gateway configuration are not changed.
 - Gateway query failures appear as UNKNOWN; OFFLINE requires a confirmed inactive

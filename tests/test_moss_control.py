@@ -61,6 +61,12 @@ if cmd == "stop":
         sys.stderr.write("Failed to stop hermes-gpu-scheduler.service: Access denied\\n")
         sys.exit(1)
     (D / "state").write_text("inactive")
+    # systemd ends the unit's control group: a fake MOSS child of the unit goes with it,
+    # unless the test simulates a survivor.
+    kill = D / "kill_on_stop"
+    if kill.exists() and not (D / "survivor").exists():
+        import shutil
+        shutil.rmtree(kill.read_text().strip(), ignore_errors=True)
     sys.exit(0)
 sys.exit(2)
 '''
@@ -74,6 +80,7 @@ class FakeScheduler:
         self.sched_state = "HINDSIGHT_ACTIVE"
         self.free_mib = 24035
         self.queue_len = 0
+        self.resident = None  # None: old scheduler without resident mode; else a "moss" dict
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -94,12 +101,17 @@ class FakeScheduler:
                 if self.path != "/status" or not (active and ready):
                     return self._send(503, {"ok": False})
                 busy = time.time() < float((outer.directory / "busy_until").read_text())
-                self._send(200, {
+                status = {
                     "ok": True, "version": "0.1.0",
                     "state": "MOSS_GENERATING" if busy else outer.sched_state,
                     "current_job": "job-1" if busy else None,
                     "queue_len": outer.queue_len, "uptime_s": 12.0,
-                    "gpu_free_mib": outer.free_mib, "model_loaded": True, "hold_enabled": True})
+                    "gpu_free_mib": outer.free_mib, "model_loaded": True, "hold_enabled": True}
+                if outer.resident is not None:
+                    moss = dict(outer.resident() if callable(outer.resident) else outer.resident)
+                    status.update({"moss_resident": True, "moss": moss,
+                                   "moss_loaded": moss.get("state") == "loaded"})
+                self._send(200, status)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_port}"
@@ -123,12 +135,17 @@ class Env:
                                                    directory=str(self.dir), unit=UNIT))
         systemctl.chmod(0o755)
         self.scheduler = FakeScheduler(self.dir)
+        empty_proc = tmp_path / "proc-empty"  # never the host's /proc: a real MOSS may run here
+        empty_proc.mkdir()
         self.env = {**os.environ,
                     "MOSS_SCHEDULER_URL": self.scheduler.url,
                     "MOSS_SYSTEMCTL": str(systemctl),
                     "MOSS_CONFIG": str(tmp_path / "scheduler-config.json"),
                     "MOSS_STATE_FILE": str(tmp_path / "scheduler-state.json"),  # absent: no recent job
-                    "MOSS_POLL": "0.1", "MOSS_START_WAIT": "5", "MOSS_STOP_WAIT": "5"}
+                    "MOSS_PROC_ROOT": str(empty_proc),
+                    "MOSS_NVIDIA_SMI": str(tmp_path / "no-nvidia-smi"),  # absent: no memory figure
+                    "MOSS_POLL": "0.1", "MOSS_START_WAIT": "5", "MOSS_STOP_WAIT": "5",
+                    "MOSS_LOAD_WAIT": "5", "MOSS_UNLOAD_WAIT": "1"}
 
     def set(self, name, value):
         (self.dir / name).write_text(str(value))
@@ -412,6 +429,101 @@ def test_stop_reports_a_systemctl_failure_and_the_real_state(moss):
     assert "Access denied" in out["error"]
 
 
+# --- resident mode (scheduler keeps MOSS loaded while the unit runs, since 2026-11-07) ----------
+
+LOADED = {"state": "loaded", "reason": "", "alive": True, "pid": 4242, "vram_mib": 17012}
+
+
+def resident_child(moss):
+    """A loaded MOSS child of the unit; the fake `systemctl stop` removes it like systemd."""
+    env = fake_proc(moss, SERVICE_ARGV)
+    moss.set("kill_on_stop", moss.tmp / "proc" / "4242")
+    return env
+
+
+def test_resident_status_reports_a_loaded_moss_as_idle_not_busy(moss):
+    moss.scheduler.resident = LOADED
+    moss.scheduler.free_mib = 7300  # MOSS itself holds the memory: that is no shortage
+    env = resident_child(moss)
+    rc, out, _ = moss.run("status", **env)
+    assert rc == 0 and out["mode"] == "on" and out["ready"] is True
+    assert out["resident"] is True and out["loaded"] is True
+    assert out["busy"] is False, "a loaded, idle MOSS is not a running voice reply"
+    assert out["blocker"] == ""
+    assert "geladen" in out["note"] and "16,6 GiB" in out["note"]
+
+
+def test_resident_status_names_the_qwen_wait(moss):
+    moss.scheduler.resident = {"state": "waiting", "reason": "qwen", "alive": False, "pid": None}
+    moss.scheduler.free_mib = 1200
+    rc, out, _ = moss.run("status")
+    assert rc == 0 and out["loaded"] is False and out["moss_state"] == "waiting"
+    assert out["moss_reason"] == "qwen" and "Qwen" in out["note"]
+
+
+def test_resident_status_without_api_still_counts_a_moss_child_as_busy(moss):
+    env = resident_child(moss)
+    _, out, _ = moss.run("status", MOSS_SCHEDULER_URL="http://127.0.0.1:9", **env)
+    assert out["busy"] is True and out["resident"] is False
+
+
+def test_resident_stop_unloads_and_confirms_the_freed_memory(moss):
+    moss.scheduler.resident = LOADED
+    env = resident_child(moss)
+    smi = moss.tmp / "nvidia-smi"
+    smi.write_text("#!/bin/sh\necho 'GPU-ad1c68f7-9555-3617-9230-04937ac158be, 3900'\n"
+                   "echo 'GPU-2bc81341-8b1a-3a2e-679b-7a2bb75c6d9e, 24045'\n")
+    smi.chmod(0o755)
+    rc, out, _ = moss.run("stop", MOSS_NVIDIA_SMI=str(smi), **env)
+    assert rc == 0 and out["ok"] is True and out["mode"] == "off"
+    assert moss.calls() == ["stop busy=0"], "a loaded, idle MOSS must not delay the stop"
+    assert not (moss.tmp / "proc" / "4242").exists()
+    assert "23,5 GiB frei" in out["note"]
+
+
+def test_resident_stop_reports_a_moss_process_that_survives(moss):
+    moss.scheduler.resident = LOADED
+    env = resident_child(moss)
+    moss.set("survivor", "1")
+    rc, out, _ = moss.run("stop", **env)
+    assert rc == 1 and out["ok"] is False and out["mode"] == "off"
+    assert "MOSS-Prozess läuft noch" in out["error"]
+
+
+def test_resident_start_waits_until_moss_is_loaded(moss):
+    moss.set("state", "inactive")
+    loaded_at = time.time() + 1.2
+    moss.scheduler.resident = lambda: LOADED if time.time() >= loaded_at else \
+        {"state": "loading", "reason": "", "alive": True, "pid": 4242}
+    rc, out, elapsed = moss.run("start")
+    assert rc == 0 and out["ok"] is True and out["loaded"] is True
+    assert elapsed >= 1.0, "start must not report success before MOSS is in memory"
+    assert out["note"] == "MOSS ist geladen und bereit."
+
+
+def test_resident_start_returns_with_the_reason_when_moss_must_wait(moss):
+    moss.set("state", "inactive")
+    moss.scheduler.resident = {"state": "waiting", "reason": "qwen", "alive": False, "pid": None}
+    rc, out, _ = moss.run("start")
+    assert rc == 0 and out["ok"] is True and out["loaded"] is False
+    assert "Qwen" in out["note"]
+
+
+def test_resident_start_reports_a_load_error(moss):
+    moss.set("state", "inactive")
+    moss.scheduler.resident = {"state": "error", "reason": "RuntimeError: CUDA out of memory",
+                               "alive": False, "pid": None}
+    rc, out, _ = moss.run("start")
+    assert rc == 1 and out["ok"] is False and "CUDA out of memory" in out["error"]
+
+
+def test_resident_start_gives_up_when_loading_never_ends(moss):
+    moss.set("state", "inactive")
+    moss.scheduler.resident = {"state": "loading", "reason": "", "alive": True, "pid": 4242}
+    rc, out, _ = moss.run("start", MOSS_LOAD_WAIT="1")
+    assert rc == 1 and "noch nicht geladen" in out["error"]
+
+
 # --- widget wiring --------------------------------------------------------------------------
 
 def test_main_places_the_moss_button_left_of_qwen_and_nimble_is_gone():
@@ -494,5 +606,23 @@ def test_moss_button_shows_the_helper_error_and_keeps_the_state(moss):
             verify(button.enabled)
             compare(control.mode, "on")
             verify(control.toolTipText.indexOf("Access denied") >= 0)
+        }''')
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_moss_button_says_when_moss_runs_but_is_not_loaded(moss):
+    moss.scheduler.resident = {"state": "loading", "reason": "", "alive": True, "pid": 4242}
+    result = run_qml(moss, '''
+        function test_not_loaded_labels() {
+            var button = findChild(control, "mossToggleButton")
+            tryCompare(control, "mossState", "loading", 10000)
+            compare(button.text, "◐ MOSS LÄDT …")
+            verify(button.enabled, "a click must still stop MOSS")
+            control.mossState = "waiting"; control.mossReason = "qwen"
+            compare(button.text, "◐ MOSS WARTET (QWEN)")
+            control.mossState = "error"; control.mossReason = "CUDA out of memory"
+            compare(button.text, "▲ MOSS FEHLER · STOPPEN")
+            control.mossState = "loaded"; control.loaded = true
+            compare(button.text, "● MOSS STOPPEN")
         }''')
     assert result.returncode == 0, result.stdout + result.stderr

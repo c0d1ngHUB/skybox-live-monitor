@@ -2,9 +2,11 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import org.kde.plasma.plasma5support as PlasmaSupport
 
-// MOSS-TTS (the /voice speech output) on/off. The scheduler service loads MOSS onto the
-// Blackwell for one voice reply at a time, so "on" costs no idle VRAM; "off" stops the
-// service and /voice replies fall back to text. All state logic lives in moss_control.py.
+// MOSS-TTS (the /voice speech output) on/off. While the scheduler service runs it keeps MOSS
+// loaded on the Blackwell (resident mode, ~16.6 GB); during a Qwen session or under memory
+// pressure it unloads MOSS and loads it again afterwards. "Off" stops the service, frees the
+// memory completely and /voice replies fall back to text. All state logic lives in
+// moss_control.py.
 Item {
     id: control
     implicitWidth: 180
@@ -24,6 +26,11 @@ Item {
     property string blocker: ""
     property string note: ""
     property string serviceState: "unknown"
+    // Resident mode (scheduler since 2026-11-07): is MOSS actually in the Blackwell's memory?
+    property bool resident: false
+    property bool loaded: false
+    property string mossState: ""
+    property string mossReason: ""
     property bool actionBusy: false
     property string errorMessage: ""
     property string activeOperation: ""
@@ -34,17 +41,21 @@ Item {
     property double lastStatusMs: 0
     readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("../code/moss_control.py").toString().replace(/^file:\/\//, ""))
     readonly property bool running: mode === "on"
+    // Running, but MOSS is not in memory (loading, waiting for Qwen/memory, load error).
+    readonly property bool notLoaded: running && resident && !loaded
+    readonly property bool loadError: notLoaded && mossState === "error"
     readonly property bool canToggle: !actionBusy && (mode === "on" || mode === "off")
     // Same state vocabulary as the service rows and the Qwen button.
     readonly property string stateSymbol: actionBusy ? "◐"
         : mode === "unknown" ? "?"
-        : errorMessage.length ? "▲"
+        : errorMessage.length || loadError ? "▲"
+        : notLoaded ? "◐"
         : running ? "●" : "○"
     readonly property string toolTipText: (mode === "unknown" ? "MOSS-Zustand unbekannt." : note)
         + (blocker.length ? "\n" + blocker + "." : "")
         + (errorMessage.length ? "\n\nFehler: " + errorMessage : "")
-        + "\n\nMOSS ist die Sprachausgabe für /voice. Beenden stoppt den Scheduler samt MOSS (wartet auf eine laufende Sprachantwort); Sprachantworten kommen dann nur als Text."
-        + "\nStarten bringt MOSS zurück. Pro Sprachantwort lädt MOSS kurz auf die Blackwell (ca. 17 GB) und gibt sie danach wieder frei."
+        + "\n\nMOSS ist die Sprachausgabe für /voice. Solange MOSS läuft, bleibt es auf der Blackwell geladen (ca. 16,4 GiB) und antwortet ohne Ladezeit; während einer Qwen-Sitzung wird es entladen und danach automatisch wieder geladen."
+        + "\nBeenden stoppt den Dienst samt MOSS und gibt den Grafikspeicher vollständig frei (wartet auf eine laufende Sprachantwort); Sprachantworten kommen dann nur als Text. Starten lädt MOSS wieder."
 
     function beginCommand(operation) {
         if (activeCommand.length) executable.disconnectSource(activeCommand)
@@ -90,6 +101,10 @@ Item {
         blocker = valid ? String(payload.blocker || "") : ""
         note = valid ? String(payload.note || "") : ""
         serviceState = valid ? String(payload.service || "") : "unknown"
+        resident = valid && payload.resident === true
+        loaded = valid && payload.loaded === true
+        mossState = valid ? String(payload.moss_state || "") : ""
+        mossReason = valid ? String(payload.moss_reason || "") : ""
         lastStatusMs = valid ? Date.now() : 0
         if (completedOperation !== "status") {
             if (Number(data["exit code"]) !== 0 || !valid || payload.ok !== true) {
@@ -118,7 +133,12 @@ Item {
             var word
             if (control.actionBusy) word = control.activeOperation === "stop" ? "stoppt …" : "startet …"
             else if (control.mode === "unknown") word = "unbekannt"
-            else word = (control.errorMessage.length ? "Fehler · " : "") + (control.running ? "stoppen" : "starten")
+            else if (control.errorMessage.length) word = "Fehler · " + (control.running ? "stoppen" : "starten")
+            // Running but not in memory: say so instead of "stoppen" (a click still stops MOSS).
+            else if (control.notLoaded && control.mossState === "loading") word = "lädt …"
+            else if (control.loadError) word = "Fehler · stoppen"
+            else if (control.notLoaded) word = control.mossReason === "qwen" ? "wartet (Qwen)" : "wartet"
+            else word = control.running ? "stoppen" : "starten"
             return control.stateSymbol + " MOSS " + word.toUpperCase()
         }
         onClicked: control.toggleMoss()
@@ -127,8 +147,8 @@ Item {
             color: toggleButton.down ? Qt.lighter(control.surface, 1.4)
                 : toggleButton.hovered ? Qt.lighter(control.surface, 1.2) : control.surface
             border.width: toggleButton.activeFocus ? 2 : 1
-            border.color: control.errorMessage.length ? control.warning
-                : control.running || toggleButton.activeFocus ? control.accent : control.muted
+            border.color: control.errorMessage.length || control.loadError ? control.warning
+                : (control.running && !control.notLoaded) || toggleButton.activeFocus ? control.accent : control.muted
             opacity: toggleButton.enabled || control.actionBusy ? 1 : 0.65
         }
         contentItem: Text {
@@ -136,8 +156,8 @@ Item {
             font.family: "DejaVu Sans Mono"
             font.pixelSize: 12
             font.bold: true
-            color: control.errorMessage.length ? control.warning
-                : control.running ? control.accent : control.ink
+            color: control.errorMessage.length || control.loadError ? control.warning
+                : control.running && !control.notLoaded ? control.accent : control.ink
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
