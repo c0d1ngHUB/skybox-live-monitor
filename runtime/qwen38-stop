@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop Qwen3.8 (NInfer engine) and hand the Blackwell back to the Hindsight
-# resident backend (nimble-v3-serve; model residency follows nimble-ctl auto/hold).
+# Hindsight runs on Ollama Cloud; no local resident backend is restored.
 #
 # Order matters. The priority gateway remains running: Hindsight reaches its LLM
 # exclusively through its :11438 listener. Once Qwen is stopped, the gateway
@@ -47,37 +47,10 @@ if (( ! restore_hindsight )); then
   exit 0
 fi
 
-# Restore only the resident service; never revive the decommissioned ollama-nimble.
-if ! systemctl --user start nimble-v3-serve.service; then
-  echo "Hindsight backend could not be restored after Qwen stop." >&2
-  exit 75
-fi
-
 rc=0
-# This is a handback: Qwen is down while the priority gateway and the Hindsight
-# Ollama backend are expected to be up.
 for unit in qwen38-ninfer.service; do
   state=$(systemctl --user is-active "$unit")
   printf '%-26s %s\n' "$unit" "$state"
   [[ "$state" == inactive ]] || rc=75
 done
-state=$(systemctl --user is-active qwen38-gateway.service)
-printf '%-26s %s\n' qwen38-gateway.service "$state"
-if [[ "$state" != active ]] && (( rc == 0 )); then rc=1; fi
-for unit in nimble-v3-serve.service; do
-  state=$(systemctl --user is-active "$unit")
-  printf '%-26s %s\n' "$unit" "$state"
-  [[ "$state" == active ]] || rc=75
-done
-
-for port in 11441; do
-  curl -fsS --max-time 10 --retry 10 --retry-delay 1 --retry-connrefused --retry-max-time 30 "http://127.0.0.1:${port}/api/ps" 2>/dev/null | python3 -c '
-import json, sys
-for model in json.load(sys.stdin)["models"]:
-    size, vram = model["size"], model["size_vram"]
-    where = "full GPU" if size == vram else "SPLIT vram=%d" % vram
-    print("  %-12s %d MiB  %s" % (model["name"], size // 1048576, where))
-' || rc=75
-done
-
 exit "$rc"
