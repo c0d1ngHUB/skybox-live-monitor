@@ -772,7 +772,7 @@ def test_openai_oauth_row_is_removed_everywhere():
     """The OPENAI OAUTH row (card, key poll, helper, state logic) is gone, not hidden."""
     root = Path(__file__).parents[1]
     assert not (root / 'contents/code/hermes_openai_keys.py').exists()
-    for rel in ('contents/ui/main.qml', 'contents/ui/ClaudeUsage.qml', 'contents/ui/MossControl.qml',
+    for rel in ('contents/ui/main.qml', 'contents/ui/ClaudeUsage.qml',
                 'contents/ui/QwenControl.qml', 'contents/code/monitor_logic.js',
                 'contents/code/ai_services_status.py'):
         text = (root / rel).read_text().lower()
@@ -808,3 +808,16 @@ if __name__ == "__main__":
             failures.append(f"FAIL {test.__name__}: {error}")
     print("\n".join(failures))
     raise SystemExit(bool(failures))
+
+
+def test_moss_button_is_removed_everywhere():
+    """MOSS-TTS is uninstalled: its button, helper and docs are gone, not hidden."""
+    root = Path(__file__).parents[1]
+    for rel in ('contents/ui/MossControl.qml', 'contents/code/moss_control.py', 'docs/MOSS_CONTROL.md'):
+        assert not (root / rel).exists(), rel
+    for path in sorted((root / 'contents').rglob('*')):
+        if path.suffix in ('.qml', '.js', '.py'):
+            text = path.read_text().lower()
+            assert 'moss' not in text, path.name
+            assert 'gpu-scheduler' not in text, path.name
+    assert 'moss' not in (root / 'README.md').read_text().lower()
