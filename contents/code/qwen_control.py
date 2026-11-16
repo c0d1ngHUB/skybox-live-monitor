@@ -146,29 +146,6 @@ def handoff_settled() -> bool:
             and container_state() == "")
 
 
-def prior_backend_active() -> bool | None:
-    """Snapshot rollback intent before the start script can release the GPU."""
-    try:
-        result = subprocess.run(
-            ["systemctl", "--user", "is-active", "nimble-v3-serve.service"],
-            capture_output=True, text=True, timeout=PROBE_TIMEOUT, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    state = result.stdout.strip()
-    if result.returncode in {0, 3}:
-        if state in {"active", "activating", "reloading"}:
-            return True
-        if state in {"inactive", "failed"}:
-            return False
-    # Exit 4 is "no such unit": a backend that is no longer installed was not
-    # running, so a failed start has nothing to restore. Without this a removed
-    # backend unit blocks every Qwen start (2026-11-02, nimble-v3-serve).
-    if result.returncode == 4 and state == "inactive":
-        return False
-    return None
-
-
 def group_is_live(pgid: int) -> bool:
     """Linux zombies cannot perform work; wait for every other group member."""
     for entry in Path("/proc").iterdir():
@@ -224,11 +201,11 @@ def execute_script(script: Path, timeout: float, arguments: tuple[str, ...] = ()
     return subprocess.CompletedProcess([str(script), *arguments], process.returncode, stdout, stderr)
 
 
-def write_barrier(path: Path, processes_settled: bool, restore_hindsight: bool = True) -> None:
+def write_barrier(path: Path, processes_settled: bool) -> None:
     """Publish before dispatch so an interrupted controller also fails closed."""
     temporary = path.with_suffix(".tmp")
     with temporary.open("w") as stream:
-        json.dump({"processes_settled": processes_settled, "restore_hindsight": restore_hindsight}, stream)
+        json.dump({"processes_settled": processes_settled}, stream)
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(path)
@@ -244,17 +221,15 @@ def reconcile(barrier: Path, stop_script: Path) -> bool:
             return False
         if not stop_script.is_file() or not os.access(stop_script, os.X_OK):
             return False
-        restore_hindsight = record.get("restore_hindsight", True)
-        if not isinstance(restore_hindsight, bool):
-            return False
-        write_barrier(barrier, False, restore_hindsight)
+        # Markers written by older versions may still carry "restore_hindsight";
+        # there is no local Hindsight backend any more, so that field is ignored.
+        write_barrier(barrier, False)
         try:
-            result = execute_script(stop_script, RECOVERY_TIMEOUT,
-                                    () if restore_hindsight else ("--no-restore",))
+            result = execute_script(stop_script, RECOVERY_TIMEOUT)
         except (ScriptLaunchError, subprocess.TimeoutExpired):
-            write_barrier(barrier, True, restore_hindsight)
+            write_barrier(barrier, True)
             return False
-        write_barrier(barrier, True, restore_hindsight)
+        write_barrier(barrier, True)
         if result.returncode != 0 or not handoff_settled():
             return False
         barrier.unlink()
@@ -289,25 +264,22 @@ def run_action(action: str) -> dict:
 
             if barrier.exists() and not reconcile(barrier, stop_script):
                 return recovery_error("Qwen-Wiederherstellung nicht abgeschlossen; neue Umschaltung gesperrt. Bei unbekanntem Prozessabschluss ist eine manuelle Prüfung erforderlich.")
-            restore_hindsight = prior_backend_active() if action == "start" else True
-            if restore_hindsight is None:
-                return outcome(False, "Vorheriger Hindsight-Zustand nicht lesbar; Qwen-Start ohne Änderung abgebrochen.")
-            write_barrier(barrier, False, restore_hindsight)
+            write_barrier(barrier, False)
             try:
                 result = execute_script(script, CONTROL_TIMEOUT)
             except ScriptLaunchError as error:
                 barrier.unlink()
                 return outcome(False, f"Qwen-Skript konnte nicht ausgeführt werden: {error}")
             except subprocess.TimeoutExpired:
-                write_barrier(barrier, True, restore_hindsight)
+                write_barrier(barrier, True)
                 if not reconcile(barrier, stop_script):
                     return recovery_error("Zeitlimit erreicht; Qwen-Wiederherstellung nicht abgeschlossen, Umschaltung gesperrt.")
-                return outcome(False, "Zeitlimit bei Qwen-Umschaltung erreicht; Qwen gestoppt und Übergabe wiederhergestellt.")
+                return outcome(False, "Zeitlimit bei Qwen-Umschaltung erreicht; Qwen gestoppt und aufgeräumt.")
             except (OSError, subprocess.SubprocessError) as error:
                 # Keep the pre-dispatch barrier: group completion is uncertain.
                 return recovery_error(f"Qwen-Skript konnte nicht sicher abgeschlossen werden; Wiederherstellung erforderlich: {error}")
             if result.returncode == RECOVERY_REQUIRED_EXIT:
-                write_barrier(barrier, True, restore_hindsight)
+                write_barrier(barrier, True)
                 detail = (result.stderr or result.stdout or "Keine weiteren Angaben.").strip()[-1600:]
                 return recovery_error(f"Qwen-Wiederherstellung nicht abgeschlossen; Umschaltung gesperrt: {detail}")
             barrier.unlink()
