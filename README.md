@@ -81,8 +81,8 @@ Memory figures use one unit family everywhere (GiB / MiB).
   still ON, and calls the existing `~/.local/bin/qwen38-start` / `qwen38-stop`
   scripts for the Blackwell GPU handoff. The button is disabled while switching
   or when status is unknown; failures are visible on the button and explained
-  in its tooltip. Stopping interrupts Qwen requests and restores Hindsight only;
-  the decommissioned Nimble service is neither started nor probed.
+  in its tooltip. Stopping interrupts Qwen requests and frees the GPU; Hindsight
+  runs on Ollama Cloud, so no local backend is restored, started or probed.
   Boot settings and gateway configuration are not changed.
 - Gateway query failures appear as UNKNOWN; OFFLINE requires a confirmed inactive
   or failed gateway state.

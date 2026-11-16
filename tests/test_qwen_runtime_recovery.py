@@ -17,9 +17,9 @@ def runtime_script(name):
     return versioned
 
 
-def run_start(tmp_path, *, failure, backend='active', engine='inactive', controller_timeout=None, monkeypatch=None):
+def run_start(tmp_path, *, failure, engine='inactive', controller_timeout=None, monkeypatch=None):
     state = tmp_path / 'state.json'
-    state.write_text(json.dumps({'engine': engine, 'backend': backend, 'gateway': 'active',
+    state.write_text(json.dumps({'engine': engine, 'gateway': 'active',
                                  'failure': failure, 'calls': []}))
     bindir = tmp_path / 'bin'
     bindir.mkdir()
@@ -30,21 +30,18 @@ from pathlib import Path
 p=Path({str(state)!r});s=json.loads(p.read_text());args=sys.argv[1:]
 verb=next((a for a in args if a in ('is-active','start','stop','status','show')),None)
 unit=next((a for a in args if a.endswith('.service')),'')
-key={{'qwen38-ninfer.service':'engine','nimble-v3-serve.service':'backend','qwen38-gateway.service':'gateway'}}.get(unit)
+key={{'qwen38-ninfer.service':'engine','qwen38-gateway.service':'gateway'}}.get(unit)
 s['calls'].append([verb,unit]);rc=0
 if verb=='is-active':
  value=s.get(key,'unknown')
- if key=='backend' and s['failure']=='snapshot':value='unknown'
  print(value);rc=0 if value=='active' else 3
 elif verb=='show':
  print('LoadState=loaded\\nActiveState='+s.get(key,'unknown')+'\\nSubState=dead\\nJob=0')
 elif verb=='start':
  if key=='engine' and s['engine']!='active':
-  s['backend']='inactive' # Simulate successful ExecStartPre releasing Blackwell.
   s['engine']='failed' if s['failure']=='engine' else 'active'
   if s['failure']=='engine':rc=7
  elif key=='gateway' and s['failure']=='gateway':rc=8
- elif key=='backend' and s['failure']=='restore':rc=9
  elif key:s[key]='active'
 elif verb=='stop':
  if s['failure']=='stop':rc=10
@@ -57,7 +54,7 @@ p.write_text(json.dumps(s));sys.exit(rc)
 import json,sys
 from pathlib import Path
 s=json.loads(Path({str(state)!r}).read_text())
-if any('/props' in a for a in sys.argv) and s['failure'] in ('readiness','stop','restore','container','docker'):sys.exit(22)
+if any('/props' in a for a in sys.argv) and s['failure'] in ('readiness','stop','container','docker'):sys.exit(22)
 print('{{"models":[]}}')
 ''')
     curl.chmod(0o755)
@@ -87,6 +84,11 @@ if s['engine']=='active' or s['failure']=='container':print('running')
     return result, json.loads(state.read_text())
 
 
+def no_local_backend_touched(calls):
+    """Hindsight runs on Ollama Cloud: only the Qwen engine and gateway exist."""
+    return all(unit in ('', 'qwen38-ninfer.service', 'qwen38-gateway.service') for _verb, unit in calls)
+
+
 def load_controller(timeout):
     spec=importlib.util.spec_from_file_location('recovery_controller',ROOT/'contents/code/qwen_control.py')
     helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
@@ -95,59 +97,46 @@ def load_controller(timeout):
 
 
 @pytest.mark.parametrize('failure', ['engine', 'readiness', 'gateway'])
-def test_failed_start_restores_previously_active_backend_after_engine_is_stopped(tmp_path, failure):
+def test_failed_start_stops_the_engine_and_touches_no_other_backend(tmp_path, failure):
     result, state = run_start(tmp_path, failure=failure)
-    assert result.returncode != 0
-    assert state['backend'] == 'active', result.stderr
+    assert result.returncode not in (0, 75), result.stderr
     assert state['engine'] == 'inactive'
-    stop = state['calls'].index(['stop', 'qwen38-ninfer.service'])
-    restore = state['calls'].index(['start', 'nimble-v3-serve.service'])
-    assert stop < restore
+    assert ['stop', 'qwen38-ninfer.service'] in state['calls']
+    assert no_local_backend_touched(state['calls']), state['calls']
 
 
-def test_failed_start_preserves_previously_inactive_backend(tmp_path):
-    result, state = run_start(tmp_path, failure='engine', backend='inactive')
-    assert result.returncode != 0
-    assert state['backend'] == 'inactive'
-    assert ['start', 'nimble-v3-serve.service'] not in state['calls']
-    assert state['engine'] == 'inactive'
-
-
-def test_rollback_does_not_restore_backend_until_engine_stop_succeeds(tmp_path):
+def test_rollback_reports_an_unsettled_engine_stop(tmp_path):
     result, state = run_start(tmp_path, failure='stop')
-    assert result.returncode != 0
+    assert result.returncode == 75
     assert state['engine'] == 'active'
     assert ['stop', 'qwen38-ninfer.service'] in state['calls']
-    assert ['start', 'nimble-v3-serve.service'] not in state['calls']
-    assert 'recovery' in result.stderr.lower() or 'rollback' in result.stderr.lower()
+    assert 'rollback' in result.stderr.lower()
 
 
-def test_failed_restore_is_visible_in_original_start_error(tmp_path):
-    result, state = run_start(tmp_path, failure='restore')
-    assert result.returncode != 0
-    assert state['engine'] == 'inactive'
-    assert ['start', 'nimble-v3-serve.service'] in state['calls']
-    assert 'recovery' in result.stderr.lower() or 'rollback' in result.stderr.lower()
-
-
-@pytest.mark.parametrize('failure', ['stop','restore','container','docker'])
+@pytest.mark.parametrize('failure', ['stop','container','docker'])
 def test_unsettled_start_cleanup_has_distinct_recovery_exit(tmp_path,failure):
     result,state=run_start(tmp_path,failure=failure)
     assert result.returncode==75
+    assert no_local_backend_touched(state['calls']), state['calls']
 
 
-@pytest.mark.parametrize('backend', ['active','inactive'])
-def test_controller_timeout_preserves_prior_backend_state(tmp_path,monkeypatch,backend):
-    result,state,helper,path=run_start(tmp_path,failure='readiness',backend=backend,
+def test_start_script_has_no_local_hindsight_backend_logic():
+    source = runtime_script('qwen38-start').read_text()
+    for stale in ('nimble', 'restore_hindsight', 'gpt-oss', 'Hindsight not reloaded'):
+        assert stale not in source, stale
+
+
+def test_controller_timeout_stops_engine_and_clears_barrier(tmp_path,monkeypatch):
+    result,state,helper,path=run_start(tmp_path,failure='readiness',
         controller_timeout=0.4,monkeypatch=monkeypatch)
     assert result['ok'] is False
     assert state['engine']=='inactive'
-    assert state['backend']==backend
     assert not helper.recovery_barrier().exists()
+    assert no_local_backend_touched(state['calls']), state['calls']
 
 
-def test_retry_after_failed_timeout_cleanup_retains_original_off_policy(tmp_path,monkeypatch):
-    first,state,helper,path=run_start(tmp_path,failure='stop',backend='inactive',
+def test_retry_after_failed_timeout_cleanup_reconciles_before_next_start(tmp_path,monkeypatch):
+    first,state,helper,path=run_start(tmp_path,failure='stop',
         controller_timeout=0.4,monkeypatch=monkeypatch)
     assert first['state']=='unknown'
     assert helper.recovery_barrier().exists()
@@ -157,32 +146,39 @@ def test_retry_after_failed_timeout_cleanup_retains_original_off_policy(tmp_path
     state=json.loads(path.read_text())
     assert result['ok'] is False
     assert state['engine']=='inactive'
-    assert state['backend']=='inactive'
-    assert ['start','nimble-v3-serve.service'] not in state['calls']
+    assert not fresh.recovery_barrier().exists()
+    assert no_local_backend_touched(state['calls']), state['calls']
+
+
+@pytest.mark.parametrize('legacy_restore', [True, False])
+def test_marker_from_previous_version_is_reconciled_without_restore_flag(tmp_path,monkeypatch,legacy_restore):
+    """Older controllers stored restore_hindsight and passed --no-restore."""
+    _,state,helper,path=run_start(tmp_path,failure='readiness',
+        controller_timeout=0.4,monkeypatch=monkeypatch)
+    barrier=helper.recovery_barrier()
+    barrier.write_text(json.dumps({'processes_settled':True,'restore_hindsight':legacy_restore}))
+    state['failure']='none';state['engine']='active';path.write_text(json.dumps(state))
+    result=load_controller(5).run_action('stop')
+    assert result['ok'] is True, result
+    assert not barrier.exists()
+    assert json.loads(path.read_text())['engine']=='inactive'
 
 
 @pytest.mark.parametrize('failure', ['container','docker'])
-def test_rollback_does_not_reload_backend_without_confirmed_container_cleanup(tmp_path, failure):
+def test_rollback_without_confirmed_container_cleanup_is_reported(tmp_path, failure):
     result,state=run_start(tmp_path,failure=failure)
-    assert result.returncode != 0
-    assert ['start','nimble-v3-serve.service'] not in state['calls']
-    assert 'recovery' in result.stderr.lower() or 'rollback' in result.stderr.lower()
-
-
-def test_unreadable_previous_backend_state_prevents_any_mutation(tmp_path):
-    result, state = run_start(tmp_path, failure='snapshot')
-    assert result.returncode != 0
-    assert not any(action in ('start','stop') for action,unit in state['calls'])
+    assert result.returncode == 75
+    assert 'rollback' in result.stderr.lower()
 
 
 def test_idempotent_start_failure_preserves_existing_qwen_session(tmp_path):
-    result, state = run_start(tmp_path, failure='gateway', backend='inactive', engine='active')
+    result, state = run_start(tmp_path, failure='gateway', engine='active')
     assert result.returncode != 0
     assert state['engine'] == 'active'
     assert ['stop', 'qwen38-ninfer.service'] not in state['calls']
 
 
-def test_stop_never_reloads_hindsight_after_unsettled_engine_stop(tmp_path):
+def test_unsettled_engine_stop_is_a_recovery_exit(tmp_path):
     calls = tmp_path/'calls'
     bindir = tmp_path/'bin'
     bindir.mkdir()
@@ -197,12 +193,12 @@ def test_stop_never_reloads_hindsight_after_unsettled_engine_stop(tmp_path):
     curl.chmod(0o755)
     result = subprocess.run(['/bin/bash',str(runtime_script('qwen38-stop'))], capture_output=True,text=True,
         timeout=10,env={**os.environ,'PATH':str(bindir)+os.pathsep+os.environ['PATH']})
-    assert result.returncode != 0
-    assert 'start nimble-v3-serve.service' not in calls.read_text()
+    assert result.returncode == 75
+    assert 'nimble' not in calls.read_text()
 
 
 @pytest.mark.parametrize('docker_output,docker_exit', [('running',0),('',1)])
-def test_stop_requires_confirmed_container_absence_before_hindsight_reload(tmp_path,docker_output,docker_exit):
+def test_stop_requires_confirmed_container_absence(tmp_path,docker_output,docker_exit):
     calls=tmp_path/'calls';bindir=tmp_path/'bin';bindir.mkdir()
     ctl=bindir/'systemctl'
     ctl.write_text(f'#!{sys.executable}\nimport sys\nfrom pathlib import Path\n'
@@ -213,8 +209,8 @@ def test_stop_requires_confirmed_container_absence_before_hindsight_reload(tmp_p
     curl=bindir/'curl';curl.write_text('#!/bin/sh\nprintf \'{"models":[]}\\n\'\n');curl.chmod(0o755)
     result=subprocess.run(['/bin/bash',str(runtime_script('qwen38-stop'))],capture_output=True,text=True,timeout=10,
         env={**os.environ,'PATH':str(bindir)+os.pathsep+os.environ['PATH']})
-    assert result.returncode != 0
-    assert 'start nimble-v3-serve.service' not in calls.read_text()
+    assert result.returncode == 75
+    assert 'nimble' not in calls.read_text()
 
 
 def test_gateway_error_cannot_hide_an_unsettled_unit_recovery_result(tmp_path):
@@ -228,3 +224,38 @@ def test_gateway_error_cannot_hide_an_unsettled_unit_recovery_result(tmp_path):
     result=subprocess.run(['/bin/bash',str(runtime_script('qwen38-stop'))],capture_output=True,text=True,timeout=10,
         env={**os.environ,'PATH':str(bindir)+os.pathsep+os.environ['PATH']})
     assert result.returncode==75
+
+
+
+def _stop_with(tmp_path, *, gateway, args=()):
+    calls=tmp_path/'calls';bindir=tmp_path/'bin';bindir.mkdir()
+    ctl=bindir/'systemctl'
+    ctl.write_text(f'#!{sys.executable}\nimport sys\nfrom pathlib import Path\n'
+        +f'with Path({str(calls)!r}).open("a") as f:f.write(" ".join(sys.argv[1:])+"\\n")\n'
+        +'if "is-active" in sys.argv:print("inactive" if "qwen38-ninfer.service" in sys.argv else '+repr(gateway)+')\n')
+    ctl.chmod(0o755)
+    docker=bindir/'docker';docker.write_text('#!/bin/sh\nexit 0\n');docker.chmod(0o755)
+    result=subprocess.run(['/bin/bash',str(runtime_script('qwen38-stop')),*args],capture_output=True,text=True,
+        timeout=10,env={**os.environ,'PATH':str(bindir)+os.pathsep+os.environ['PATH']})
+    return result,(calls.read_text() if calls.exists() else '')
+
+
+def test_stop_settles_engine_and_reports_gateway(tmp_path):
+    result,calls=_stop_with(tmp_path,gateway='active')
+    assert result.returncode==0, result.stderr
+    assert 'qwen38-ninfer.service      inactive' in result.stdout
+    assert 'qwen38-gateway.service     active' in result.stdout
+    assert 'nimble' not in calls and 'hindsight' not in calls.lower()
+
+
+def test_inactive_gateway_is_warned_but_does_not_block_recovery(tmp_path):
+    result,_=_stop_with(tmp_path,gateway='inactive')
+    assert result.returncode==0
+    assert 'qwen38-gateway.service is inactive' in result.stderr
+
+
+@pytest.mark.parametrize('args', [('--no-restore',), ('extra',)])
+def test_stop_rejects_arguments_without_touching_units(tmp_path,args):
+    result,calls=_stop_with(tmp_path,gateway='active',args=args)
+    assert result.returncode==64
+    assert calls==''

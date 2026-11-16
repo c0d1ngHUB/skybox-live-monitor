@@ -78,5 +78,5 @@ def test_qwen38_stop_targets_the_ninfer_unit(tmp_path):
     commands = _commands(calls)
     assert any("stop" in c and "qwen38-ninfer.service" in c for c in commands), commands
     assert not any("qwen38-llama-server.service" in c for c in commands), commands
-    assert any("nimble-v3-serve.service" in c and "start" in c for c in commands), commands
+    assert not any("nimble" in arg for c in commands for arg in c), commands
     assert result.returncode == 0, result.stdout + result.stderr

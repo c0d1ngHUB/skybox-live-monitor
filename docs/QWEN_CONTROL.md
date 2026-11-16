@@ -13,7 +13,7 @@ The symbol is the same state vocabulary as the service rows.
 - A sleeping Qwen server is still ON: its session reservation is not released until the server is stopped.
 - Actions disable the button, use a per-user process lock and return verified service state. An active unit also requires a confirmed running NInfer container; Docker query failures produce UNKNOWN. Unique executable-source request IDs discard disconnected/stale completions before buffer mutation.
 - The priority gateway remains active when Qwen is OFF. Boot settings and model configuration are not modified.
-- Stopping interrupts Qwen requests and restores only the resident service `nimble-v3-serve.service` as of the versioned `runtime/` scripts (since 2026-11-01). Nimble was decommissioned on 2026-11-02 and the installed `~/.local/bin` copies no longer restore it; `runtime/` has not been synced to that yet. The old `ollama-nimble` (:11440) is never started, checked or probed.
+- Stopping interrupts Qwen requests and frees the Blackwell; nothing else is restored. Hindsight runs on Ollama Cloud, so neither `nimble-v3-serve` nor the older `ollama-nimble` (:11440) is started, checked or probed. The versioned `runtime/` scripts and the installed `~/.local/bin` copies match.
 
 ## Engine: NInfer Docker server (switch 2026-10-12)
 
@@ -67,13 +67,11 @@ systemd unit; they do not load the production model.
 
 ### Whole-start rollback and controller timeouts
 
-The start script records whether Hindsight's backend was active before the
-attempt. If a new Qwen engine start, readiness check or gateway start fails, it
-performs a blocking engine stop and verifies that the container has disappeared
-before restoring that previously active backend. A backend deliberately left
-inactive is not started by rollback. Retrying an already-running Qwen session
-does not stop that existing session on a gateway-only error. Cleanup failures
-remain visible and never reload Hindsight onto a possibly occupied GPU.
+If a new Qwen engine start, readiness check or gateway start fails, the start
+script performs a blocking engine stop and verifies that the container has
+disappeared. There is no local Hindsight backend to restore. Retrying an
+already-running Qwen session does not stop that existing session on a
+gateway-only error. Cleanup failures remain visible (exit 75).
 
 The controller owns an isolated process group for each action. On timeout it
 terminates the group, runs the existing stop handoff under the same user lock,
@@ -81,17 +79,18 @@ and verifies unit/job/container state before permitting another action. A
 durable recovery marker prevents a later helper instance from bypassing
 unfinished cleanup; status polling only reads that marker. A retry first
 reconciles the previous action before dispatching the requested operation.
-The marker also records whether Hindsight was active before a new start, so
-automatic timeout recovery uses `qwen38-stop --no-restore` when it was off.
-An explicit user stop still performs the normal Hindsight handback. Start/stop
-scripts reserve exit 75 for an unresolved cleanup; the controller retains its
+Recovery always runs plain `qwen38-stop`; a `restore_hindsight` field left in a
+marker by an older version is ignored, and `qwen38-stop` rejects arguments
+(exit 64). The stop script prints the gateway state and warns when it is not
+active, but does not fail on it, so recovery after a start that never reached
+the gateway is not locked. Start/stop scripts reserve exit 75 for an unresolved cleanup; the controller retains its
 barrier for that result even when the script returned before the timeout.
 
 If a controller itself is forcibly terminated before it can prove that its
 process group ended, the marker deliberately refuses automatic recovery. In
 that case the tooltip requests manual recovery: verify the old control
 processes are gone, settle the Qwen unit and its pending jobs, confirm container
-absence and the intended Hindsight state, then remove
+absence, then remove
 `$XDG_RUNTIME_DIR/skybox-qwen-control.recovery.json` (fallback:
 `~/.cache/skybox-live-monitor/skybox-qwen-control.recovery.json`). Never remove
 that marker merely to bypass an unresolved operation.
@@ -130,11 +129,14 @@ fallback any more: a rollback means downloading weights again.
 - **Changing the model later** means updating the wrapper, the unit condition,
   `PINNED_MODEL_*` in `qwen_control.py` and this section together.
 
-## Existing stop-script readiness fix
+## Former stop-script readiness fix (historical)
 
-A real test reproduced a `Type=simple` bind race: Nimble was systemd-active before its HTTP listener was ready. The first curl response was empty, causing `JSONDecodeError` and a false stop failure. The existing `~/.local/bin/qwen38-stop` now uses bounded curl connection-refused retries. Its obsolete Nimble start/check/probe path was subsequently removed to honor the current no-Nimble setup. No service or model configuration was changed.
-
-`tests/test_qwen_stop_readiness.py` reproduces this with ephemeral loopback listeners and an intercepted `systemctl`; it never changes production services.
+The stop script once probed the local Nimble backend over HTTP and needed
+bounded connection-refused retries for a `Type=simple` bind race. With
+Hindsight on Ollama Cloud the stop script no longer makes any HTTP probe, so
+that retry and `tests/test_qwen_stop_readiness.py` were removed (2026-11-16).
+`tests/test_qwen_stop_no_nimble.py` now asserts that the stop path neither
+touches a Nimble unit nor calls `curl`.
 
 ## Verified delivery (button, 2026-10-10)
 
