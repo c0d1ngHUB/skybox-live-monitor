@@ -74,9 +74,14 @@ systemctl --user start qwen38-gateway.service
 
 rc=0
 for unit in qwen38-ninfer.service qwen38-gateway.service; do
-  state=$(systemctl --user is-active "$unit")
+  # is-active exits non-zero for every state but active; under set -e that
+  # would abort here silently instead of naming the unit that is not up.
+  state=$(systemctl --user is-active "$unit" || true)
   printf '%-26s %s\n' "$unit" "$state"
-  [[ "$state" == active ]] || rc=1
+  if [[ "$state" != active ]]; then
+    echo "Qwen start incomplete: $unit is ${state:-unknown}." >&2
+    rc=1
+  fi
 done
 
 curl -fsS --max-time 10 "$STATUS" 2>/dev/null || true

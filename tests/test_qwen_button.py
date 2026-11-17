@@ -111,3 +111,10 @@ Item {{
     # A duplicate click must not start a second Qwen load; keyboard stop must
     # select the stop script, not merely paint an OFF label.
     assert calls.read_text().splitlines() == ["start", "stop", "start"]
+
+
+def test_tooltip_no_longer_promises_a_hindsight_handback():
+    """Since #17 Hindsight runs on Ollama Cloud; stopping only frees the Blackwell."""
+    qml = (Path(__file__).parents[1] / "contents/ui/QwenControl.qml").read_text()
+    assert "an Hindsight" not in qml
+    assert "gibt die Blackwell frei" in qml

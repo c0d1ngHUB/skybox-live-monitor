@@ -448,19 +448,24 @@ def test_each_gpu_card_has_its_own_series_color_and_legend_name():
     assert 'topGpu2' not in text
 
 
-def test_gpu_telemetry_maps_cards_by_gpu_index_not_by_array_position():
+def test_gpu_telemetry_maps_cards_by_uuid_not_by_index_or_position():
     """A missing card must empty its own card, never shift the others.
 
-    nvidia-smi numbers the GPUs itself and omits absent ones, so positional
-    assignment would render GPU 1 into the GPU 0 card.
+    nvidia-smi numbers only the GPUs it sees: with the Blackwell bound to
+    vfio-pci the RTX 3060 Ti becomes index 0. Mapping by index or by array
+    position would render it into the Blackwell's card, so both the slow and
+    the fast poll assign cards by UUID.
     """
     text = source()
     gpu_source = text[text.index("id: gpuTelemetrySource"):text.index("id: topCpuSource")]
-    assert 'byIndex[String(Number(payload.gpus[i].index))] = payload.gpus[i]' in gpu_source
-    assert 'root.applyGpuTelemetry(byIndex["0"] || null, 0)' in gpu_source
-    assert 'root.applyGpuTelemetry(byIndex["1"] || null, 1)' in gpu_source
-    assert 'applyGpuTelemetry(byIndex["2"]' not in gpu_source
+    assert 'var bySlot = MonitorLogic.assignGpuSlots(payload.gpus, root.gpuSlotUuids, 2)' in gpu_source
+    assert 'root.applyGpuTelemetry(bySlot["0"] || null, 0)' in gpu_source
+    assert 'root.applyGpuTelemetry(bySlot["1"] || null, 1)' in gpu_source
+    assert 'byIndex' not in gpu_source
     assert 'payload.gpus[0]' not in gpu_source
+    assert 'MonitorLogic.assignGpuSlots(MonitorLogic.parseGpuLoads(buffer), root.gpuSlotUuids, 2)' in gpu_source
+    assert ('readonly property var gpuSlotUuids: ["GPU-2bc81341-8b1a-3a2e-679b-7a2bb75c6d9e", '
+            '"GPU-ad1c68f7-9555-3617-9230-04937ac158be"]') in text
 
 
 def test_narrow_cards_fit_their_key_figures_without_cutting_them(self=None):

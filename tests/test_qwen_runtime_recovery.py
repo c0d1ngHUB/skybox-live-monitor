@@ -259,3 +259,50 @@ def test_stop_rejects_arguments_without_touching_units(tmp_path,args):
     result,calls=_stop_with(tmp_path,gateway='active',args=args)
     assert result.returncode==64
     assert calls==''
+
+
+def test_start_names_a_unit_that_is_not_active_instead_of_aborting_silently(tmp_path):
+    """`set -e` must not turn the final is-active check into a silent exit 3."""
+    # Prepare the fake runtime with a normal start, then make the gateway's
+    # start "succeed" without the unit staying active.
+    result, state = run_start(tmp_path, failure='none')
+    assert result.returncode == 0, result.stderr
+    ctl = tmp_path / 'bin' / 'systemctl'
+    ctl.write_text(ctl.read_text().replace(
+        " elif key:s[key]='active'", " elif key=='gateway':s[key]='inactive'\n elif key:s[key]='active'"))
+    state.update(engine='inactive', gateway='inactive', calls=[])
+    (tmp_path / 'state.json').write_text(json.dumps(state))
+    result = subprocess.run(['/bin/bash', str(tmp_path / 'qwen38-start')], capture_output=True, text=True,
+        timeout=10, env={**os.environ, 'PATH': str(tmp_path / 'bin') + os.pathsep + os.environ['PATH']})
+    state = json.loads((tmp_path / 'state.json').read_text())
+    assert result.returncode == 1, result.stderr
+    assert 'qwen38-gateway.service     inactive' in result.stdout
+    assert 'qwen38-gateway.service is inactive' in result.stderr
+    assert state['engine'] == 'inactive'  # The rollback still stops the engine.
+
+
+def _stop_with_failed_unit(tmp_path, *, reset_works):
+    calls = tmp_path / 'calls'; marker = tmp_path / 'reset'; bindir = tmp_path / 'bin'; bindir.mkdir()
+    ctl = bindir / 'systemctl'
+    ctl.write_text(f'#!{sys.executable}\nimport sys\nfrom pathlib import Path\n'
+        + f'with Path({str(calls)!r}).open("a") as f:f.write(" ".join(sys.argv[1:])+"\\n")\n'
+        + f'm=Path({str(marker)!r})\n'
+        + f'if "reset-failed" in sys.argv:\n    {"m.write_text(chr(49))" if reset_works else "sys.exit(1)"}\n'
+        + 'if "is-active" in sys.argv:\n'
+        + '    if "qwen38-ninfer.service" in sys.argv:print("inactive" if m.exists() else "failed");sys.exit(3)\n'
+        + '    print("active")\n')
+    ctl.chmod(0o755)
+    docker = bindir / 'docker'; docker.write_text('#!/bin/sh\nexit 0\n'); docker.chmod(0o755)
+    result = subprocess.run(['/bin/bash', str(runtime_script('qwen38-stop'))], capture_output=True, text=True,
+        timeout=10, env={**os.environ, 'PATH': str(bindir) + os.pathsep + os.environ['PATH']})
+    return result, calls.read_text()
+
+
+@pytest.mark.parametrize('reset_works,shown', [(True, 'inactive'), (False, 'failed')])
+def test_stop_treats_a_failed_unit_as_settled_like_the_controller(tmp_path, reset_works, shown):
+    """qwen_control.handoff_settled accepts failed; exit 75 here would lock the button."""
+    result, calls = _stop_with_failed_unit(tmp_path, reset_works=reset_works)
+    assert result.returncode == 0, result.stderr
+    assert 'reset-failed qwen38-ninfer.service' in calls
+    assert f'qwen38-ninfer.service      {shown}' in result.stdout
+    assert 'nimble' not in calls
