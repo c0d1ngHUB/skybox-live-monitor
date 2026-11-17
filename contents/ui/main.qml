@@ -121,13 +121,26 @@ PlasmoidItem {
     property var topGpu1Processes: []
     property int gpu1ProcessCount: 0
     property bool gpuProcessUnavailable: false
+    // Card slot owners by nvidia-smi UUID (see MonitorLogic.assignGpuSlots):
+    // GPU 0 = the Blackwell, GPU 1 = the 3060 Ti (names still come live from
+    // nvidia-smi). nvidia-smi renumbers the visible GPUs, so while the Blackwell
+    // is passed through to a VM the 3060 Ti would otherwise move into the
+    // Blackwell's card and graph.
+    readonly property var gpuSlotUuids: ["GPU-2bc81341-8b1a-3a2e-679b-7a2bb75c6d9e", "GPU-ad1c68f7-9555-3617-9230-04937ac158be"]
     // 500-ms utilization samples are independent of 2-s VRAM/process snapshots.
     property var gpuLoadStates: ({})
     function applyGpuLoads(entries, nowMs) {
         var next = ({})
         for (var i = 0; i < 2; i++) {
             var key = String(i)
-            next[key] = MonitorLogic.nextGpuLoadState(root.gpuLoadStates[key], entries[key] || null, nowMs)
+            var previous = root.gpuLoadStates[key]
+            var entry = entries[key] || null
+            // A different GPU in the same slot must not continue its graph.
+            if (previous && previous.uuid && entry && entry.uuid && entry.uuid !== previous.uuid) {
+                if (i === 0) root.gpu0History = []
+                else root.gpu1History = []
+            }
+            next[key] = MonitorLogic.nextGpuLoadState(previous, entry, nowMs)
         }
         root.gpuLoadStates = next
     }
@@ -1590,15 +1603,12 @@ PlasmoidItem {
                 return
             }
             root.lastGpuTelemetryMs = Date.now()
-            // Index by the GPU's own index field, never by array position:
-            // nvidia-smi numbers the GPUs itself and a missing card must leave
-            // exactly its own card empty instead of shifting the others.
-            var byIndex = ({})
-            for (var i = 0; i < payload.gpus.length; i++) {
-                byIndex[String(Number(payload.gpus[i].index))] = payload.gpus[i]
-            }
-            root.applyGpuTelemetry(byIndex["0"] || null, 0)
-            root.applyGpuTelemetry(byIndex["1"] || null, 1)
+            // Slot by UUID, never by array position or nvidia-smi index: the
+            // index shifts when a card disappears, and a missing card must
+            // leave exactly its own card empty.
+            var bySlot = MonitorLogic.assignGpuSlots(payload.gpus, root.gpuSlotUuids, 2)
+            root.applyGpuTelemetry(bySlot["0"] || null, 0)
+            root.applyGpuTelemetry(bySlot["1"] || null, 1)
         }
     }
 
@@ -1614,7 +1624,8 @@ PlasmoidItem {
         onNewData: function(source, data) {
             buffer += data["stdout"] || ""
             if (data["exit code"] === undefined) return
-            var entries = Number(data["exit code"]) === 0 ? MonitorLogic.parseGpuLoads(buffer) : ({})
+            var entries = Number(data["exit code"]) === 0
+                ? MonitorLogic.assignGpuSlots(MonitorLogic.parseGpuLoads(buffer), root.gpuSlotUuids, 2) : ({})
             buffer = ""
             disconnectSource(source)
             root.applyGpuLoads(entries, Date.now())

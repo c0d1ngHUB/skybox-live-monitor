@@ -275,6 +275,48 @@ function parseGpuLoads(output) {
     return byIndex
 }
 
+// Card slot for each visible GPU, keyed by slot ("0", "1", ...).
+// nvidia-smi numbers only the GPUs it can see, so its index shifts when a card
+// disappears (e.g. the Blackwell bound to vfio-pci for a VM): the remaining
+// card would become index 0 and land in the other card's slot. A slot whose
+// UUID is configured therefore belongs to that GPU and stays empty while it is
+// absent. GPUs without a configured slot fill the remaining slots in index
+// order, unconfigured slots first; only then may they take the slot of a
+// configured GPU that is absent (a replaced card stays visible).
+function assignGpuSlots(entries, slotUuids, slotCount) {
+    var configured = []
+    for (var s = 0; s < slotCount; s++) {
+        var wanted = slotUuids && typeof slotUuids[s] === "string" ? slotUuids[s].trim() : ""
+        configured.push(wanted)
+    }
+    var list = []
+    for (var key in entries || {}) {
+        var entry = entries[key]
+        if (!entry || typeof entry.uuid !== "string" || !entry.uuid) continue
+        var index = Number(entry.index !== undefined ? entry.index : key)
+        if (!isFinite(index)) continue
+        list.push({index: index, entry: entry})
+    }
+    list.sort(function(a, b) { return a.index - b.index })
+    var slots = ({})
+    var unplaced = []
+    for (var i = 0; i < list.length; i++) {
+        var owned = configured.indexOf(list[i].entry.uuid)
+        if (owned >= 0 && slots[String(owned)] === undefined) slots[String(owned)] = list[i].entry
+        else unplaced.push(list[i].entry)
+    }
+    var order = []
+    for (var free = 0; free < slotCount; free++) if (!configured[free]) order.push(free)
+    for (var taken = 0; taken < slotCount; taken++) if (configured[taken]) order.push(taken)
+    for (var u = 0; u < unplaced.length; u++) {
+        for (var o = 0; o < order.length; o++) {
+            var slotKey = String(order[o])
+            if (slots[slotKey] === undefined) { slots[slotKey] = unplaced[u]; break }
+        }
+    }
+    return slots
+}
+
 function gpuProcessRole(name) {
     return name === "hindsight-api" ? "EMBED / RERANK" : ""
 }
@@ -319,6 +361,7 @@ if (typeof module !== "undefined") {
         localFilePath: localFilePath,
         shellQuote: shellQuote,
         parseGpuLoads: parseGpuLoads,
+        assignGpuSlots: assignGpuSlots,
         gpuProcessRole: gpuProcessRole,
         nextGpuLoadState: nextGpuLoadState,
         gpuLoadSample: gpuLoadSample,

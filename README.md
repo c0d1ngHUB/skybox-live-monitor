@@ -19,6 +19,11 @@ Memory figures use one unit family everywhere (GiB / MiB).
   two GPU cards share the full dashboard width in one row, with the live GPU model name and
   VRAM as `used / total GiB` always visible (the bar still shows percent filled;
   hover for exact MiB). CPU and RAM share the row below
+- GPU cards are assigned by nvidia-smi UUID (`gpuSlotUuids` in `main.qml`:
+  GPU 0 = RTX PRO 4000 Blackwell, GPU 1 = RTX 3060 Ti), not by index. nvidia-smi
+  renumbers the GPUs it can see, so while the Blackwell is passed through to a VM
+  its card stays empty instead of showing the 3060 Ti. An unknown GPU (e.g. a
+  replaced card) takes a free slot; a different GPU entering a slot clears its graph
 - Compact CPU and RAM process summaries (up to four largest consumers)
 - Narrow cards show compact MiB/GiB memory figures so process names remain readable;
   hover a row for the full process name or the source reading (RAM: unrounded

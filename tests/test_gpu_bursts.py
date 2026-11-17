@@ -133,3 +133,64 @@ def test_card_height_fits_four_processes_peak_and_hindsight_role():
     available = (height - spacing) / 2 - 2 * 12  # Card content margins.
     required = 18 + 17 + 4 * 18 + 14 + 5 * 3  # Heading, peak, rows, role, gaps.
     assert available >= required
+
+
+BLACKWELL = "GPU-2bc81341-8b1a-3a2e-679b-7a2bb75c6d9e"
+RTX3060TI = "GPU-ad1c68f7-9555-3617-9230-04937ac158be"
+
+
+def slots(output, configured):
+    return node(f"""
+const s=m.assignGpuSlots(m.parseGpuLoads({json.dumps(output)}),{json.dumps(configured)},2);
+console.log(JSON.stringify(Object.fromEntries(Object.entries(s).map(([k,v])=>[k,v.uuid]))));
+""")
+
+
+def test_configured_slots_survive_a_passed_through_gpu():
+    both = f"0, {BLACKWELL}, 40\n1, {RTX3060TI}, 7"
+    # Blackwell on vfio-pci: nvidia-smi renumbers the 3060 Ti to index 0.
+    vm = f"0, {RTX3060TI}, 7"
+    assert slots(both, [BLACKWELL, RTX3060TI]) == {"0": BLACKWELL, "1": RTX3060TI}
+    assert slots(vm, [BLACKWELL, RTX3060TI]) == {"1": RTX3060TI}
+
+
+def test_unknown_gpus_fill_free_slots_in_index_order():
+    # Without configuration the slots follow nvidia-smi's order.
+    assert slots("1, GPU-b, 5\n0, GPU-a, 1", []) == {"0": "GPU-a", "1": "GPU-b"}
+    # A replaced card takes the slot of the absent configured GPU.
+    assert slots(f"0, GPU-new, 1\n1, {RTX3060TI}, 7", [BLACKWELL, RTX3060TI]) == {"0": "GPU-new", "1": RTX3060TI}
+    # Unconfigured slots are filled before the slot of an absent configured GPU.
+    assert slots("0, GPU-new, 1", [BLACKWELL, ""]) == {"1": "GPU-new"}
+
+
+def test_slow_poll_entries_keep_their_own_index_field():
+    actual = node(f"""
+const s=m.assignGpuSlots([{{index:0,uuid:{json.dumps(RTX3060TI)},name:'3060'}}],{json.dumps([BLACKWELL, RTX3060TI])},2);
+console.log(JSON.stringify(Object.keys(s).map(k=>[k,s[k].name])));
+""")
+    assert actual == [["1", "3060"]]
+
+
+def test_fast_handler_keeps_the_3060ti_out_of_the_blackwell_card_and_graph():
+    qml = QML.read_text()
+    block = qml.split("id: gpuLoadSource", 1)[1].split("id: topCpuSource", 1)[0]
+    body = block.split("onNewData: function(source, data) {", 1)[1].rsplit("\n        }", 1)[0]
+    actual = node(f"""
+const MonitorLogic=m;
+var root={{gpuLoadStates:{{}},gpuSlotUuids:{json.dumps([BLACKWELL, RTX3060TI])},gpu0History:[1,2],gpu1History:[3,4]}};
+""" + qml_function("applyGpuLoads") + f"""
+root.applyGpuLoads=applyGpuLoads;
+var buffer='',source='';function disconnectSource(){{}};
+function handle(data){{
+""" + body + f"""
+}}
+handle({{'stdout':'0, {BLACKWELL}, 40\\n1, {RTX3060TI}, 7','exit code':0}});
+handle({{'stdout':'0, {RTX3060TI}, 9','exit code':0}});
+const afterVm=[root.gpuLoadStates['0'].available,root.gpuLoadStates['1'].usage,root.gpu0History.length,root.gpu1History.length];
+root.gpuSlotUuids=[];
+handle({{'stdout':'0, GPU-other, 50','exit code':0}});
+console.log(JSON.stringify([afterVm,root.gpuLoadStates['0'].uuid,root.gpu0History.length]));
+""")
+    # Slot 0 stays empty (history kept, gaps follow from the unavailable sample);
+    # the 3060 Ti stays in slot 1. A different GPU entering a slot clears its graph.
+    assert actual == [[False, 9, 2, 2], "GPU-other", 0]

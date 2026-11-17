@@ -37,8 +37,15 @@ fi
 
 rc=0
 state=$(systemctl --user is-active qwen38-ninfer.service)
+if [[ "$state" == failed ]]; then
+  # A failed unit is stopped as well (the container's absence is proven above).
+  # Clear the marker so the button reads "stopped" instead of "failed"; if that
+  # does not work, failed still counts as settled, as in the Skybox controller.
+  systemctl --user reset-failed qwen38-ninfer.service || true
+  state=$(systemctl --user is-active qwen38-ninfer.service)
+fi
 printf '%-26s %s\n' qwen38-ninfer.service "$state"
-[[ "$state" == inactive ]] || rc=75
+[[ "$state" == inactive || "$state" == failed ]] || rc=75
 state=$(systemctl --user is-active qwen38-gateway.service)
 printf '%-26s %s\n' qwen38-gateway.service "$state"
 [[ "$state" == active ]] || echo "Warning: qwen38-gateway.service is $state." >&2

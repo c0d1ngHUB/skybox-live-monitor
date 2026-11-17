@@ -41,7 +41,7 @@ Item {
         : modelOn ? "●" : "○"
     readonly property string toolTipText: detail
         + (errorMessage.length ? "\n\nFehler: " + errorMessage : "")
-        + "\n\nStarten reserviert die Blackwell für Qwen. Stoppen beendet laufende Qwen-Anfragen und gibt die GPU an Hindsight zurück."
+        + "\n\nStarten reserviert die Blackwell für Qwen. Stoppen beendet laufende Qwen-Anfragen und gibt die Blackwell frei."
 
     function beginCommand(operation) {
         if (activeCommand.length) executable.disconnectSource(activeCommand)
