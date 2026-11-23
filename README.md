@@ -42,11 +42,18 @@ Memory figures use one unit family everywhere (GiB / MiB).
   poll (not the separately polled services, disk, or other system sensors)
 - Disk usage in `df` semantics, including the filesystem reserve
 - NVIDIA VRAM telemetry via `nvidia-smi`
-- Claude plan usage row (**CLAUDE MAX**) between the system-load chart and the GPU cards: 5-hour session and
+- Claude plan usage row (**CLAUDE MAX**) in the KI-DIENSTE block: 5-hour session and
   weekly limit in percent with bar and local reset time, the same numbers as the
   "Plan usage limits" page on claude.ai. Polled every 2 min; yellow from 75 %, red
   from 90 % or when the API reports a non-normal severity. The tooltip adds the
   per-model weekly limits, the weekly share per surface and the extra-usage state.
+- Codex plan usage row (**CODEX PLUS**, the plan comes from the API) directly under
+  the Claude row, in the same form: 5-hour session and weekly limit of the ChatGPT
+  account that Codex is logged in with, the numbers Codex shows in `/status`.
+  Windows are placed by their published length, not their position. Polled every
+  2 min; yellow from 75 %, red from 90 % or when the API reports the limit as
+  reached. The tooltip adds window lengths, full reset dates, extra limits
+  (code review, model-specific), credits and banked limit resets.
 - Longest completed Hermes run across the default and named profiles;
   assistant tool-call preambles and unfinished turns do not count as completion
   One unreadable profile does not discard other readings: a partial maximum is
@@ -135,6 +142,7 @@ The hardware panels work independently of the AI integrations. Missing tools or 
 | [hermes_max_think.py](contents/code/hermes_max_think.py) | Local SQLite history under `~/.hermes`, including named profiles; standalone `--root` / `--db` overrides |
 | [ai_services_status.py](contents/code/ai_services_status.py) | User unit `hermes-gateway.service`, and fixed `http://127.0.0.1:9177/health` |
 | [claude_usage.py](contents/code/claude_usage.py) | Read-only `GET https://api.anthropic.com/api/oauth/usage` (undocumented) with the Claude Code OAuth access token from `~/.claude/.credentials.json`. The token is never refreshed (that would rotate the refresh token and log out Claude Code); an expired token shows `Token abgelaufen` until Claude Code refreshes it. No model call, no usage cost |
+| [codex_usage.py](contents/code/codex_usage.py) | Read-only `GET https://chatgpt.com/backend-api/wham/usage` (undocumented; the endpoint behind Codex' `/status` limits) with the ChatGPT access token from `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`). The token is never refreshed and the file is never written (a refresh rotates the refresh token and would log out Codex); an expired token shows `Token abgelaufen` until Codex refreshes it. Account e-mail and IDs from the response are not passed to the widget. No model call, no usage cost |
 | [hindsight_observation_health.py](contents/code/hindsight_observation_health.py) | `HINDSIGHT_API_URL` (default `http://127.0.0.1:9177`) and `HINDSIGHT_HEALTH_BANK` (default `hermes`) |
 
 Environment overrides must be visible to the Plasma shell process, not just a terminal running a helper. `HINDSIGHT_API_URL` affects observation health only; the service status helper retains its fixed loopback endpoint. Overriding the API URL can cause remote HTTP requests. The observation helper reads paginated memory and scope data without invoking an LLM, and its migration timestamp/baselines are specific to the original `hermes` bank; reassess them for another installation.
