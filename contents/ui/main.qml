@@ -655,13 +655,13 @@ PlasmoidItem {
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.bottomMargin: -8; color: root.cyan; opacity: 0.45 }
 
             // --- AI SERVICES section --- (rendered title: KI-DIENSTE)
-            // Status cards, then the two status rows: Hindsight condensation
-            // and Claude plan limits. Everything about the AI
+            // Status cards, then the three status rows: Hindsight condensation,
+            // Claude plan limits and Codex plan limits. Everything about the AI
             // stack lives in this block; the host card below is host-only.
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 178
-                Layout.minimumHeight: 174
+                Layout.preferredHeight: 214
+                Layout.minimumHeight: 210
                 clip: true
                 Column {
                     anchors.fill: parent
@@ -768,6 +768,16 @@ PlasmoidItem {
                     }
                     ClaudeUsage {
                         id: claudeUsage
+                        width: parent.width
+                        ink: root.ink
+                        muted: root.muted
+                        accent: root.cyan
+                        warning: root.warning
+                        critical: root.critical
+                        quietBorder: root.quietBorder
+                    }
+                    CodexUsage {
+                        id: codexUsage
                         width: parent.width
                         ink: root.ink
                         muted: root.muted

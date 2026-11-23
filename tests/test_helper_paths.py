@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).parents[1]
 LOGIC = ROOT / 'contents/code/monitor_logic.js'
 SOURCES = []
-for component in ('main.qml', 'ClaudeUsage.qml'):
+for component in ('main.qml', 'ClaudeUsage.qml', 'CodexUsage.qml'):
     source = (ROOT / 'contents/ui' / component).read_text()
     for match in re.finditer(r'property string scriptPath:\s*([^\n]+)\n\s*(?:(?!property string command:)[^\n]*\n)*?\s*property string command:\s*([^\n]+)', source):
         name = re.search(r'\.\./code/([^"\s]+)', match[1]).group(1)
@@ -17,12 +17,12 @@ for component in ('main.qml', 'ClaudeUsage.qml'):
 
 
 def test_all_helper_paths_are_covered():
-    assert len(SOURCES) == 9
+    assert len(SOURCES) == 10
     assert {row[1] for row in SOURCES} == {
         'disk_usage.py', 'hermes_max_think.py',
         'hindsight_observation_health.py',
         'ai_services_status.py', 'gpu_telemetry.py', 'cpu_process_snapshot.py',
-        'network_interface.py', 'network_counters.sh', 'claude_usage.py',
+        'network_interface.py', 'network_counters.sh', 'claude_usage.py', 'codex_usage.py',
     }
 
 
