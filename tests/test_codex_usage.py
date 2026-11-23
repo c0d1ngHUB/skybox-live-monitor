@@ -3,10 +3,13 @@
 
 import base64
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import threading
 
 import pytest
@@ -18,14 +21,16 @@ SIGNATURE = "c2lnbmF0dXJlLXN5bnRoZXRpYw"
 REFRESH = "rt_synthetic_refresh_token_never_used"
 
 
-def jwt(exp=NOW + 3600, plan="plus", account="acct-synthetic-1", residency: "str | None" = "us"):
+def jwt(exp=NOW + 3600, plan="plus", account="acct-synthetic-1", residency: "str | None" = "us", exp_raw=None):
     def b64(obj):
         return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
     auth = {"chatgpt_plan_type": plan, "chatgpt_account_id": account}
     if residency is not None:
         auth["chatgpt_compute_residency"] = residency
     claims: dict = {"https://api.openai.com/auth": auth}
-    if exp is not None:
+    if exp_raw is not None:
+        claims["exp"] = exp_raw
+    elif exp is not None:
         claims["exp"] = int(exp)
     return b64({"alg": "RS256", "typ": "JWT"}) + "." + b64(claims) + "." + SIGNATURE
 
@@ -51,14 +56,17 @@ USAGE = {
 
 
 class Server:
-    def __init__(self, status=200, body=None):
+    def __init__(self, status=200, body=None, headers=None):
         self.status, self.body, self.requests = status, body, []
+        self.response_headers = headers or {}
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 outer.requests.append({"path": self.path, "method": "GET", "headers": dict(self.headers)})
                 self.send_response(outer.status)
+                for name, value in outer.response_headers.items():
+                    self.send_header(name, value)
                 self.end_headers()
                 payload = outer.body if isinstance(outer.body, bytes) else json.dumps(outer.body).encode()
                 self.wfile.write(payload)
@@ -83,8 +91,8 @@ class Server:
 def server():
     created = []
 
-    def make(status=200, body=USAGE):
-        s = Server(status, body)
+    def make(status=200, body=USAGE, headers=None):
+        s = Server(status, body, headers)
         created.append(s)
         return s
     yield make
@@ -109,7 +117,7 @@ def auth_file(tmp_path, token=None, account_id: "str | None" = "acct-synthetic-1
 def secrets(auth):
     try:
         tokens = json.loads(Path(auth).read_text()).get("tokens") or {}
-    except (OSError, ValueError, AttributeError):
+    except (OSError, ValueError, AttributeError, RecursionError):
         tokens = {}
     return [value for value in (tokens.get("access_token"), REFRESH) if value]
 
@@ -322,3 +330,60 @@ def test_unexpected_list_types_do_not_break_the_row(tmp_path, server):
     body["rate_limit_reset_credits"] = None
     p = run(auth_file(tmp_path), server(body=body).url)
     assert p["available"] is True and p["extra"] == [] and p["credits"] is None and p["reset_credits"] is None
+
+
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+def test_redirects_are_not_followed_so_the_token_stays_put(tmp_path, server, status):
+    """urllib's default handler re-sends every header (bearer token included) to
+    the redirect target; the helper must stop at the first response instead."""
+    target = server()
+    origin = server(status=status, body=b"", headers={"Location": target.url})
+    p = run(auth_file(tmp_path), origin.url)
+    assert p["available"] is False and p["reason"] == "http_%d" % status and p["session"] is None
+    assert len(origin.requests) == 1 and target.requests == []
+
+
+def test_non_finite_numbers_are_unknown_not_a_crash(tmp_path, server):
+    raw = (json.dumps(USAGE)
+           .replace('"used_percent": 22', '"used_percent": Infinity')
+           .replace('"reset_at": 1900517502', '"reset_at": 1e400')
+           .replace('"available_count": 3', '"available_count": NaN'))
+    assert raw.count("Infinity") == 1 and raw.count("1e400") == 1 and raw.count("NaN") == 1
+    p = run(auth_file(tmp_path), server(body=raw.encode()).url)
+    assert p["available"] is True and p["session"] is None
+    # The unusable reset stamp falls back to reset_after_seconds.
+    assert p["weekly"] == {"pct": 19, "resets_at": int(NOW) + 517502, "window_s": 604800}
+    assert p["reset_credits"] is None
+
+
+@pytest.mark.parametrize("exp_raw", [float("inf"), float("nan"), 10 ** 400], ids=["inf", "nan", "huge-int"])
+def test_unreadable_token_expiry_is_still_tried(tmp_path, server, exp_raw):
+    s = server()
+    p = run(auth_file(tmp_path, token=jwt(exp_raw=exp_raw)), s.url)
+    assert p["available"] is True and p["token_expires_in_s"] is None and len(s.requests) == 1
+
+
+def test_deeply_nested_json_is_a_bad_payload_and_bad_credentials(tmp_path, server):
+    deep = b"[" * 200000 + b"]" * 200000
+    p = run(auth_file(tmp_path), server(body=deep).url)
+    assert p["available"] is False and p["reason"] == "bad_payload"
+    nested = tmp_path / "nested.json"
+    nested.write_bytes(deep)
+    assert run(nested)["reason"] == "no_credentials"
+
+
+def test_an_unexpected_error_still_prints_json(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("codex_usage_under_test", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(module, "collect", boom)
+    monkeypatch.setattr(sys, "argv", ["codex_usage.py", "--auth", str(tmp_path / "auth.json"), "--now", str(NOW)])
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    module.main()
+    p = json.loads(out.getvalue())
+    assert p["available"] is False and p["reason"] == "internal_error" and p["session"] is None
+    assert p["stamp"] == NOW and p["tone"] == "unknown"

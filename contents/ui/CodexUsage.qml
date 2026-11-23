@@ -71,9 +71,12 @@ Rectangle {
         var l = limit(key)
         return l ? Math.max(0, Math.min(100, l.pct)) / 100 : 0
     }
+    // The limits row is only visible while fresh, so a missing limit here means
+    // the API published no such window (e.g. a weekly-only plan): muted, not a
+    // warning colour that would read as a fault on a healthy account.
     function levelColor(key) {
         var l = limit(key)
-        if (!l) return warning
+        if (!l) return muted
         var t = payload.thresholds || {}
         if (l.pct >= (t.critical_pct || 90)) return critical
         if (l.pct >= (t.warn_pct || 75)) return warning
@@ -86,6 +89,7 @@ Rectangle {
         if (r === "no_credentials") return "keine Codex-Anmeldung"
         if (r === "network") return "nicht erreichbar"
         if (r === "bad_payload") return "Antwort unbekannt"
+        if (r === "internal_error") return "interner Fehler"
         if (r && r.indexOf("http_") === 0) return "HTTP " + r.slice(5)
         if (payload.available === true) return "Messung veraltet"
         return "unbekannt"
@@ -115,12 +119,12 @@ Rectangle {
     }
     function detailText() {
         if (!fresh) return "Codex-Nutzung UNBEKANNT: " + reasonText() + ".\n"
-            + "Quelle: chatgpt.com/backend-api/wham/usage mit dem Token aus ~/.codex/auth.json.\n"
+            + "Quelle: chatgpt.com/backend-api/wham/usage mit dem Token aus $CODEX_HOME/auth.json (Standard ~/.codex/auth.json).\n"
             + "Der Token wird hier nie erneuert; Codex erneuert ihn beim nächsten Aufruf."
         var s = limit("session"), w = limit("weekly")
         var lines = ["Codex-Nutzungslimits des Plans " + (planText() || "?") + " · nur lesend, kein Modellaufruf.",
-            "Sitzung (" + (s ? windowText(s.window_s) : "5 h") + "): " + (s ? s.pct + "% · Reset " + fullReset(s.resets_at) : "unbekannt"),
-            "Woche (" + (w ? windowText(w.window_s) : "7 Tage") + "): " + (w ? w.pct + "% · Reset " + fullReset(w.resets_at) : "unbekannt")]
+            s ? "Sitzung (" + windowText(s.window_s) + "): " + s.pct + "% · Reset " + fullReset(s.resets_at) : "Sitzung: kein Limit gemeldet",
+            w ? "Woche (" + windowText(w.window_s) + "): " + w.pct + "% · Reset " + fullReset(w.resets_at) : "Woche: kein Limit gemeldet"]
         if (payload.limit_reached === true) lines.push("LIMIT ERREICHT: Codex ist bis zum nächsten Reset gesperrt.")
         var extra = payload.extra || []
         for (var i = 0; i < extra.length; i++) {

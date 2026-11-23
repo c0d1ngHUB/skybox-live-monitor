@@ -17,6 +17,7 @@ import base64
 from datetime import datetime
 import http.client
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -36,9 +37,14 @@ def default_auth_file():
 
 
 def _number(value):
+    """Finite int/float or None. json.loads accepts Infinity/NaN and 1e400 (inf);
+    an int beyond float range makes math.isfinite raise OverflowError."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return value
+    try:
+        return value if math.isfinite(value) else None
+    except OverflowError:
+        return None
 
 
 def _pct(value):
@@ -157,18 +163,31 @@ def tone(session, weekly, limit_reached):
     return ["ok", "warn", "critical"][level]
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A 3xx must not carry the bearer token to another URL: the default handler
+    re-sends every header to the redirect target. Returning None lets the
+    redirect surface as an HTTPError (reason http_3xx) instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def empty_result(now):
+    return {"available": False, "stamp": now, "reason": None, "plan": None, "tone": "unknown",
+            "session": None, "weekly": None, "limit_reached": None, "extra": [], "credits": None,
+            "reset_credits": None, "token_expires_in_s": None,
+            "thresholds": {"warn_pct": WARN_PCT, "critical_pct": CRITICAL_PCT}}
+
+
 def collect(auth_file: Path, url: str, now: float, timeout: float):
-    result = {"available": False, "stamp": now, "reason": None, "plan": None, "tone": "unknown",
-              "session": None, "weekly": None, "limit_reached": None, "extra": [], "credits": None,
-              "reset_credits": None, "token_expires_in_s": None,
-              "thresholds": {"warn_pct": WARN_PCT, "critical_pct": CRITICAL_PCT}}
+    result = empty_result(now)
     try:
         tokens = json.loads(auth_file.read_text())["tokens"]
         token = tokens["access_token"]
         if not isinstance(token, str) or not token.strip():
             raise ValueError("empty access token")
         token = token.strip()
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
         result["reason"] = "no_credentials"
         return result
     claims = _claims(token)
@@ -192,7 +211,7 @@ def collect(auth_file: Path, url: str, now: float, timeout: float):
         headers["x-openai-internal-codex-residency"] = residency.strip()
     request = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.build_opener(_NoRedirect).open(request, timeout=timeout) as response:
             raw = response.read(1024 * 1024)
     except urllib.error.HTTPError as error:
         result["reason"] = "http_%d" % error.code
@@ -202,7 +221,7 @@ def collect(auth_file: Path, url: str, now: float, timeout: float):
         return result
     try:
         parsed = parse(json.loads(raw), now)
-    except ValueError:
+    except (ValueError, RecursionError):
         parsed = None
     if parsed is None:
         result["reason"] = "bad_payload"
@@ -223,7 +242,12 @@ def main():
     parser.add_argument("--timeout", type=float, default=8.0)
     args = parser.parse_args()
     now = args.now if args.now is not None else time.time()
-    print(json.dumps(collect(args.auth or default_auth_file(), args.url, now, args.timeout)))
+    try:
+        result = collect(args.auth or default_auth_file(), args.url, now, args.timeout)
+    except Exception:  # last resort: the widget must get JSON, never a bare traceback
+        result = empty_result(now)
+        result["reason"] = "internal_error"
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

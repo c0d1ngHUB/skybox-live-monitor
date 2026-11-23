@@ -98,11 +98,18 @@ Item {
    u.payload = p
    verify(u.border.color == u.critical, "limit reached must colour the border")
    verify(u.detailText().indexOf("LIMIT ERREICHT") >= 0, u.detailText())
+   // A weekly-only plan: no session window is not a fault. Muted "--", quiet
+   // border, and the tooltip says so instead of "unbekannt".
+   p = base(t); p.session = null
+   u.payload = p
+   compare(s.text, "SITZUNG --")
+   verify(s.color == u.muted && w.color == u.accent && u.border.color == u.quietBorder)
+   verify(u.detailText().indexOf("Sitzung: kein Limit gemeldet") >= 0 && u.detailText().indexOf("Woche (7 Tage): 19%") >= 0, u.detailText())
    // Expired token or missing login: explicit reason, no stale numbers.
    u.payload = {available:false,stamp:t,reason:"token_expired",plan:"plus",tone:"unknown",session:null,weekly:null,extra:[]}
    verify(unknown.visible && unknown.text.indexOf("Token abgelaufen") >= 0, unknown.text)
    compare(heading.text, "CODEX PLUS")
-   verify(u.detailText().indexOf("Token abgelaufen") >= 0 && u.detailText().indexOf("~/.codex/auth.json") >= 0)
+   verify(u.detailText().indexOf("Token abgelaufen") >= 0 && u.detailText().indexOf("$CODEX_HOME/auth.json (Standard ~/.codex/auth.json)") >= 0, u.detailText())
    verify(u.detailText().indexOf("undefined") < 0)
    u.payload = {available:false,stamp:t,reason:"no_credentials",plan:null,tone:"unknown",session:null,weekly:null}
    verify(unknown.text.indexOf("keine Codex-Anmeldung") >= 0, unknown.text)
@@ -112,6 +119,8 @@ Item {
    verify(unknown.text.indexOf("nicht erreichbar") >= 0, unknown.text)
    u.payload = {available:false,stamp:t,reason:"bad_payload",plan:null,tone:"unknown",session:null,weekly:null}
    verify(unknown.text.indexOf("Antwort unbekannt") >= 0, unknown.text)
+   u.payload = {available:false,stamp:t,reason:"internal_error",plan:null,tone:"unknown",session:null,weekly:null}
+   verify(unknown.text.indexOf("interner Fehler") >= 0, unknown.text)
    // Stale after 2.5 poll intervals (5 min at 2 min).
    u.payload = base(t)
    u.nowMs = (t + 4 * 60) * 1000
