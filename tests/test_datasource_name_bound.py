@@ -18,12 +18,13 @@ MAX_NAMES = 4
 
 
 def command_expressions():
-    """Every executable source name: `command` properties and the imperative
-    `activeCommand = ...` assignment in QwenControl."""
+    """Every executable source name: `command` properties, the imperative
+    `activeCommand = ...` assignment in QwenControl, and CodexUsage's
+    `helperArgs` part of its command."""
     rows = []
     for qml in sorted(UI.glob('*.qml')):
         text = qml.read_text()
-        for match in re.finditer(r'property string command:\s*([^\n]+)', text):
+        for match in re.finditer(r'property string (?:command|helperArgs):\s*([^\n]+)', text):
             rows.append((qml.name, match[1].strip()))
         for match in re.finditer(r'^\s*activeCommand\s*=\s*("python3[^\n]+)', text, re.M):
             rows.append((qml.name, match[1].strip()))
@@ -37,6 +38,8 @@ def test_request_counter_commands_rotate_through_a_bounded_set():
         js = f'''
 const MonitorLogic={{shellQuote:s=>"'"+s+"'"}};
 const scriptPath="/x/helper.py", quotedPath="'/x/helper.py'", operation="status";
+// CodexUsage's fixed per-instance pool argument (empty without poolEntry).
+const helperArgs=" --hermes-pool-entry '1449ff'";
 const names=new Set();
 let previous=null, consecutiveRepeat=false;
 for (let requestId=0; requestId<5000; requestId++) {{

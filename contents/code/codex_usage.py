@@ -6,10 +6,16 @@ $CODEX_HOME/auth.json (default ~/.codex/auth.json) and issues ONE GET to
 https://chatgpt.com/backend-api/wham/usage, the endpoint behind the limits that
 Codex shows in /status.
 
+With --hermes-pool-entry ID the token comes from that entry of the Hermes
+credential pool instead (credential_pool["openai-codex"] in
+$HERMES_HOME/auth.json, default ~/.hermes/auth.json), e.g. a second account
+that Codex itself is not logged in with. The entry is matched by its id only.
+
 The token is never refreshed here: a refresh rotates the refresh token and would
-log out Codex. An expired token is reported as unknown; Codex refreshes it on
-its own next use. No model is called, so this costs no usage. Failures are
-reported as unknown (null), never as 0 %.
+log out Codex (or invalidate the Hermes pool entry). An expired token is
+reported as unknown; Codex, or Hermes on its next use of the entry, refreshes
+it. No file is ever written. No model is called, so this costs no usage.
+Failures are reported as unknown (null), never as 0 %.
 """
 
 import argparse
@@ -30,10 +36,15 @@ CRITICAL_PCT = 90
 EXPIRY_MARGIN_S = 30
 DAY_S = 86400
 AUTH_CLAIM = "https://api.openai.com/auth"
+POOL_PROVIDER = "openai-codex"
 
 
 def default_auth_file():
     return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "auth.json"
+
+
+def default_hermes_auth_file():
+    return Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes") / "auth.json"
 
 
 def _number(value):
@@ -179,10 +190,22 @@ def empty_result(now):
             "thresholds": {"warn_pct": WARN_PCT, "critical_pct": CRITICAL_PCT}}
 
 
-def collect(auth_file: Path, url: str, now: float, timeout: float):
+def read_tokens(auth_file: Path, pool_entry=None):
+    """The token fields: Codex' auth.json `tokens`, or the Hermes pool entry whose
+    `id` is pool_entry under credential_pool["openai-codex"]. Only read."""
+    data = json.loads(auth_file.read_text())
+    if pool_entry is None:
+        return data["tokens"]
+    for entry in data["credential_pool"][POOL_PROVIDER]:
+        if isinstance(entry, dict) and entry.get("id") == pool_entry:
+            return entry
+    raise KeyError(pool_entry)
+
+
+def collect(auth_file: Path, url: str, now: float, timeout: float, pool_entry=None):
     result = empty_result(now)
     try:
-        tokens = json.loads(auth_file.read_text())["tokens"]
+        tokens = read_tokens(auth_file, pool_entry)
         token = tokens["access_token"]
         if not isinstance(token, str) or not token.strip():
             raise ValueError("empty access token")
@@ -237,13 +260,21 @@ def collect(auth_file: Path, url: str, now: float, timeout: float):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--auth", type=Path, default=None, help="Codex auth.json (default: $CODEX_HOME/auth.json)")
+    parser.add_argument("--hermes-pool-entry", default=None, metavar="ID",
+                        help="read the token of this Hermes credential-pool entry instead of the Codex auth.json")
+    parser.add_argument("--hermes-auth", type=Path, default=None,
+                        help="Hermes auth.json for --hermes-pool-entry (default: $HERMES_HOME/auth.json)")
     parser.add_argument("--url", default=URL)
     parser.add_argument("--now", type=float, default=None)
     parser.add_argument("--timeout", type=float, default=8.0)
     args = parser.parse_args()
     now = args.now if args.now is not None else time.time()
     try:
-        result = collect(args.auth or default_auth_file(), args.url, now, args.timeout)
+        if args.hermes_pool_entry is None:
+            auth_file = args.auth or default_auth_file()
+        else:
+            auth_file = args.hermes_auth or default_hermes_auth_file()
+        result = collect(auth_file, args.url, now, args.timeout, args.hermes_pool_entry)
     except Exception:  # last resort: the widget must get JSON, never a bare traceback
         result = empty_result(now)
         result["reason"] = "internal_error"

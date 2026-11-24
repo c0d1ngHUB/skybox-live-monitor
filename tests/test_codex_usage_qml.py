@@ -141,22 +141,174 @@ Item {
     assert 'ReferenceError' not in result.stderr and 'TypeError' not in result.stderr
 
 
+def run_case(tmp_path, code, case):
+    runner = qml_runner(tmp_path)
+    path = tmp_path / ('tst_' + case.split('::')[0].lower() + '.qml')
+    path.write_text(code)
+    result = subprocess.run([str(runner), '-input', str(path)],
+        env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'}, text=True, capture_output=True, timeout=25)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert case in result.stdout, result.stdout + result.stderr
+    assert 'ReferenceError' not in result.stderr and 'TypeError' not in result.stderr, result.stderr
+
+
+GO_PAYLOAD = '''
+  function go(t) {
+   return {available:true,stamp:t,reason:null,plan:"go",tone:"ok",session:null,
+     weekly:{pct:0,resets_at:t+20*86400,window_s:2592000},
+     limit_reached:false,extra:[],credits:{has_credits:false,unlimited:false,balance:"0"},
+     reset_credits:null,token_expires_in_s:863000,thresholds:{warn_pct:75,critical_pct:90}}
+  }
+'''
+
+
+def test_a_window_of_eight_days_or_more_is_a_month(tmp_path):
+    """The Go plan publishes one 30-day limit: MONAT, never WOCHE."""
+    code = '''import QtQuick
+import QtTest
+import ''' + json.dumps((ROOT / 'contents/ui').as_uri()) + '''
+Item {
+ id:root; width:860; height:120
+ CodexUsage { id:u; width:parent.width; height:implicitHeight; pollingEnabled:false }
+ TestCase {
+  name:"CodexMonth"; when:windowShown
+''' + GO_PAYLOAD + '''
+  function test_month() {
+   var heading = findChild(u, "codexHeading"), unknown = findChild(u, "codexUnknown")
+   var t = Date.now() / 1000
+   u.nowMs = t * 1000
+   u.payload = go(t)
+   var s = findChild(u, "codexSession"), w = findChild(u, "codexWeekly")
+   compare(heading.text, "CODEX GO")
+   compare(s.text, "SITZUNG --")
+   verify(s.color == u.muted && w.color == u.accent && u.border.color == u.quietBorder)
+   // More than 7 days ahead: the reset shows a date, not a weekday.
+   verify(/^MONAT 0% ↻ \\d\\d\\.\\d\\d\\. \\d\\d:\\d\\d$/.test(w.text), w.text)
+   var tip = u.detailText()
+   verify(tip.indexOf("Plans GO") >= 0 && tip.indexOf("Monat (30 Tage): 0% · Reset ") >= 0, tip)
+   verify(tip.indexOf("Sitzung: kein Limit gemeldet") >= 0 && tip.indexOf("Woche") < 0, tip)
+   verify(tip.indexOf("undefined") < 0 && tip.indexOf("null") < 0 && tip.indexOf("NaN") < 0, tip)
+   // Boundary: 8 days and more is a month, 7 days stays a week.
+   var p = go(t); p.weekly.window_s = 8 * 86400; u.payload = p
+   verify(w.text.indexOf("MONAT 0%") === 0, w.text)
+   p = go(t); p.weekly.window_s = 7 * 86400; p.weekly.resets_at = t + 3 * 86400; u.payload = p
+   verify(w.text.indexOf("WOCHE 0%") === 0, w.text)
+   verify(u.detailText().indexOf("Woche (7 Tage): 0%") >= 0, u.detailText())
+   // Unknown keeps the last published length, so the row still says MONAT.
+   u.payload = go(t)
+   u.payload = {available:false,stamp:t,reason:"token_expired",plan:"go",tone:"unknown",session:null,weekly:null,extra:[]}
+   compare(unknown.text, "SITZUNG -- · MONAT -- · Token abgelaufen")
+   compare(heading.text, "CODEX GO")
+   // A fresh answer without the long limit: muted "--" under the known name.
+   p = go(t); p.weekly = null; p.session = {pct:5,resets_at:t+3600,window_s:18000}; u.payload = p
+   compare(w.text, "MONAT --")
+   verify(w.color == u.muted, "a missing limit is muted")
+   verify(u.detailText().indexOf("Monat: kein Limit gemeldet") >= 0, u.detailText())
+   u.payload = null
+  }
+ }
+}
+'''
+    run_case(tmp_path, code, 'CodexMonth::test_month()')
+
+
+def test_pool_row_passes_only_the_entry_id_and_names_its_source(tmp_path):
+    """poolEntry switches the helper to the Hermes pool; without it the row,
+    its command and every text stay as they were."""
+    code = '''import QtQuick
+import QtTest
+import ''' + json.dumps((ROOT / 'contents/ui').as_uri()) + '''
+Item {
+ id:root; width:860; height:120
+ CodexUsage { id:u; width:parent.width; height:implicitHeight; pollingEnabled:false }
+ CodexUsage { id:g; y:40; width:parent.width; height:implicitHeight; pollingEnabled:false; poolEntry:"1449ff" }
+ TestCase {
+  name:"CodexPool"; when:windowShown
+''' + GO_PAYLOAD + '''
+  function test_pool() {
+   // The plain row keeps its command; the pool row only adds the quoted entry id.
+   var plain = findChild(u, "codexSource").command, pool = findChild(g, "codexSource").command
+   verify(/^python3 '[^']*\\/codex_usage\\.py' # skybox-request-0$/.test(plain), plain)
+   compare(pool, plain.replace(" # skybox-request-", " --hermes-pool-entry '1449ff' # skybox-request-"))
+   var t = Date.now() / 1000
+   u.nowMs = t * 1000; g.nowMs = t * 1000
+   // Unknown: the pool row names the pool, the plain row reads exactly as before.
+   var none = {available:false,stamp:t,reason:"no_credentials",plan:null,tone:"unknown",session:null,weekly:null}
+   u.payload = none; g.payload = none
+   compare(findChild(g, "codexUnknown").text, "SITZUNG -- · WOCHE -- · kein Hermes-Pool-Eintrag")
+   compare(findChild(u, "codexUnknown").text, "SITZUNG -- · WOCHE -- · keine Codex-Anmeldung")
+   compare(u.detailText(), "Codex-Nutzung UNBEKANNT: keine Codex-Anmeldung.\\n"
+       + "Quelle: chatgpt.com/backend-api/wham/usage mit dem Token aus $CODEX_HOME/auth.json (Standard ~/.codex/auth.json).\\n"
+       + "Der Token wird hier nie erneuert; Codex erneuert ihn beim nächsten Aufruf.")
+   var tip = g.detailText()
+   verify(tip.indexOf("Codex-Nutzung UNBEKANNT: kein Hermes-Pool-Eintrag.") === 0, tip)
+   verify(tip.indexOf("Hermes-Pool (Eintrag 1449ff") >= 0 && tip.indexOf("hermes auth refresh") >= 0, tip)
+   verify(tip.indexOf("CODEX_HOME") < 0 && tip.indexOf("Codex erneuert") < 0, tip)
+   g.payload = {available:false,stamp:t,reason:"token_expired",plan:"go",tone:"unknown",session:null,weekly:null}
+   verify(findChild(g, "codexUnknown").text.indexOf("Token abgelaufen") >= 0, findChild(g, "codexUnknown").text)
+   verify(g.detailText().indexOf("Token abgelaufen") >= 0 && g.detailText().indexOf("hermes auth refresh") >= 0, g.detailText())
+   compare(findChild(g, "codexHeading").text, "CODEX GO")
+   // Fresh: the tooltip says which account the numbers belong to.
+   g.payload = go(t)
+   compare(findChild(g, "codexHeading").text, "CODEX GO")
+   verify(findChild(g, "codexWeekly").text.indexOf("MONAT 0%") === 0, findChild(g, "codexWeekly").text)
+   verify(g.detailText().indexOf("Hermes-Pool-Eintrag 1449ff") >= 0, g.detailText())
+   verify(g.detailText().indexOf("undefined") < 0 && g.detailText().indexOf("null") < 0, g.detailText())
+   u.payload = go(t)
+   verify(u.detailText().indexOf("Hermes") < 0, u.detailText())
+   g.payload = null; u.payload = null
+  }
+ }
+}
+'''
+    run_case(tmp_path, code, 'CodexPool::test_pool()')
+
+
+def test_pool_entry_reaches_the_helper_as_one_shell_quoted_argument(tmp_path):
+    """The real helperArgs/command expressions under /bin/sh, as the Plasma
+    executable engine runs them; an empty poolEntry adds nothing."""
+    qml = (ROOT / 'contents/ui/CodexUsage.qml').read_text()
+    args_match = re.search(r'property string helperArgs:\s*([^\n]+)', qml)
+    command_match = re.search(r'property string command:\s*([^\n]+)', qml)
+    assert args_match and command_match
+    args_expression, command_expression = args_match[1], command_match[1]
+    helper = tmp_path / 'codex_usage.py'
+    helper.write_text('import json, sys\nprint(json.dumps(sys.argv[1:]))\n')
+    for entry in ('', '1449ff', "x' ; touch pwned # $(touch pwned) `touch pwned`"):
+        js = f'''
+const MonitorLogic=require({json.dumps(str(ROOT / 'contents/code/monitor_logic.js'))});
+const usage={{poolEntry:{json.dumps(entry)}}}, scriptPath={json.dumps(str(helper))}, requestId=6;
+const helperArgs={args_expression};
+console.log({command_expression});
+'''
+        command = subprocess.check_output(['node', '-e', js], text=True).strip()
+        assert command.endswith(' # skybox-request-2'), command
+        run = subprocess.run(['/bin/sh', '-c', command], cwd=tmp_path, text=True, capture_output=True)
+        assert run.returncode == 0, run.stderr
+        assert json.loads(run.stdout) == (['--hermes-pool-entry', entry] if entry else [])
+    assert not (tmp_path / 'pwned').exists()
+
+
 def test_poll_interval_is_two_minutes_and_helper_is_wired():
     qml = (ROOT / 'contents/ui/CodexUsage.qml').read_text()
     assert re.search(r'property int pollIntervalMs: 120000\b', qml)
     assert 'Qt.resolvedUrl("../code/codex_usage.py")' in qml
 
 
-def test_codex_row_sits_directly_under_the_claude_row():
-    """KI-DIENSTE order: service cards -> VERDICHTUNG -> CLAUDE -> CODEX, and the
-    block grows by exactly one 28-px row plus the 8-px column spacing."""
+def test_codex_rows_sit_directly_under_the_claude_row():
+    """KI-DIENSTE order: service cards -> VERDICHTUNG -> CLAUDE -> CODEX (Codex
+    login) -> CODEX (Hermes pool entry 1449ff); every 28-px row adds the row
+    plus the 8-px column spacing to the block."""
     text = (ROOT / 'contents/ui/main.qml').read_text()
     block = text[text.index('// --- AI SERVICES section ---'):text.index('// --- SYSTEM LOAD section ---')]
-    assert block.count('CodexUsage {') == 1 and block.count('ClaudeUsage {') == 1
-    assert block.index('id: obsCondenseCard') < block.index('id: claudeUsage') < block.index('id: codexUsage')
-    codex = block[block.index('CodexUsage {'):]
-    codex = codex[:codex.index('}') + 1]
-    for line in ('width: parent.width', 'accent: root.cyan', 'warning: root.warning',
-                 'critical: root.critical', 'quietBorder: root.quietBorder'):
-        assert line in codex, line
-    assert 'Layout.preferredHeight: 214' in block and 'Layout.minimumHeight: 210' in block
+    assert block.count('CodexUsage {') == 2 and block.count('ClaudeUsage {') == 1
+    assert (block.index('id: obsCondenseCard') < block.index('id: claudeUsage')
+            < block.index('id: codexUsage\n') < block.index('id: codexUsagePool\n'))
+    rows = [block[m.start():block.index('}', m.start()) + 1] for m in re.finditer(r'CodexUsage \{', block)]
+    for row in rows:
+        for line in ('width: parent.width', 'ink: root.ink', 'muted: root.muted', 'accent: root.cyan',
+                     'warning: root.warning', 'critical: root.critical', 'quietBorder: root.quietBorder'):
+            assert line in row, (line, row)
+    assert 'poolEntry' not in rows[0] and 'objectName' not in rows[0]
+    assert 'poolEntry: "1449ff"' in rows[1] and 'objectName: "codexUsagePool"' in rows[1]
+    assert 'Layout.preferredHeight: 250' in block and 'Layout.minimumHeight: 246' in block

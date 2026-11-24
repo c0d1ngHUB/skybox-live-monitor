@@ -7,7 +7,8 @@ import org.kde.plasma.plasma5support 2.0 as PlasmaSupport
 // limits Codex shows in /status. Read-only, never refreshes the token, costs
 // no model usage. Polled every 2 min; unknown is never shown as 0 %.
 // Rendered as one status row of the KI-DIENSTE block, in the same form as the
-// CLAUDE row above it.
+// CLAUDE row above it. With poolEntry set, the row shows a second account whose
+// token lives in the Hermes credential pool.
 Rectangle {
     id: usage
     objectName: "codexUsage"
@@ -20,8 +21,21 @@ Rectangle {
     property color quietBorder: Qt.rgba(0.63, 0.78, 0.85, 0.28)
     property bool pollingEnabled: true
     property int pollIntervalMs: 120000
+    // Hermes credential-pool entry id of a second Codex account. Empty: the
+    // Codex login in $CODEX_HOME/auth.json. Only the id is passed on; the
+    // helper owns the pool's provider key.
+    property string poolEntry: ""
     property var payload: null
     property double nowMs: Date.now()
+    // Length of the last published long limit (the "weekly" slot of the helper).
+    // 8 days and more is a month, not a week: the Go plan publishes 30 days.
+    // Kept while the row is unknown, so it does not fall back to WOCHE.
+    property double longWindowS: 0
+    readonly property bool monthly: longWindowS >= 8 * 86400
+    onPayloadChanged: {
+        var w = payload && payload.available === true ? payload.weekly : null
+        if (w && typeof w.window_s === "number" && w.window_s > 0) longWindowS = w.window_s
+    }
     // Stale after 2.5 poll intervals (one missed poll is tolerated).
     readonly property bool fresh: !!payload && payload.available === true && typeof payload.stamp === "number"
         && nowMs / 1000 >= payload.stamp - 2 && nowMs / 1000 - payload.stamp <= pollIntervalMs / 1000 * 2.5
@@ -60,6 +74,8 @@ Rectangle {
         var days = Math.round(seconds / 86400)
         return days + (days === 1 ? " Tag" : " Tage")
     }
+    function longLabel() { return monthly ? "MONAT" : "WOCHE" }
+    function longName() { return monthly ? "Monat" : "Woche" }
     function limit(key) {
         return fresh && payload[key] && typeof payload[key].pct === "number" ? payload[key] : null
     }
@@ -86,7 +102,7 @@ Rectangle {
         var r = payload ? payload.reason : null
         if (!payload) return "noch keine Messung"
         if (r === "token_expired") return "Token abgelaufen"
-        if (r === "no_credentials") return "keine Codex-Anmeldung"
+        if (r === "no_credentials") return poolEntry.length ? "kein Hermes-Pool-Eintrag" : "keine Codex-Anmeldung"
         if (r === "network") return "nicht erreichbar"
         if (r === "bad_payload") return "Antwort unbekannt"
         if (r === "internal_error") return "interner Fehler"
@@ -117,14 +133,22 @@ Rectangle {
         if (c.has_credits === false) return "keine"
         return "unbekannt"
     }
-    function detailText() {
-        if (!fresh) return "Codex-Nutzung UNBEKANNT: " + reasonText() + ".\n"
-            + "Quelle: chatgpt.com/backend-api/wham/usage mit dem Token aus $CODEX_HOME/auth.json (Standard ~/.codex/auth.json).\n"
+    // Where the token comes from and who renews it (never this widget).
+    function sourceText() {
+        if (poolEntry.length)
+            return "Quelle: chatgpt.com/backend-api/wham/usage mit dem Token aus dem Hermes-Pool (Eintrag " + poolEntry
+                + " in $HERMES_HOME/auth.json, Standard ~/.hermes/auth.json).\n"
+                + "Der Token wird hier nie erneuert; Hermes erneuert ihn bei Nutzung oder per „hermes auth refresh“."
+        return "Quelle: chatgpt.com/backend-api/wham/usage mit dem Token aus $CODEX_HOME/auth.json (Standard ~/.codex/auth.json).\n"
             + "Der Token wird hier nie erneuert; Codex erneuert ihn beim nächsten Aufruf."
+    }
+    function detailText() {
+        if (!fresh) return "Codex-Nutzung UNBEKANNT: " + reasonText() + ".\n" + sourceText()
         var s = limit("session"), w = limit("weekly")
         var lines = ["Codex-Nutzungslimits des Plans " + (planText() || "?") + " · nur lesend, kein Modellaufruf.",
             s ? "Sitzung (" + windowText(s.window_s) + "): " + s.pct + "% · Reset " + fullReset(s.resets_at) : "Sitzung: kein Limit gemeldet",
-            w ? "Woche (" + windowText(w.window_s) + "): " + w.pct + "% · Reset " + fullReset(w.resets_at) : "Woche: kein Limit gemeldet"]
+            w ? longName() + " (" + windowText(w.window_s) + "): " + w.pct + "% · Reset " + fullReset(w.resets_at) : longName() + ": kein Limit gemeldet"]
+        if (poolEntry.length) lines.splice(1, 0, "Konto: Hermes-Pool-Eintrag " + poolEntry + " · Token wird hier nie erneuert.")
         if (payload.limit_reached === true) lines.push("LIMIT ERREICHT: Codex ist bis zum nächsten Reset gesperrt.")
         var extra = payload.extra || []
         for (var i = 0; i < extra.length; i++) {
@@ -158,7 +182,7 @@ Rectangle {
         anchors.left: heading.right; anchors.right: parent.right; anchors.rightMargin: 10
         anchors.verticalCenter: parent.verticalCenter
         horizontalAlignment: Text.AlignRight
-        text: "SITZUNG -- · WOCHE -- · " + usage.reasonText()
+        text: "SITZUNG -- · " + usage.longLabel() + " -- · " + usage.reasonText()
         color: usage.warning
         font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true
         elide: Text.ElideRight
@@ -179,7 +203,7 @@ Rectangle {
                     objectName: index === 0 ? "codexSession" : "codexWeekly"
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                     width: 200
-                    text: usage.limitText(index === 0 ? "SITZUNG" : "WOCHE", key)
+                    text: usage.limitText(index === 0 ? "SITZUNG" : usage.longLabel(), key)
                     color: usage.levelColor(key)
                     font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true
                     elide: Text.ElideRight
@@ -208,6 +232,7 @@ Rectangle {
     // Source names rotate through a bounded set (see test_datasource_name_bound).
     PlasmaSupport.DataSource {
         id: source
+        objectName: "codexSource"
         engine: "executable"
         connectedSources: []
         property bool busy: false
@@ -215,7 +240,8 @@ Rectangle {
         property double startedMs: 0
         property string buffer: ""
         property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/codex_usage.py"))
-        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + " # skybox-request-" + (requestId % 4)
+        property string helperArgs: usage.poolEntry.length ? " --hermes-pool-entry " + MonitorLogic.shellQuote(usage.poolEntry) : ""
+        property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + helperArgs + " # skybox-request-" + (requestId % 4)
         onNewData: function(name, data) {
             if (name !== command) return
             buffer += data["stdout"] || ""

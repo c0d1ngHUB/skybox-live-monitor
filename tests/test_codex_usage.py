@@ -372,6 +372,155 @@ def test_deeply_nested_json_is_a_bad_payload_and_bad_credentials(tmp_path, serve
     assert run(nested)["reason"] == "no_credentials"
 
 
+# --- Hermes credential pool (second Codex account) ---------------------------
+
+POOL_REFRESH = "rt_synthetic_pool_refresh_token_never_used"
+POOL_LABEL = "synthetic-pool-label"
+# Trimmed shape of the Go plan answer: one 30-day limit, no 5-h window.
+USAGE_GO = {
+    "user_id": "user-synthetic-go", "account_id": "acct-synthetic-go", "email": "second@example.invalid",
+    "plan_type": "go",
+    "rate_limit": {
+        "allowed": True, "limit_reached": False,
+        "primary_window": {"used_percent": 0, "limit_window_seconds": 2592000,
+                           "reset_after_seconds": 2592000, "reset_at": 1_902_592_000},
+        "secondary_window": None,
+    },
+    "code_review_rate_limit": None, "additional_rate_limits": None,
+    "credits": {"has_credits": False, "unlimited": False, "balance": "0"},
+}
+
+
+def pool_entry(entry_id, token, label=POOL_LABEL):
+    """One credential-pool entry in the shape Hermes writes (values synthetic)."""
+    return {"id": entry_id, "label": label, "auth_type": "oauth", "priority": 1, "source": "manual:device_code",
+            "access_token": token, "refresh_token": POOL_REFRESH, "last_status": "ok", "last_status_at": None,
+            "last_error_code": None, "last_error_reason": None, "last_error_message": None,
+            "last_error_reset_at": None, "base_url": "https://chatgpt.com/backend-api/codex",
+            "last_refresh": "2030-03-17T10:00:00Z", "request_count": 0}
+
+
+def hermes_auth(folder, entries=None, pool=True):
+    """Synthetic Hermes auth.json: the second entry is the account under test."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "auth.json"
+    if entries is None:
+        entries = [pool_entry("aa11bb", jwt(plan="plus", account="acct-first-pool")),
+                   pool_entry("1449ff", jwt(plan="go", account="acct-second-pool", residency="eu"))]
+    body = {"version": 1, "active_provider": "openai-codex", "providers": {},
+            "credential_pool": {"anthropic": [pool_entry("cc22dd", "sk-ant-synthetic")]}}
+    if pool:
+        body["credential_pool"]["openai-codex"] = entries
+    path.write_text(json.dumps(body))
+    return path
+
+
+def pool_secrets(path):
+    try:
+        pools = json.loads(Path(path).read_text())["credential_pool"].values()
+        tokens = [entry.get("access_token") for pool in pools for entry in pool if isinstance(entry, dict)]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError):
+        tokens = []
+    return [value for value in (*tokens, POOL_REFRESH, POOL_LABEL) if isinstance(value, str) and value]
+
+
+def run_pool(tmp_path, hermes, entry="1449ff", url="http://127.0.0.1:9/unused", env=None, pass_path=True):
+    """Pool mode. HERMES_HOME/CODEX_HOME point into tmp_path by default so a test
+    can never fall back to the developer's real credential files."""
+    args = ["python3", str(SCRIPT), "--hermes-pool-entry", entry, "--url", url, "--now", str(NOW), "--timeout", "3"]
+    if pass_path:
+        args += ["--hermes-auth", str(hermes)]
+    environ = {**os.environ, "HERMES_HOME": str(tmp_path / "no-hermes-home"), "CODEX_HOME": str(tmp_path / "no-codex-home")}
+    environ.update(env or {})
+    out = subprocess.run(args, check=True, text=True, capture_output=True, env={k: v for k, v in environ.items() if v is not None})
+    for value in pool_secrets(hermes):
+        assert value not in out.stdout and value not in out.stderr
+    return json.loads(out.stdout)
+
+
+def test_pool_entry_token_is_used_read_only(tmp_path, server):
+    s = server(body=USAGE_GO)
+    path = hermes_auth(tmp_path / "hermes")
+    before = path.read_bytes()
+    p = run_pool(tmp_path, path, url=s.url)
+    assert p["available"] is True and p["reason"] is None and p["plan"] == "go"
+    assert p["session"] is None
+    assert p["weekly"] == {"pct": 0, "resets_at": 1_902_592_000, "window_s": 2592000}
+    assert p["tone"] == "ok" and p["token_expires_in_s"] == 3600
+    # One GET with the token of entry 1449ff; account and residency from its JWT.
+    assert [(r["method"], r["path"]) for r in s.requests] == [("GET", "/backend-api/wham/usage")]
+    h = {k.lower(): v for k, v in s.requests[0]["headers"].items()}
+    second = json.loads(before)["credential_pool"]["openai-codex"][1]
+    assert h["authorization"] == "Bearer " + second["access_token"]
+    assert h["chatgpt-account-id"] == "acct-second-pool"
+    assert h["x-openai-internal-codex-residency"] == "eu"
+    # Nothing identifying is passed on and the pool file stays untouched.
+    shown = json.dumps(p)
+    for value in ("second@example.invalid", "user-synthetic-go", "acct-synthetic-go", "acct-second-pool", "1449ff"):
+        assert value not in shown, value
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("make", [
+    lambda folder: folder / "missing.json",
+    lambda folder: (folder.mkdir(parents=True), (folder / "auth.json").write_text("not json"), folder / "auth.json")[-1],
+    lambda folder: hermes_auth(folder, pool=False),
+    lambda folder: hermes_auth(folder, entries=[]),
+    lambda folder: hermes_auth(folder, entries={"1449ff": {"access_token": jwt()}}),
+    lambda folder: hermes_auth(folder, entries=["1449ff", None, 5]),
+    lambda folder: hermes_auth(folder, entries=[pool_entry("aa11bb", jwt())]),
+    # Only the id selects an entry, never the label.
+    lambda folder: hermes_auth(folder, entries=[pool_entry("zz99zz", jwt(), label="1449ff")]),
+    lambda folder: hermes_auth(folder, entries=[pool_entry("1449ff", "")]),
+    lambda folder: hermes_auth(folder, entries=[pool_entry("1449ff", None)]),
+    lambda folder: hermes_auth(folder, entries=[{"id": "1449ff", "label": POOL_LABEL}]),
+], ids=["no-file", "not-json", "no-codex-pool", "empty-pool", "pool-not-a-list", "junk-entries",
+        "other-entry-only", "label-is-not-an-id", "empty-token", "null-token", "no-token"])
+def test_missing_pool_entry_or_token_is_no_credentials(tmp_path, server, make):
+    s = server(body=USAGE_GO)
+    p = run_pool(tmp_path, make(tmp_path / "hermes"), url=s.url)
+    assert p["available"] is False and p["reason"] == "no_credentials"
+    assert p["session"] is None and p["weekly"] is None and p["plan"] is None and p["tone"] == "unknown"
+    assert s.requests == []
+
+
+def test_pool_mode_never_falls_back_to_the_codex_login(tmp_path, server):
+    """A valid Codex login next to a missing pool entry must not fill the row
+    with the first account's numbers."""
+    s = server()
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    auth_file(codex_home)
+    hermes = hermes_auth(tmp_path / "hermes", entries=[pool_entry("aa11bb", jwt())])
+    p = run_pool(tmp_path, hermes, url=s.url, env={"CODEX_HOME": str(codex_home)})
+    assert p["reason"] == "no_credentials" and s.requests == []
+
+
+def test_expired_pool_token_is_token_expired_without_network_call(tmp_path, server):
+    """Hermes renews pool tokens only when it uses them; the widget never does."""
+    s = server(body=USAGE_GO)
+    hermes = hermes_auth(tmp_path / "hermes", entries=[pool_entry("1449ff", jwt(exp=NOW - 5, plan="go"))])
+    before = hermes.read_bytes()
+    p = run_pool(tmp_path, hermes, url=s.url)
+    assert p["available"] is False and p["reason"] == "token_expired"
+    assert p["plan"] == "go" and p["token_expires_in_s"] == -5 and p["tone"] == "unknown"
+    assert s.requests == [] and hermes.read_bytes() == before
+
+
+def test_hermes_home_selects_the_pool_file(tmp_path, server):
+    s = server(body=USAGE_GO)
+    hermes = hermes_auth(tmp_path / "hermes-home")
+    p = run_pool(tmp_path, hermes, url=s.url, env={"HERMES_HOME": str(tmp_path / "hermes-home")}, pass_path=False)
+    assert p["available"] is True and p["plan"] == "go" and len(s.requests) == 1
+
+
+def test_pool_file_defaults_to_dot_hermes_in_the_home_directory(tmp_path, server):
+    s = server(body=USAGE_GO)
+    hermes = hermes_auth(tmp_path / "home" / ".hermes")
+    p = run_pool(tmp_path, hermes, url=s.url, env={"HERMES_HOME": None, "HOME": str(tmp_path / "home")}, pass_path=False)
+    assert p["available"] is True and p["plan"] == "go" and len(s.requests) == 1
+
+
 def test_an_unexpected_error_still_prints_json(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("codex_usage_under_test", SCRIPT)
     module = importlib.util.module_from_spec(spec)

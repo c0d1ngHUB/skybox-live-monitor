@@ -11,9 +11,11 @@ LOGIC = ROOT / 'contents/code/monitor_logic.js'
 SOURCES = []
 for component in ('main.qml', 'ClaudeUsage.qml', 'CodexUsage.qml'):
     source = (ROOT / 'contents/ui' / component).read_text()
+    # CodexUsage appends its optional Hermes pool argument through helperArgs.
+    args = re.search(r'property string helperArgs:\s*([^\n]+)', source)
     for match in re.finditer(r'property string scriptPath:\s*([^\n]+)\n\s*(?:(?!property string command:)[^\n]*\n)*?\s*property string command:\s*([^\n]+)', source):
         name = re.search(r'\.\./code/([^"\s]+)', match[1]).group(1)
-        SOURCES.append((component, name, match[1], match[2]))
+        SOURCES.append((component, name, match[1], match[2], args[1] if args else '""'))
 
 
 def test_all_helper_paths_are_covered():
@@ -26,9 +28,9 @@ def test_all_helper_paths_are_covered():
     }
 
 
-@pytest.mark.parametrize('component,name,path_expression,command_expression', SOURCES, ids=[row[1] for row in SOURCES])
+@pytest.mark.parametrize('component,name,path_expression,command_expression,args_expression', SOURCES, ids=[row[1] for row in SOURCES])
 @pytest.mark.parametrize('folder', ['normal', "user name ä ' % # ; $(false)"])
-def test_helper_command_decodes_and_shell_quotes(tmp_path, component, name, path_expression, command_expression, folder):
+def test_helper_command_decodes_and_shell_quotes(tmp_path, component, name, path_expression, command_expression, args_expression, folder):
     helper = tmp_path / folder / name
     helper.parent.mkdir()
     if name.endswith('.py'):
@@ -39,7 +41,9 @@ def test_helper_command_decodes_and_shell_quotes(tmp_path, component, name, path
 const MonitorLogic=require({json.dumps(str(LOGIC))});
 const Qt={{resolvedUrl:()=>{json.dumps(helper.as_uri())}}};
 const root={{netIf:'eth0'}}, networkCountersSource={{generation:7}},health={{session:'123-456'}},requestId=1;
+const usage={{poolEntry:{json.dumps(folder)}}};
 const scriptPath={path_expression};
+const helperArgs={args_expression};
 const command={command_expression};
 console.log(JSON.stringify({{scriptPath,command}}));
 '''

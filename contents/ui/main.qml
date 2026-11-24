@@ -655,13 +655,14 @@ PlasmoidItem {
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.bottomMargin: -8; color: root.cyan; opacity: 0.45 }
 
             // --- AI SERVICES section --- (rendered title: KI-DIENSTE)
-            // Status cards, then the three status rows: Hindsight condensation,
-            // Claude plan limits and Codex plan limits. Everything about the AI
-            // stack lives in this block; the host card below is host-only.
+            // Status cards, then the four status rows: Hindsight condensation,
+            // Claude plan limits and the Codex plan limits of two accounts (the
+            // Codex login and a Hermes credential-pool entry). Everything about
+            // the AI stack lives in this block; the host card below is host-only.
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 214
-                Layout.minimumHeight: 210
+                Layout.preferredHeight: 250
+                Layout.minimumHeight: 246
                 clip: true
                 Column {
                     anchors.fill: parent
@@ -778,6 +779,20 @@ PlasmoidItem {
                     }
                     CodexUsage {
                         id: codexUsage
+                        width: parent.width
+                        ink: root.ink
+                        muted: root.muted
+                        accent: root.cyan
+                        warning: root.warning
+                        critical: root.critical
+                        quietBorder: root.quietBorder
+                    }
+                    // Second Codex account (plan GO): its token lives only in the
+                    // Hermes credential pool, entry 1449ff; read, never refreshed.
+                    CodexUsage {
+                        id: codexUsagePool
+                        objectName: "codexUsagePool"
+                        poolEntry: "1449ff"
                         width: parent.width
                         ink: root.ink
                         muted: root.muted
