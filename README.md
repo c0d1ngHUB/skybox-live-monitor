@@ -58,9 +58,10 @@ Memory figures use one unit family everywhere (GiB / MiB).
   whose token lives only in the Hermes credential pool (`poolEntry: "1449ff"` in
   `main.qml`). A limit window of 8 days or more is labelled **MONAT** instead of
   WOCHE (the Go plan publishes one 30-day limit and no 5-hour window, so the
-  session shows a muted `--`). Hermes renews the pool token when it uses the
-  entry or on `hermes auth refresh`; the widget never does and shows
-  `Token abgelaufen` meanwhile.
+  session shows a muted `--`); until its first answer the row presets 30 days.
+  Hermes renews the pool token when it uses the entry or on
+  `hermes auth refresh`; the widget never does and shows `Token abgelaufen`
+  meanwhile.
 - Longest completed Hermes run across the default and named profiles;
   assistant tool-call preambles and unfinished turns do not count as completion
   One unreadable profile does not discard other readings: a partial maximum is

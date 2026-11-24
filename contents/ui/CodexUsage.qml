@@ -29,7 +29,8 @@ Rectangle {
     property double nowMs: Date.now()
     // Length of the last published long limit (the "weekly" slot of the helper).
     // 8 days and more is a month, not a week: the Go plan publishes 30 days.
-    // Kept while the row is unknown, so it does not fall back to WOCHE.
+    // Kept while the row is unknown, so it does not fall back to WOCHE; an
+    // instance may preset the length it expects before the first answer.
     property double longWindowS: 0
     readonly property bool monthly: longWindowS >= 8 * 86400
     onPayloadChanged: {

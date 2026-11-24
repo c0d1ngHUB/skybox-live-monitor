@@ -789,10 +789,13 @@ PlasmoidItem {
                     }
                     // Second Codex account (plan GO): its token lives only in the
                     // Hermes credential pool, entry 1449ff; read, never refreshed.
+                    // Until an answer publishes the window (and while the pool
+                    // token is expired) the row assumes the Go plan's 30 days.
                     CodexUsage {
                         id: codexUsagePool
                         objectName: "codexUsagePool"
                         poolEntry: "1449ff"
+                        longWindowS: 30 * 86400
                         width: parent.width
                         ink: root.ink
                         muted: root.muted
