@@ -655,14 +655,15 @@ PlasmoidItem {
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.bottomMargin: -8; color: root.cyan; opacity: 0.45 }
 
             // --- AI SERVICES section --- (rendered title: KI-DIENSTE)
-            // Status cards, then the four status rows: Hindsight condensation,
-            // Claude plan limits and the Codex plan limits of two accounts (the
-            // Codex login and a Hermes credential-pool entry). Everything about
-            // the AI stack lives in this block; the host card below is host-only.
+            // Status cards, then the three status rows: Hindsight condensation,
+            // Claude plan limits and Codex plan limits. Everything about the AI
+            // stack lives in this block; the host card below is host-only.
+            // (A second Codex row for a Hermes credential-pool entry existed from
+            // PR #20 until 2026-11-25; CodexUsage.poolEntry stays for reuse.)
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 250
-                Layout.minimumHeight: 246
+                Layout.preferredHeight: 214
+                Layout.minimumHeight: 210
                 clip: true
                 Column {
                     anchors.fill: parent
@@ -779,23 +780,6 @@ PlasmoidItem {
                     }
                     CodexUsage {
                         id: codexUsage
-                        width: parent.width
-                        ink: root.ink
-                        muted: root.muted
-                        accent: root.cyan
-                        warning: root.warning
-                        critical: root.critical
-                        quietBorder: root.quietBorder
-                    }
-                    // Second Codex account (plan GO): its token lives only in the
-                    // Hermes credential pool, entry 1449ff; read, never refreshed.
-                    // Until an answer publishes the window (and while the pool
-                    // token is expired) the row assumes the Go plan's 30 days.
-                    CodexUsage {
-                        id: codexUsagePool
-                        objectName: "codexUsagePool"
-                        poolEntry: "1449ff"
-                        longWindowS: 30 * 86400
                         width: parent.width
                         ink: root.ink
                         muted: root.muted
