@@ -415,7 +415,7 @@ def test_system_and_ai_service_rows_place_related_status_together():
     assert 'id: systemMetaGrid' in text and 'ANTW. MAX24H' not in text
     assert 'id: openAiOauthCard' not in text
     assert 'font.pixelSize: 14' in text
-    assert 'Layout.preferredHeight: 250' in text
+    assert 'Layout.preferredHeight: 214' in text
 
 
 
@@ -715,8 +715,8 @@ def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
     assert 'root.gpu0PowerLimitWatts' in text and 'root.gpu1PowerLimitWatts' in text
     assert 'elide: Text.ElideRight' in text
     assert 'height: 44' in text
-    assert 'Layout.preferredHeight: 250' in text
-    assert 'Layout.minimumHeight: 246' in text
+    assert 'Layout.preferredHeight: 214' in text
+    assert 'Layout.minimumHeight: 210' in text
     assert 'id: openAiOauthCard' not in text
     # The HINDSIGHT OBS row was removed on request; VERDICHTUNG replaces it.
     assert 'id: obsHealthCard' not in text

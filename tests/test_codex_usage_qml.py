@@ -297,62 +297,18 @@ def test_poll_interval_is_two_minutes_and_helper_is_wired():
     assert 'Qt.resolvedUrl("../code/codex_usage.py")' in qml
 
 
-def test_codex_rows_sit_directly_under_the_claude_row():
+def test_codex_row_sits_directly_under_the_claude_row():
     """KI-DIENSTE order: service cards -> VERDICHTUNG -> CLAUDE -> CODEX (Codex
-    login) -> CODEX (Hermes pool entry 1449ff); every 28-px row adds the row
-    plus the 8-px column spacing to the block."""
+    login). The second row for a Hermes pool entry (CODEX GO) was removed on
+    2026-11-25; the block is back to 214/210 px."""
     text = (ROOT / 'contents/ui/main.qml').read_text()
     block = text[text.index('// --- AI SERVICES section ---'):text.index('// --- SYSTEM LOAD section ---')]
-    assert block.count('CodexUsage {') == 2 and block.count('ClaudeUsage {') == 1
-    assert (block.index('id: obsCondenseCard') < block.index('id: claudeUsage')
-            < block.index('id: codexUsage\n') < block.index('id: codexUsagePool\n'))
-    rows = [block[m.start():block.index('}', m.start()) + 1] for m in re.finditer(r'CodexUsage \{', block)]
-    for row in rows:
-        for line in ('width: parent.width', 'ink: root.ink', 'muted: root.muted', 'accent: root.cyan',
-                     'warning: root.warning', 'critical: root.critical', 'quietBorder: root.quietBorder'):
-            assert line in row, (line, row)
-    assert 'poolEntry' not in rows[0] and 'objectName' not in rows[0]
-    assert 'poolEntry: "1449ff"' in rows[1] and 'objectName: "codexUsagePool"' in rows[1]
-    assert 'Layout.preferredHeight: 250' in block and 'Layout.minimumHeight: 246' in block
-
-
-def test_pool_row_from_main_qml_says_monat_before_its_first_answer(tmp_path):
-    """The pool row as main.qml declares it: right after a Plasma start, and as
-    long as its token stays expired, it must not claim a weekly limit. The
-    first published window still wins."""
-    text = (ROOT / 'contents/ui/main.qml').read_text()
-    block = text[text.index('// --- AI SERVICES section ---'):text.index('// --- SYSTEM LOAD section ---')]
-    start = block.rindex('CodexUsage {', 0, block.index('id: codexUsagePool\n'))
-    row = block[start:block.index('}', start) + 1].replace('CodexUsage {', 'CodexUsage { pollingEnabled: false', 1)
-    code = '''import QtQuick
-import QtTest
-import ''' + json.dumps((ROOT / 'contents/ui').as_uri()) + '''
-Item {
- id: root; width: 860; height: 60
- property color ink: "#e4f5ff"; property color muted: "#8ba8b5"; property color cyan: "#96f5f6"
- property color warning: "#ffca70"; property color critical: "#ff7373"; property color quietBorder: "#47a1c7d9"
- Column {
-  width: parent.width
-''' + row + '''
- }
- TestCase {
-  name:"CodexPoolRow"; when:windowShown
-  function test_initial_window_name() {
-   var g = findChild(root, "codexUsagePool")
-   verify(g !== null && g.poolEntry === "1449ff")
-   compare(findChild(g, "codexUnknown").text, "SITZUNG -- · MONAT -- · noch keine Messung")
-   var t = Date.now() / 1000
-   g.nowMs = t * 1000
-   g.payload = {available:false,stamp:t,reason:"token_expired",plan:"go",tone:"unknown",session:null,weekly:null,extra:[]}
-   compare(findChild(g, "codexUnknown").text, "SITZUNG -- · MONAT -- · Token abgelaufen")
-   // A plan change to a 7-day limit is taken from the first fresh answer.
-   g.payload = {available:true,stamp:t,reason:null,plan:"plus",tone:"ok",session:null,
-     weekly:{pct:3,resets_at:t+3*86400,window_s:604800},limit_reached:false,extra:[],credits:null,
-     reset_credits:null,token_expires_in_s:3600,thresholds:{warn_pct:75,critical_pct:90}}
-   verify(findChild(g, "codexWeekly").text.indexOf("WOCHE 3%") === 0, findChild(g, "codexWeekly").text)
-   g.payload = null
-  }
- }
-}
-'''
-    run_case(tmp_path, code, 'CodexPoolRow::test_initial_window_name()')
+    assert block.count('CodexUsage {') == 1 and block.count('ClaudeUsage {') == 1
+    assert block.index('id: obsCondenseCard') < block.index('id: claudeUsage') < block.index('id: codexUsage\n')
+    assert 'codexUsagePool' not in block and 'poolEntry:' not in block and '1449ff' not in block
+    start = block.index('CodexUsage {')
+    row = block[start:block.index('}', start) + 1]
+    for line in ('width: parent.width', 'ink: root.ink', 'muted: root.muted', 'accent: root.cyan',
+                 'warning: root.warning', 'critical: root.critical', 'quietBorder: root.quietBorder'):
+        assert line in row, (line, row)
+    assert 'Layout.preferredHeight: 214' in block and 'Layout.minimumHeight: 210' in block
