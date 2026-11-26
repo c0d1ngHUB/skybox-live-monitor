@@ -186,6 +186,8 @@ PlasmoidItem {
     property color orange: "#FF9F43"
     property color warning: "#FFD166"
     property color critical: "#FF6B6B"
+    // Neon green of the HINDSIGHT VERDICHTUNG row (Markus, 2026-11-26).
+    property color neonGreen: "#39FF14"
     // Healthy structure stays quiet; warning and critical states retain full semantic color.
     property color quietBorder: Qt.rgba(0.63, 0.78, 0.85, 0.28)
 
@@ -655,15 +657,16 @@ PlasmoidItem {
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.bottomMargin: -8; color: root.cyan; opacity: 0.45 }
 
             // --- AI SERVICES section --- (rendered title: KI-DIENSTE)
-            // Status cards, then the three status rows: Hindsight condensation,
-            // Claude plan limits and Codex plan limits. Everything about the AI
-            // stack lives in this block; the host card below is host-only.
-            // (A second Codex row for a Hermes credential-pool entry existed from
-            // PR #20 until 2026-11-25; CodexUsage.poolEntry stays for reuse.)
+            // Status cards, then the status rows: Hindsight condensation, Claude
+            // plan limits and one Codex row per account (since 2026-11-26): the
+            // Codex login (FUSSI) and the Hermes credential-pool entries 1449ff
+            // (MAGDII) and e4b59d (MARION). Pool entry 23a7fd is the same account
+            // as the Codex login and gets no row of its own. Everything about the
+            // AI stack lives in this block; the host card below is host-only.
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 214
-                Layout.minimumHeight: 210
+                Layout.preferredHeight: 286
+                Layout.minimumHeight: 282
                 clip: true
                 Column {
                     anchors.fill: parent
@@ -751,7 +754,7 @@ PlasmoidItem {
                             anchors.leftMargin: 10
                             anchors.verticalCenter: parent.verticalCenter
                             text: "HINDSIGHT VERDICHTUNG"
-                            color: root.muted
+                            color: root.neonGreen
                             font.family: "DejaVu Sans Mono"
                             font.pixelSize: 14
                             font.bold: true
@@ -761,7 +764,7 @@ PlasmoidItem {
                             anchors.rightMargin: 10
                             anchors.verticalCenter: parent.verticalCenter
                             text: root.obsCondenseLabel()
-                            color: root.obsHealthUnavailable ? root.muted : root.cyan
+                            color: root.obsHealthUnavailable ? root.muted : root.neonGreen
                             font.family: "DejaVu Sans Mono"
                             font.pixelSize: 13
                             font.bold: true
@@ -771,6 +774,7 @@ PlasmoidItem {
                     ClaudeUsage {
                         id: claudeUsage
                         width: parent.width
+                        headingWidth: 180
                         ink: root.ink
                         muted: root.muted
                         accent: root.cyan
@@ -780,7 +784,41 @@ PlasmoidItem {
                     }
                     CodexUsage {
                         id: codexUsage
+                        accountLabel: "FUSSI"
                         width: parent.width
+                        headingWidth: 180
+                        ink: root.ink
+                        muted: root.muted
+                        accent: root.cyan
+                        warning: root.warning
+                        critical: root.critical
+                        quietBorder: root.quietBorder
+                    }
+                    // Hermes credential-pool accounts: read only, never refreshed.
+                    CodexUsage {
+                        id: codexUsageMagdii
+                        objectName: "codexUsageMagdii"
+                        poolEntry: "1449ff"
+                        accountLabel: "MAGDII"
+                        // Until an answer publishes the window (and while the pool
+                        // token is expired) the row assumes the Go plan's 30 days.
+                        longWindowS: 30 * 86400
+                        width: parent.width
+                        headingWidth: 180
+                        ink: root.ink
+                        muted: root.muted
+                        accent: root.cyan
+                        warning: root.warning
+                        critical: root.critical
+                        quietBorder: root.quietBorder
+                    }
+                    CodexUsage {
+                        id: codexUsageMarion
+                        objectName: "codexUsageMarion"
+                        poolEntry: "e4b59d"
+                        accountLabel: "MARION"
+                        width: parent.width
+                        headingWidth: 180
                         ink: root.ink
                         muted: root.muted
                         accent: root.cyan

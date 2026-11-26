@@ -297,18 +297,80 @@ def test_poll_interval_is_two_minutes_and_helper_is_wired():
     assert 'Qt.resolvedUrl("../code/codex_usage.py")' in qml
 
 
-def test_codex_row_sits_directly_under_the_claude_row():
-    """KI-DIENSTE order: service cards -> VERDICHTUNG -> CLAUDE -> CODEX (Codex
-    login). The second row for a Hermes pool entry (CODEX GO) was removed on
-    2026-11-25; the block is back to 214/210 px."""
+def test_codex_rows_sit_directly_under_the_claude_row():
+    """KI-DIENSTE order: service cards -> VERDICHTUNG -> CLAUDE -> one CODEX row
+    per account (since 2026-11-26): the Codex login (FUSSI), then the Hermes
+    pool entries 1449ff (MAGDII) and e4b59d (MARION). Pool entry 23a7fd is the
+    Codex login's own account and must not get a duplicate row. Block 286/282 px
+    (214/210 plus two 28-px rows and their 8-px spacing)."""
     text = (ROOT / 'contents/ui/main.qml').read_text()
     block = text[text.index('// --- AI SERVICES section ---'):text.index('// --- SYSTEM LOAD section ---')]
-    assert block.count('CodexUsage {') == 1 and block.count('ClaudeUsage {') == 1
-    assert block.index('id: obsCondenseCard') < block.index('id: claudeUsage') < block.index('id: codexUsage\n')
-    assert 'codexUsagePool' not in block and 'poolEntry:' not in block and '1449ff' not in block
-    start = block.index('CodexUsage {')
-    row = block[start:block.index('}', start) + 1]
-    for line in ('width: parent.width', 'ink: root.ink', 'muted: root.muted', 'accent: root.cyan',
-                 'warning: root.warning', 'critical: root.critical', 'quietBorder: root.quietBorder'):
-        assert line in row, (line, row)
-    assert 'Layout.preferredHeight: 214' in block and 'Layout.minimumHeight: 210' in block
+    assert block.count('CodexUsage {') == 3 and block.count('ClaudeUsage {') == 1
+    order = [block.index(s) for s in ('id: obsCondenseCard', 'id: claudeUsage', 'id: codexUsage\n',
+                                      'id: codexUsageMagdii', 'id: codexUsageMarion')]
+    assert order == sorted(order), order
+    assert block.count('poolEntry:') == 2 and '23a7fd' not in block.replace('Pool entry 23a7fd', '')
+    rows = []
+    start = 0
+    for _ in range(3):
+        start = block.index('CodexUsage {', start)
+        rows.append(block[start:block.index('}', start) + 1])
+        start += 1
+    expected = [('FUSSI', None), ('MAGDII', '1449ff'), ('MARION', 'e4b59d')]
+    for row, (label, entry) in zip(rows, expected):
+        assert f'accountLabel: "{label}"' in row, row
+        assert (f'poolEntry: "{entry}"' in row) if entry else ('poolEntry:' not in row), row
+        for line in ('width: parent.width', 'headingWidth: 180', 'ink: root.ink', 'muted: root.muted',
+                     'accent: root.cyan', 'warning: root.warning', 'critical: root.critical',
+                     'quietBorder: root.quietBorder'):
+            assert line in row, (line, row)
+    # The Go account publishes a 30-day window; only its row presets MONAT.
+    assert 'longWindowS: 30 * 86400' in rows[1] and 'longWindowS' not in rows[0] + rows[2]
+    # The CLAUDE row shares the heading width so the limit columns line up.
+    claude = block[block.index('ClaudeUsage {'):block.index('}', block.index('ClaudeUsage {')) + 1]
+    assert 'headingWidth: 180' in claude
+    assert 'Layout.preferredHeight: 286' in block and 'Layout.minimumHeight: 282' in block
+
+
+def test_account_label_names_the_row_without_changing_an_unlabelled_one(tmp_path):
+    """accountLabel follows the plan in the heading and names the account in the
+    tooltip; headingWidth sizes the heading column. Without them nothing changes."""
+    code = '''import QtQuick
+import QtTest
+import ''' + json.dumps((ROOT / 'contents/ui').as_uri()) + '''
+Item {
+ id:root; width:860; height:160
+ CodexUsage { id:u; width:parent.width; height:implicitHeight; pollingEnabled:false }
+ CodexUsage { id:f; y:40; width:parent.width; height:implicitHeight; pollingEnabled:false; accountLabel:"fussi"; headingWidth:180 }
+ CodexUsage { id:m; y:80; width:parent.width; height:implicitHeight; pollingEnabled:false; poolEntry:"e4b59d"; accountLabel:"MARION"; headingWidth:180 }
+ TestCase {
+  name:"CodexAccount"; when:windowShown
+''' + GO_PAYLOAD + '''
+  function test_account() {
+   compare(findChild(u, "codexHeading").width, 130)
+   compare(findChild(f, "codexHeading").width, 180)
+   compare(findChild(u, "codexHeading").text, "CODEX")
+   compare(findChild(f, "codexHeading").text, "CODEX · FUSSI")
+   var t = Date.now() / 1000
+   u.nowMs = t * 1000; f.nowMs = t * 1000; m.nowMs = t * 1000
+   var p = go(t); p.plan = "plus"
+   u.payload = p; f.payload = p; m.payload = p
+   compare(findChild(u, "codexHeading").text, "CODEX PLUS")
+   compare(findChild(f, "codexHeading").text, "CODEX PLUS · FUSSI")
+   compare(findChild(m, "codexHeading").text, "CODEX PLUS · MARION")
+   // The heading fits its column in the board font, no elision.
+   var h = findChild(m, "codexHeading")
+   verify(h.implicitWidth <= h.width, h.implicitWidth + " > " + h.width)
+   verify(u.detailText().indexOf("Konto:") < 0, u.detailText())
+   verify(f.detailText().indexOf("Konto: FUSSI · Codex-Anmeldung") >= 0, f.detailText())
+   verify(m.detailText().indexOf("Konto: MARION · Hermes-Pool-Eintrag e4b59d") >= 0, m.detailText())
+   var none = {available:false,stamp:t,reason:"token_expired",plan:null,tone:"unknown",session:null,weekly:null}
+   m.payload = none; u.payload = none
+   verify(m.detailText().indexOf("Codex-Nutzung MARION UNBEKANNT: Token abgelaufen.") === 0, m.detailText())
+   verify(u.detailText().indexOf("Codex-Nutzung UNBEKANNT: Token abgelaufen.") === 0, u.detailText())
+   u.payload = null; f.payload = null; m.payload = null
+  }
+ }
+}
+'''
+    run_case(tmp_path, code, 'CodexAccount::test_account()')

@@ -20,6 +20,8 @@ Rectangle {
     property color quietBorder: Qt.rgba(0.63, 0.78, 0.85, 0.28)
     property bool pollingEnabled: true
     property int pollIntervalMs: 120000
+    // Heading column width; main.qml sets the same value on the CODEX rows.
+    property int headingWidth: 130
     property var payload: null
     property double nowMs: Date.now()
     // Stale after 2.5 poll intervals (one missed poll is tolerated).
@@ -122,7 +124,7 @@ Rectangle {
         id: heading
         objectName: "claudeHeading"
         anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
-        width: 130
+        width: usage.headingWidth
         text: usage.headingText()
         color: usage.muted
         font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true
