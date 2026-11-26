@@ -71,6 +71,7 @@ PlasmoidItem {
     property bool hermesMaxThinkPartial: false
     property string hermesGatewayState: "UNKNOWN"
     property string hindsightState: "UNKNOWN"
+    property var hindsightConsolidation: null
     // HINDSIGHT VERDICHTUNG row, read by contents/code/hindsight_observation_health.py.
     // Only the condensation numbers are displayed; the helper still ships the full
     // health payload (backlog, scope drift, orphan audit) for its CLI.
@@ -167,6 +168,7 @@ PlasmoidItem {
     function resetServices() {
         root.hermesGatewayState = "UNKNOWN"
         root.hindsightState = "UNKNOWN"
+        root.hindsightConsolidation = null
     }
     function resetNetwork() {
         root.networkAvailable = false
@@ -728,11 +730,39 @@ PlasmoidItem {
                             border.width: 1
                             border.color: root.serviceBorderColor(root.hindsightState)
                             Column {
-                                anchors.fill: parent
+                                anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
                                 anchors.margins: 8
                                 spacing: 2
                                 Text { text: "HINDSIGHT"; color: root.muted; font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true }
-                                Text { text: root.serviceStateLabel(root.hindsightState); color: root.serviceToneColor(root.hindsightState); font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
+                                Text { id: hindsightServiceLabel; text: root.serviceStateLabel(root.hindsightState); color: root.serviceToneColor(root.hindsightState); font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
+                            }
+                            PlasmaCore.ToolTipArea {
+                                anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.right: parent.right
+                                anchors.margins: 8
+                                width: Math.max(0, parent.width - hindsightServiceLabel.implicitWidth - 28)
+                                mainText: "Konsolidierungsaufträge aller lokalen Hindsight-Banken · Abfrage alle 15 s."
+                                subText: root.hindsightConsolidation
+                                    ? "Läuft: vom Worker übernommen. Wartet: in der Warteschlange. Gezählt werden Aufträge, keine Fakten."
+                                    : "Der Auftragsstatus ist gerade nicht verfügbar."
+                                Column {
+                                    anchors.fill: parent
+                                    spacing: 2
+                                    Text {
+                                        width: parent.width; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight
+                                        text: "KONSOLIDIERUNG"; color: root.muted
+                                        font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true
+                                    }
+                                    Text {
+                                        objectName: "hindsightConsolidationValue"
+                                        width: parent.width; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight
+                                        readonly property var counts: root.hindsightConsolidation
+                                        text: counts ? counts.processing + (counts.processing === 1 ? " LÄUFT" : " LAUFEN")
+                                            + " · " + counts.pending + (counts.pending === 1 ? " WARTET" : " WARTEN") : "KEINE DATEN"
+                                        color: !counts ? root.muted : counts.processing > 0 ? root.neonGreen
+                                            : counts.pending > 0 ? root.ink : root.muted
+                                        font.family: "DejaVu Sans Mono"; font.pixelSize: 15; font.bold: true
+                                    }
+                                }
                             }
                         }
                     }
@@ -1621,6 +1651,9 @@ PlasmoidItem {
             root.lastServiceTelemetryMs = Date.now()
             root.hermesGatewayState = (payload.gateway || "UNKNOWN").toUpperCase()
             root.hindsightState = (payload.hindsight || "UNKNOWN").toUpperCase()
+            var counts = payload.consolidation
+            root.hindsightConsolidation = counts && Number.isSafeInteger(counts.processing) && counts.processing >= 0
+                && Number.isSafeInteger(counts.pending) && counts.pending >= 0 ? counts : null
         }
     }
 
