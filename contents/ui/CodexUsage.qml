@@ -25,6 +25,12 @@ Rectangle {
     // Codex login in $CODEX_HOME/auth.json. Only the id is passed on; the
     // helper owns the pool's provider key.
     property string poolEntry: ""
+    // Short account name shown after the plan (e.g. "CODEX PLUS · MARION"), so
+    // several Codex rows stay distinguishable. Never an e-mail address.
+    property string accountLabel: ""
+    // Heading column width; main.qml widens it for every usage row alike so the
+    // limit columns of the CLAUDE and CODEX rows stay aligned.
+    property int headingWidth: 130
     property var payload: null
     property double nowMs: Date.now()
     // Length of the last published long limit (the "weekly" slot of the helper).
@@ -116,9 +122,11 @@ Rectangle {
     }
     // "CODEX PLUS" when the plan is known, plain "CODEX" otherwise — never a
     // literal placeholder like "CODEX PLAN".
+    function accountText() { return accountLabel.trim().toUpperCase() }
     function headingText() {
         var plan = planText()
-        return plan.length ? "CODEX " + plan : "CODEX"
+        var account = accountText()
+        return (plan.length ? "CODEX " + plan : "CODEX") + (account.length ? " · " + account : "")
     }
     // The reset suffix only exists when the API named a reset time.
     function limitText(label, key) {
@@ -144,12 +152,14 @@ Rectangle {
             + "Der Token wird hier nie erneuert; Codex erneuert ihn beim nächsten Aufruf."
     }
     function detailText() {
-        if (!fresh) return "Codex-Nutzung UNBEKANNT: " + reasonText() + ".\n" + sourceText()
+        var account = accountText()
+        if (!fresh) return "Codex-Nutzung " + (account.length ? account + " " : "") + "UNBEKANNT: " + reasonText() + ".\n" + sourceText()
         var s = limit("session"), w = limit("weekly")
         var lines = ["Codex-Nutzungslimits des Plans " + (planText() || "?") + " · nur lesend, kein Modellaufruf.",
             s ? "Sitzung (" + windowText(s.window_s) + "): " + s.pct + "% · Reset " + fullReset(s.resets_at) : "Sitzung: kein Limit gemeldet",
             w ? longName() + " (" + windowText(w.window_s) + "): " + w.pct + "% · Reset " + fullReset(w.resets_at) : longName() + ": kein Limit gemeldet"]
-        if (poolEntry.length) lines.splice(1, 0, "Konto: Hermes-Pool-Eintrag " + poolEntry + " · Token wird hier nie erneuert.")
+        if (poolEntry.length) lines.splice(1, 0, "Konto: " + (account.length ? account + " · " : "") + "Hermes-Pool-Eintrag " + poolEntry + " · Token wird hier nie erneuert.")
+        else if (account.length) lines.splice(1, 0, "Konto: " + account + " · Codex-Anmeldung")
         if (payload.limit_reached === true) lines.push("LIMIT ERREICHT: Codex ist bis zum nächsten Reset gesperrt.")
         var extra = payload.extra || []
         for (var i = 0; i < extra.length; i++) {
@@ -171,7 +181,7 @@ Rectangle {
         id: heading
         objectName: "codexHeading"
         anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
-        width: 130
+        width: usage.headingWidth
         text: usage.headingText()
         color: usage.muted
         font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true

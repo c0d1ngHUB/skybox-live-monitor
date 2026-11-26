@@ -104,4 +104,10 @@ def test_row_is_wired_into_the_dashboard_and_reset_path():
     assert text.index('text: "HINDSIGHT"') < text.index("id: obsCondenseCard") < text.index("id: claudeUsage")
     # Healthy rows keep the quiet border; only an unreachable API colours it.
     assert 'border.color: root.obsHealthUnavailable ? root.warning : root.quietBorder' in text
+    # Label and figures in neon green (Markus, 2026-11-26); unknown stays muted.
+    assert 'property color neonGreen: "#39FF14"' in text
+    card = text[text.index("id: obsCondenseCard"):text.index("id: claudeUsage")]
+    assert card.count("color: root.neonGreen") == 1
+    assert "color: root.obsHealthUnavailable ? root.muted : root.neonGreen" in card
+    assert "root.cyan" not in card
     assert "id: obsHealthCard" not in text
