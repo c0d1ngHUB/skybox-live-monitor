@@ -74,6 +74,9 @@ Memory figures use one unit family everywhere (GiB / MiB).
 - Service cards return to UNKNOWN on helper failures or after 60 seconds without
   a completed service poll; root disk capacity comes exclusively from the same
   statvfs reading as its used/free values
+- The Hindsight status card shows running and queued consolidation **jobs**, not
+  fact counts. It polls the local operations API across all visible banks every
+  15 seconds. An incomplete or failed poll shows **KEINE DATEN**, not zero jobs.
 - Hindsight observation health: the card reports the quality signals that
   survive a bank rebuild — **MERGE** (share of observations that merged more than
   one raw fact; higher is better, because consolidation that never merges only

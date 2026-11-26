@@ -8,6 +8,8 @@ from typing import Any, cast
 import sys
 import threading
 
+import pytest
+
 MODULE = Path(__file__).parents[1] / "contents/code/ai_services_status.py"
 spec = importlib.util.spec_from_file_location("ai_services_status", MODULE)
 assert spec and spec.loader
@@ -81,3 +83,83 @@ def test_gateway_status_maps_inactive_to_down(monkeypatch):
                         subprocess.CompletedProcess(command, 3, "inactive", ""))
     status = ai.hermes_gateway_status()
     assert status.state == "down"
+
+
+def test_fetch_json_does_not_follow_redirects():
+    requested = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requested.append(self.path)
+            if self.path == "/health":
+                self.send_response(302)
+                self.send_header("Location", "/redirected")
+                self.end_headers()
+            else:
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"status":"healthy"}')
+
+        def log_message(self, format, *args):
+            pass
+
+    with HTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            result = ai.fetch_json(f"http://127.0.0.1:{server.server_port}/health")
+        finally:
+            server.shutdown()
+            thread.join()
+
+    assert result is None
+    assert requested == ["/health"]
+
+
+def test_incomplete_bank_inventory_is_not_reported_as_idle(monkeypatch):
+    monkeypatch.setattr(ai, 'fetch_json', lambda _: {"total": 101, "banks": []})
+    assert ai.hindsight_consolidation_counts() is None
+
+
+@pytest.mark.parametrize("counts,expected", [
+    ((2, 1, 0, 3), {"processing": 2, "pending": 4}),
+    ((0, 0, 0, 0), {"processing": 0, "pending": 0}),
+    ((2, 1, 0, None), None),  # A failed bank poll is not an idle bank.
+    ((2, 1, 0, True), None),  # Booleans and other malformed totals are not counts.
+])
+def test_hindsight_counts_filtered_jobs_across_banks(counts, expected):
+    routes: dict[str, dict | None] = {
+        "/v1/default/banks?limit=100": {"total": 2, "banks": [
+            {"bank_id": "hermes"}, {"bank_id": "bot:hotel"},
+        ]},
+    }
+    for index, bank in enumerate(("hermes", "bot%3Ahotel")):
+        for offset, status in enumerate(("processing", "pending")):
+            total = counts[index * 2 + offset]
+            routes[f"/v1/default/banks/{bank}/operations?type=consolidation&status={status}&limit=1"] = (
+                None if total is None else {"total": total}
+            )
+    requested = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requested.append(self.path)
+            payload = routes.get(self.path)
+            self.send_response(200 if payload is not None else 503)
+            self.end_headers()
+            self.wfile.write(ai.json.dumps(payload).encode())
+
+        def log_message(self, format, *args):
+            pass
+
+    with HTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            actual = ai.hindsight_consolidation_counts(f"http://127.0.0.1:{server.server_port}")
+        finally:
+            server.shutdown()
+            thread.join()
+
+    assert actual == expected
+    assert sorted(requested) == sorted(routes)

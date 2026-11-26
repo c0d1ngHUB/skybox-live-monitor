@@ -33,16 +33,25 @@ def qml_property(source_id, name):
 
 # --- AI services poll -------------------------------------------------------
 
-def test_service_poll_reports_only_gateway_and_hindsight(monkeypatch, capsys):
+@pytest.mark.parametrize('state,counts', [('healthy', {'processing': 2, 'pending': 1}), ('error', None)])
+def test_service_poll_reports_gateway_hindsight_and_job_counts(monkeypatch, capsys, state, counts):
     ai = load('ai_services_status')
     calls = []
+    count_calls = []
     monkeypatch.setattr(ai.subprocess, 'run', lambda command, *a, **k: calls.append(command))
     monkeypatch.setattr(ai, 'hermes_gateway_status', lambda: ai.ServiceStatus('running'))
-    monkeypatch.setattr(ai, 'hindsight_status', lambda: ai.ServiceStatus('healthy'))
+    monkeypatch.setattr(ai, 'hindsight_status', lambda: ai.ServiceStatus(state))
+
+    def count_jobs():
+        count_calls.append(True)
+        return {'processing': 2, 'pending': 1}
+
+    monkeypatch.setattr(ai, 'hindsight_consolidation_counts', count_jobs)
     assert ai.main() == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {'gateway': 'running', 'hindsight': 'healthy'}
+    assert payload == {'gateway': 'running', 'hindsight': state, 'consolidation': counts}
     assert calls == []
+    assert count_calls == ([True] if state == 'healthy' else [])
 
 
 def test_service_payload_sets_gateway_and_hindsight_state():

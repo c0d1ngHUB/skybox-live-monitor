@@ -693,14 +693,15 @@ def test_process_rows_reserve_a_right_aligned_value_column():
     assert "anchors.right: processValue.left" in text
 
 
-def test_ai_services_helper_is_local_only_and_null_safe_for_weekly_usage():
+def test_ai_services_helper_is_local_only():
     text = AI_HELPER.read_text()
     assert 'hermes-gateway.service' in text
-    assert '127.0.0.1:9177/health' in text
+    assert 'HINDSIGHT_URL = "http://127.0.0.1:9177"' in text
+    assert 'fetch_json(f"{HINDSIGHT_URL}/health")' in text
     assert '11435' not in text
     assert 'nvidia-smi' not in text
     assert 'http://' in text and '127.0.0.1' in text
-    assert 'requests' not in text
+    assert not re.search(r'^(?:import|from) requests\b', text, re.MULTILINE)
 
 
 def test_ai_services_and_dual_gpu_power_are_rendered_compactly():
