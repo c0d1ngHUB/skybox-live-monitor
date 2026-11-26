@@ -59,6 +59,15 @@ def test_real_zero_and_warning_are_distinct(state):
     assert p['tone'] == 'warn'
 
 
+@pytest.mark.parametrize('reset', ['2026-11-26T15:59:59Z', '2026-11-26T16:00:00Z'])
+def test_reset_at_or_before_sample_does_not_invalidate_usage(state, reset):
+    state.write_text(json.dumps({'history': [{'t': '2026-11-26T16:00:00Z', 's': 100, 'w': 55}],
+                                 'alerted': {'session': {'reset': reset}}}))
+    p = read_state(state)
+    assert p['session'] == {'pct': 0, 'resets_at': None}
+    assert p['weekly']['pct'] == 45
+
+
 @pytest.mark.parametrize('raw', ['{', '[]', '{}', '{"history": [null]}',
                                  '{"history":[{"t":"2026-11-26T16:00:00","s":90,"w":25}]}',
                                  '{"history":[{"t":"2026-11-26T16:00:00Z","s":null,"w":null}]}'])

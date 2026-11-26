@@ -49,6 +49,9 @@ def read_quota(path):
             continue
         entry = alerts.get(name) if isinstance(alerts, dict) else None
         reset = timestamp(entry.get('reset')) if isinstance(entry, dict) else None
+        # An inactive or previous period's reset must not hide a newer sample.
+        if reset is not None and reset <= stamp:
+            reset = None
         pct = round(100 - remaining)
         out[name] = {'pct': pct, 'resets_at': reset}
         used.append(pct)
