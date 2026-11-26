@@ -741,26 +741,68 @@ PlasmoidItem {
                                 anchors.margins: 8
                                 width: Math.max(0, parent.width - hindsightServiceLabel.implicitWidth - 28)
                                 mainText: "Konsolidierungsaufträge aller lokalen Hindsight-Banken · Abfrage alle 15 s."
-                                subText: root.hindsightConsolidation
-                                    ? "Läuft: vom Worker übernommen. Wartet: in der Warteschlange. Gezählt werden Aufträge, keine Fakten."
-                                    : "Der Auftragsstatus ist gerade nicht verfügbar."
+                                subText: !root.hindsightConsolidation ? "Der Auftragsstatus ist gerade nicht verfügbar."
+                                    : root.hindsightConsolidation.processing > 0
+                                        ? "In Bearbeitung: vom Worker übernommen."
+                                            + (root.hindsightConsolidation.done !== null
+                                                ? " Der Balken zeigt verarbeitete von insgesamt an Fakten des laufenden Auftrags ("
+                                                + root.hindsightConsolidation.done + "/" + root.hindsightConsolidation.total + ")." : "")
+                                            + (root.hindsightConsolidation.pending > 0
+                                                ? " Wartet: " + root.hindsightConsolidation.pending + "." : "")
+                                        : root.hindsightConsolidation.pending > 0
+                                            ? "Wartet: in der Warteschlange. Gezählt werden Aufträge, keine Fakten."
+                                            : "Keine offenen Aufträge. Gezählt werden Aufträge, keine Fakten."
                                 Column {
                                     anchors.fill: parent
                                     spacing: 2
                                     Text {
+                                        objectName: "hindsightConsolidationTitle"
                                         width: parent.width; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight
-                                        text: "KONSOLIDIERUNG"; color: root.muted
+                                        text: root.hindsightConsolidation && root.hindsightConsolidation.processing > 0
+                                            ? "IN BEARBEITUNG" : "KONSOLIDIERUNG"
+                                        color: root.hindsightConsolidation && root.hindsightConsolidation.processing > 0
+                                            ? root.neonGreen : root.muted
                                         font.family: "DejaVu Sans Mono"; font.pixelSize: 13; font.bold: true
                                     }
-                                    Text {
-                                        objectName: "hindsightConsolidationValue"
-                                        width: parent.width; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight
+                                    Row {
+                                        id: consolidationRow
+                                        anchors.right: parent.right
+                                        spacing: 5
                                         readonly property var counts: root.hindsightConsolidation
-                                        text: counts ? counts.processing + (counts.processing === 1 ? " LÄUFT" : " LAUFEN")
-                                            + " · " + counts.pending + (counts.pending === 1 ? " WARTET" : " WARTEN") : "KEINE DATEN"
-                                        color: !counts ? root.muted : counts.processing > 0 ? root.neonGreen
-                                            : counts.pending > 0 ? root.ink : root.muted
-                                        font.family: "DejaVu Sans Mono"; font.pixelSize: 15; font.bold: true
+                                        readonly property bool running: counts && counts.processing > 0
+                                        readonly property bool showBar: running && counts.done !== null && counts.total > 0
+                                        Rectangle {
+                                            objectName: "hindsightConsolidationTrack"
+                                            visible: consolidationRow.showBar
+                                            width: 46; height: 9; radius: 4
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: Qt.rgba(0, 0, 0, 0.35)
+                                            border.width: 1; border.color: root.muted
+                                            Rectangle {
+                                                objectName: "hindsightConsolidationBar"
+                                                anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+                                                anchors.margins: 1
+                                                radius: 3
+                                                color: root.neonGreen
+                                                width: consolidationRow.showBar
+                                                    ? Math.max(0, Math.min(1, consolidationRow.counts.done / consolidationRow.counts.total))
+                                                        * (parent.width - 2)
+                                                    : 0
+                                            }
+                                        }
+                                        Text {
+                                            objectName: "hindsightConsolidationValue"
+                                            readonly property var counts: root.hindsightConsolidation
+                                            text: !counts ? "KEINE DATEN"
+                                                : consolidationRow.running
+                                                    ? consolidationRow.showBar ? counts.done + "/" + counts.total
+                                                        : counts.processing + (counts.processing === 1 ? " LÄUFT" : " LAUFEN")
+                                                : counts.pending > 0 ? counts.pending + (counts.pending === 1 ? " WARTET" : " WARTEN")
+                                                : "RUHE"
+                                            color: !counts ? root.muted : consolidationRow.running ? root.neonGreen
+                                                : counts.pending > 0 ? root.ink : root.muted
+                                            font.family: "DejaVu Sans Mono"; font.pixelSize: 15; font.bold: true
+                                        }
                                     }
                                 }
                             }
@@ -1652,8 +1694,14 @@ PlasmoidItem {
             root.hermesGatewayState = (payload.gateway || "UNKNOWN").toUpperCase()
             root.hindsightState = (payload.hindsight || "UNKNOWN").toUpperCase()
             var counts = payload.consolidation
-            root.hindsightConsolidation = counts && Number.isSafeInteger(counts.processing) && counts.processing >= 0
-                && Number.isSafeInteger(counts.pending) && counts.pending >= 0 ? counts : null
+            var validCounts = counts && Number.isSafeInteger(counts.processing) && counts.processing >= 0
+                && Number.isSafeInteger(counts.pending) && counts.pending >= 0
+            root.hindsightConsolidation = validCounts ? {
+                processing: counts.processing,
+                pending: counts.pending,
+                done: Number.isSafeInteger(counts.done) && counts.done >= 0 ? counts.done : null,
+                total: Number.isSafeInteger(counts.total) && counts.total >= 0 ? counts.total : null
+            } : null
         }
     }
 

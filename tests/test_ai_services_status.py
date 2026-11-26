@@ -121,24 +121,72 @@ def test_incomplete_bank_inventory_is_not_reported_as_idle(monkeypatch):
     assert ai.hindsight_consolidation_counts() is None
 
 
-@pytest.mark.parametrize("counts,expected", [
-    ((2, 1, 0, 3), {"processing": 2, "pending": 4}),
-    ((0, 0, 0, 0), {"processing": 0, "pending": 0}),
-    ((2, 1, 0, None), None),  # A failed bank poll is not an idle bank.
-    ((2, 1, 0, True), None),  # Booleans and other malformed totals are not counts.
-])
-def test_hindsight_counts_filtered_jobs_across_banks(counts, expected):
+def _serve_routes(routes: dict[str, dict | None]):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = routes.get(self.path)
+            self.send_response(200 if payload is not None else 503)
+            self.end_headers()
+            if payload is not None:
+                self.wfile.write(ai.json.dumps(payload).encode())
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def _counts_routes(hermes_processing: dict | None, hermes_pending: dict | None = {"total": 0},
+                   bot_processing: dict | None = {"total": 0, "operations": []},
+                   bot_pending: dict | None = {"total": 0}) -> dict[str, dict | None]:
     routes: dict[str, dict | None] = {
         "/v1/default/banks?limit=100": {"total": 2, "banks": [
             {"bank_id": "hermes"}, {"bank_id": "bot:hotel"},
         ]},
+        "/v1/default/banks/hermes/operations?type=consolidation&status=processing&limit=100": hermes_processing,
+        "/v1/default/banks/hermes/operations?type=consolidation&status=pending&limit=1": hermes_pending,
+        "/v1/default/banks/bot%3Ahotel/operations?type=consolidation&status=processing&limit=100": bot_processing,
+        "/v1/default/banks/bot%3Ahotel/operations?type=consolidation&status=pending&limit=1": bot_pending,
     }
-    for index, bank in enumerate(("hermes", "bot%3Ahotel")):
-        for offset, status in enumerate(("processing", "pending")):
-            total = counts[index * 2 + offset]
-            routes[f"/v1/default/banks/{bank}/operations?type=consolidation&status={status}&limit=1"] = (
-                None if total is None else {"total": total}
-            )
+    return routes
+
+
+@pytest.mark.parametrize("routes,expected", [
+    # Idle: no running job means no progress either.
+    (_counts_routes({"total": 0, "operations": []}),
+     {"processing": 0, "pending": 0, "done": None, "total": None}),
+    # Running jobs report live worker progress; the sums become the bar.
+    (_counts_routes({"total": 2, "operations": [
+        {"progress": {"processed": 8, "total": 24}},
+        {"progress": {"processed": 0, "total": 9}},
+    ]}, hermes_pending={"total": 3}, bot_pending={"total": 1}),
+     {"processing": 2, "pending": 4, "done": 8, "total": 33}),
+    # One running job without progress keeps the counts but drops the bar.
+    (_counts_routes({"total": 1, "operations": [{"progress": None}]}, hermes_pending={"total": 2}),
+     {"processing": 1, "pending": 2, "done": None, "total": None}),
+    # A truncated operations page keeps the counts but drops the bar.
+    (_counts_routes({"total": 2, "operations": [{"progress": {"processed": 1, "total": 2}}]}),
+     {"processing": 2, "pending": 0, "done": None, "total": None}),
+    # A failed bank poll is not an idle bank.
+    (_counts_routes({"total": 1, "operations": [{"progress": {"processed": 1, "total": 2}}]},
+                   hermes_pending=None),
+     None),
+])
+def test_hindsight_counts_filtered_jobs_and_running_progress(routes, expected):
+    server = _serve_routes(routes)
+    try:
+        actual = ai.hindsight_consolidation_counts(f"http://127.0.0.1:{server.server_port}")
+    finally:
+        server.shutdown()
+    assert actual == expected
+
+
+def test_hindsight_counts_poll_every_configured_route():
+    routes = _counts_routes({"total": 1, "operations": [{"progress": {"processed": 4, "total": 12}}]},
+                            hermes_pending={"total": 2})
     requested = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -149,7 +197,7 @@ def test_hindsight_counts_filtered_jobs_across_banks(counts, expected):
             self.end_headers()
             self.wfile.write(ai.json.dumps(payload).encode())
 
-        def log_message(self, format, *args):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
@@ -161,5 +209,5 @@ def test_hindsight_counts_filtered_jobs_across_banks(counts, expected):
             server.shutdown()
             thread.join()
 
-    assert actual == expected
+    assert actual == {"processing": 1, "pending": 2, "done": 4, "total": 12}
     assert sorted(requested) == sorted(routes)

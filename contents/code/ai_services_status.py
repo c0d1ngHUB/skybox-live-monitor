@@ -71,8 +71,28 @@ def hindsight_status() -> ServiceStatus:
     return ServiceStatus("error")
 
 
-def hindsight_consolidation_counts(base_url: str = HINDSIGHT_URL) -> dict[str, int] | None:
-    """Count jobs, not facts, over every bank visible to the local API."""
+def _operation_progress(operations: list) -> tuple[int, int] | None:
+    """Sum the live worker progress over running operations, or None if unknown."""
+    done = total = 0
+    for operation in operations:
+        progress = operation.get("progress") if isinstance(operation, dict) else None
+        processed = progress.get("processed") if isinstance(progress, dict) else None
+        op_total = progress.get("total") if isinstance(progress, dict) else None
+        # One running job without a usable progress report makes the sum unknowable.
+        if type(processed) is not int or processed < 0 or type(op_total) is not int or op_total < 0:
+            return None
+        done += processed
+        total += op_total
+    return done, total
+
+
+def hindsight_consolidation_counts(base_url: str = HINDSIGHT_URL) -> dict[str, int | None] | None:
+    """Count jobs, not facts, over every bank visible to the local API.
+
+    ``done``/``total`` aggregate the worker progress of the running jobs so the
+    dashboard can draw one real progress bar; they stay ``None`` while nothing
+    runs or when any running job did not report progress.
+    """
     url = f"{base_url}/v1/default/banks"
     # Bound the poll; do not report a partial bank inventory as a global count.
     catalog = fetch_json(f"{url}?limit=100")
@@ -91,21 +111,55 @@ def hindsight_consolidation_counts(base_url: str = HINDSIGHT_URL) -> dict[str, i
     # Don't start new requests after a slow API has consumed the poll budget.
     deadline = monotonic() + 5
 
-    def get_count(job: tuple[str, str]) -> tuple[str, int | None]:
-        bank_id, status = job
+    def get_pending(bank_id: str) -> int | None:
         if monotonic() >= deadline:
-            return status, None
-        payload = fetch_json(f"{url}/{quote(bank_id, safe='')}/operations?type=consolidation&status={status}&limit=1")
+            return None
+        payload = fetch_json(f"{url}/{quote(bank_id, safe='')}/operations?type=consolidation&status=pending&limit=1")
         total = payload.get("total") if isinstance(payload, dict) else None
-        return status, total if type(total) is int and total >= 0 else None
+        return total if type(total) is int and total >= 0 else None
 
-    counts = {"processing": 0, "pending": 0}
+    def get_processing(bank_id: str) -> tuple[int, int | None, int | None] | None:
+        if monotonic() >= deadline:
+            return None
+        # Running jobs are few; fetch their rows to read the live progress fields.
+        payload = fetch_json(f"{url}/{quote(bank_id, safe='')}/operations?type=consolidation&status=processing&limit=100")
+        if not isinstance(payload, dict):
+            return None
+        total = payload.get("total")
+        if type(total) is not int or total < 0:
+            return None
+        operations = payload.get("operations")
+        if total == 0 or not isinstance(operations, list) or len(operations) != total:
+            # The count stands; the progress sum needs every running job in hand.
+            return total, None, None
+        summed = _operation_progress(operations)
+        if summed is None:
+            return total, None, None
+        return total, summed[0], summed[1]
+
+    counts = {"processing": 0, "pending": 0, "done": None, "total": None}
+    processing_count = pending_count = 0
+    done_sum = total_sum = None
+    progress_known = True
     with ThreadPoolExecutor(max_workers=8) as executor:
-        jobs = ((bank_id, status) for bank_id in ids for status in counts)
-        for status, total in executor.map(get_count, jobs):
-            if total is None:
+        jobs = {bank_id: (executor.submit(get_pending, bank_id), executor.submit(get_processing, bank_id))
+                for bank_id in ids}
+        for bank_id, (pending_job, processing_job) in jobs.items():
+            pending, processing = pending_job.result(), processing_job.result()
+            if pending is None or processing is None:
                 return None
-            counts[status] += total
+            pending_count += pending
+            count, done, op_total = processing
+            processing_count += count
+            if count > 0:
+                if done is None or op_total is None:
+                    progress_known = False
+                else:
+                    done_sum = (done_sum or 0) + done
+                    total_sum = (total_sum or 0) + op_total
+    if progress_known:
+        counts["done"], counts["total"] = done_sum, total_sum
+    counts["processing"], counts["pending"] = processing_count, pending_count
     return counts
 
 
