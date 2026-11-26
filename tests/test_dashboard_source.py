@@ -768,8 +768,11 @@ def test_dual_gpu_helper_is_local_and_maps_processes_by_uuid():
     assert 'http://' not in helper and 'https://' not in helper
 
 
-def test_removed_ollama_service_has_no_stale_references():
-    assert 'ollama' not in source().lower()
+def test_ollama_cloud_quota_does_not_restore_a_local_service_probe():
+    text = source()
+    block = text[text.index('// --- AI SERVICES section ---'):text.index('// --- SYSTEM LOAD section ---')]
+    assert 'OllamaCloudUsage {' in block
+    assert 'ollama' not in text.replace(block, '').lower()
     assert 'ollama' not in AI_HELPER.read_text().lower()
 
 

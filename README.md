@@ -54,14 +54,15 @@ Memory figures use one unit family everywhere (GiB / MiB).
   2 min; yellow from 75 %, red from 90 % or when the API reports the limit as
   reached. The tooltip adds window lengths, full reset dates, extra limits
   (code review, model-specific), credits and banked limit resets.
-- Second Codex row (**CODEX GO**) directly under it for a second ChatGPT account
-  whose token lives only in the Hermes credential pool (`poolEntry: "1449ff"` in
-  `main.qml`). A limit window of 8 days or more is labelled **MONAT** instead of
-  WOCHE (the Go plan publishes one 30-day limit and no 5-hour window, so the
-  session shows a muted `--`); until its first answer the row presets 30 days.
-  Hermes renews the pool token when it uses the entry or on
-  `hermes auth refresh`; the widget never does and shows `Token abgelaufen`
-  meanwhile.
+- **OLLAMA CLOUD** shows the percentage used for the session and week, with
+  bars and local reset times. It reads `$HERMES_HOME/state/ollama_quota_watch.json`
+  (default `~/.hermes/state/ollama_quota_watch.json`), updated every 30 minutes
+  by the existing quota watcher. No API request, credentials, or writes from
+  the widget. Missing readings, readings older than 75 minutes and windows
+  that have reset since the last sample show `--`.
+- The last **CODEX** row shows Marion's account from the Hermes credential pool.
+  The widget never refreshes the pool token and shows `Token abgelaufen` when
+  it is expired.
 - Longest completed Hermes run across the default and named profiles;
   assistant tool-call preambles and unfinished turns do not count as completion
   One unreadable profile does not discard other readings: a partial maximum is

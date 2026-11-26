@@ -21,6 +21,8 @@ Rectangle {
     property color quietBorder: Qt.rgba(0.63, 0.78, 0.85, 0.28)
     property bool pollingEnabled: true
     property int pollIntervalMs: 120000
+    property double freshnessMs: pollIntervalMs * 2.5
+    property url helperUrl: Qt.resolvedUrl("../code/codex_usage.py")
     // Hermes credential-pool entry id of a second Codex account. Empty: the
     // Codex login in $CODEX_HOME/auth.json. Only the id is passed on; the
     // helper owns the pool's provider key.
@@ -45,7 +47,7 @@ Rectangle {
     }
     // Stale after 2.5 poll intervals (one missed poll is tolerated).
     readonly property bool fresh: !!payload && payload.available === true && typeof payload.stamp === "number"
-        && nowMs / 1000 >= payload.stamp - 2 && nowMs / 1000 - payload.stamp <= pollIntervalMs / 1000 * 2.5
+        && nowMs / 1000 >= payload.stamp - 2 && nowMs - payload.stamp * 1000 <= freshnessMs
     readonly property string tone: fresh ? String(payload.tone || "unknown") : "unknown"
     implicitHeight: 28
     radius: 9
@@ -250,7 +252,7 @@ Rectangle {
         property int requestId: 0
         property double startedMs: 0
         property string buffer: ""
-        property string scriptPath: MonitorLogic.localFilePath(Qt.resolvedUrl("../code/codex_usage.py"))
+        property string scriptPath: MonitorLogic.localFilePath(usage.helperUrl)
         property string helperArgs: usage.poolEntry.length ? " --hermes-pool-entry " + MonitorLogic.shellQuote(usage.poolEntry) : ""
         property string command: "python3 " + MonitorLogic.shellQuote(scriptPath) + helperArgs + " # skybox-request-" + (requestId % 4)
         onNewData: function(name, data) {
