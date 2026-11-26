@@ -14,17 +14,24 @@ for component in ('main.qml', 'ClaudeUsage.qml', 'CodexUsage.qml'):
     # CodexUsage appends its optional Hermes pool argument through helperArgs.
     args = re.search(r'property string helperArgs:\s*([^\n]+)', source)
     for match in re.finditer(r'property string scriptPath:\s*([^\n]+)\n\s*(?:(?!property string command:)[^\n]*\n)*?\s*property string command:\s*([^\n]+)', source):
-        name = re.search(r'\.\./code/([^"\s]+)', match[1]).group(1)
-        SOURCES.append((component, name, match[1], match[2], args[1] if args else '""'))
+        if 'usage.helperUrl' in match[1]:
+            # Both quota rows instantiate CodexUsage's executable engine.
+            urls = (source, (ROOT / 'contents/ui/OllamaCloudUsage.qml').read_text())
+            names = [name for s in urls for name in
+                     re.findall(r'helperUrl:\s*Qt.resolvedUrl\("\.\./code/([^"\s]+)"\)', s)]
+        else:
+            names = [re.search(r'\.\./code/([^"\s]+)', match[1]).group(1)]
+        for name in names:
+            SOURCES.append((component, name, match[1], match[2], args[1] if args else '""'))
 
 
 def test_all_helper_paths_are_covered():
-    assert len(SOURCES) == 10
+    assert len(SOURCES) == 11
     assert {row[1] for row in SOURCES} == {
         'disk_usage.py', 'hermes_max_think.py',
         'hindsight_observation_health.py',
         'ai_services_status.py', 'gpu_telemetry.py', 'cpu_process_snapshot.py',
-        'network_interface.py', 'network_counters.sh', 'claude_usage.py', 'codex_usage.py',
+        'network_interface.py', 'network_counters.sh', 'claude_usage.py', 'codex_usage.py', 'ollama_cloud_usage.py',
     }
 
 
@@ -41,7 +48,7 @@ def test_helper_command_decodes_and_shell_quotes(tmp_path, component, name, path
 const MonitorLogic=require({json.dumps(str(LOGIC))});
 const Qt={{resolvedUrl:()=>{json.dumps(helper.as_uri())}}};
 const root={{netIf:'eth0'}}, networkCountersSource={{generation:7}},health={{session:'123-456'}},requestId=1;
-const usage={{poolEntry:{json.dumps(folder)}}};
+const usage={{poolEntry:{json.dumps(folder if name == 'codex_usage.py' else '')},helperUrl:Qt.resolvedUrl()}};
 const scriptPath={path_expression};
 const helperArgs={args_expression};
 const command={command_expression};

@@ -657,10 +657,9 @@ PlasmoidItem {
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.bottomMargin: -8; color: root.cyan; opacity: 0.45 }
 
             // --- AI SERVICES section --- (rendered title: KI-DIENSTE)
-            // Status cards, then the status rows: Hindsight condensation, Claude
-            // plan limits and one Codex row per account (since 2026-11-26): the
-            // Codex login (FUSSI) and the Hermes credential-pool entries 1449ff
-            // (MAGDII) and e4b59d (MARION). Pool entry 23a7fd is the same account
+            // Status cards, then Hindsight condensation, Claude usage, the
+            // Codex login (FUSSI), Ollama Cloud quota, and the Hermes Codex entry
+            // e4b59d (MARION). Pool entry 23a7fd is the same account
             // as the Codex login and gets no row of its own. Everything about the
             // AI stack lives in this block; the host card below is host-only.
             Item {
@@ -794,15 +793,9 @@ PlasmoidItem {
                         critical: root.critical
                         quietBorder: root.quietBorder
                     }
-                    // Hermes credential-pool accounts: read only, never refreshed.
-                    CodexUsage {
-                        id: codexUsageMagdii
-                        objectName: "codexUsageMagdii"
-                        poolEntry: "1449ff"
-                        accountLabel: "MAGDII"
-                        // Until an answer publishes the window (and while the pool
-                        // token is expired) the row assumes the Go plan's 30 days.
-                        longWindowS: 30 * 86400
+                    OllamaCloudUsage {
+                        id: ollamaCloudUsage
+                        objectName: "ollamaCloudUsage"
                         width: parent.width
                         headingWidth: 180
                         ink: root.ink
@@ -812,6 +805,7 @@ PlasmoidItem {
                         critical: root.critical
                         quietBorder: root.quietBorder
                     }
+                    // Hermes credential-pool account: read only, never refreshed.
                     CodexUsage {
                         id: codexUsageMarion
                         objectName: "codexUsageMarion"
